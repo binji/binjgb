@@ -78,6 +78,15 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
+#define FLAG_Z_SHIFT 7
+#define FLAG_N_SHIFT 6
+#define FLAG_H_SHIFT 5
+#define FLAG_C_SHIFT 4
+#define FLAG_Z_MASK (1 << FLAG_Z_SHIFT)
+#define FLAG_N_MASK (1 << FLAG_N_SHIFT)
+#define FLAG_H_MASK (1 << FLAG_H_SHIFT)
+#define FLAG_C_MASK (1 << FLAG_C_SHIFT)
+
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
   V(ERROR, 1)
@@ -236,11 +245,31 @@ struct Mbc {
   enum BankMode bank_mode;
 };
 
+/* TODO(binji): endianness */
+#define REGISTER_PAIR(X, Y) \
+  union {                   \
+    struct {                \
+      uint8_t X;            \
+      uint8_t Y;            \
+    };                      \
+    uint16_t X##Y;          \
+  }
+
+struct Registers {
+  REGISTER_PAIR(A, F);
+  REGISTER_PAIR(B, C);
+  REGISTER_PAIR(D, E);
+  REGISTER_PAIR(H, L);
+  uint16_t SP;
+  uint16_t PC;
+};
+
 struct Emulator {
   struct RomData* rom_data;
   struct RomInfo rom_info;
   struct MemoryMap* memory_map;
   struct Mbc mbc;
+  struct Registers reg;
 };
 
 enum Result read_rom_data_from_file(const char* filename,
@@ -922,7 +951,7 @@ const char* s_opcode_mnemonic[] = {
         [0xE6] = "AND %hhu",
         [0xE7] = "RST 20H",
         [0xE8] = "ADD SP,%hhd",
-        [0xE9] = "JP (HL)",
+        [0xE9] = "JP HL",
         [0xEA] = "LD (%04hXH),A",
         [0xEE] = "XOR %hhu",
         [0xEF] = "RST 28H",
@@ -933,7 +962,7 @@ const char* s_opcode_mnemonic[] = {
         [0xF5] = "PUSH AF",
         [0xF6] = "OR %hhu",
         [0xF7] = "RST 30H",
-        [0xF8] = "LD HL,SP + %hhd",
+        [0xF8] = "LD HL,SP%+hhd",
         [0xF9] = "LD SP,HL",
         [0xFA] = "LD A,(%04hXH)",
         [0xFB] = "EI",
@@ -1072,6 +1101,343 @@ uint8_t print_instruction(struct Emulator* e, Address addr) {
   }
 }
 
+uint8_t s_opcode_cycles[] = {
+  /* TODO(binji): guessed on 08H: LD (NN),SP; seems like it should be more
+   * expensive than LD (NN),A which is 16 cycles. */
+    /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
+    /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  0,  4,
+    /* 10 */  0, 12,  8,  8,  4,  4,  8,  4, 12,  8,  8,  8,  4,  4,  8,  4,
+    /* 20 */  8, 12,  8,  8,  4,  4,  8,  4,  8,  8,  8,  8,  4,  4,  8,  4,
+    /* 30 */  8, 12,  8,  8, 12, 12, 12,  4,  8,  8,  8,  8,  4,  4,  8,  4,
+    /* 40 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* 50 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* 60 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* 70 */  8,  8,  8,  8,  8,  8,  0,  8,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* 80 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* 90 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* a0 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* b0 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
+    /* c0 */  8, 12, 12, 16, 12, 16,  8, 16,  8, 16, 12,  0, 12, 24,  8, 16,
+    /* d0 */  8, 12, 12,  0, 12, 16,  8, 16,  8, 16, 12,  0, 12,  0,  8, 16,
+    /* e0 */ 12, 12,  8,  0,  0, 16,  8, 16, 16,  4, 16,  0,  0,  0,  8, 16,
+    /* f0 */ 12, 12,  8,  4,  0, 16,  8, 16, 12,  8, 16,  4,  0,  0,  8, 16,
+};
+
+uint8_t s_cb_opcode_cycles[] = {
+    /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
+    /* 00 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 10 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 20 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 30 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 40 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 50 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 60 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 70 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 80 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 90 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* a0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* b0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* c0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* d0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* e0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* f0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+};
+
+#define NI NOT_IMPLEMENTED("not implemented!\n")
+
+#define REG(R) e->reg.R
+#define COND_NZ ((REG(F) & FLAG_Z_MASK) == 0)
+#define COND_Z ((REG(F) & FLAG_Z_MASK) != 0)
+#define COND_NC ((REG(F) & FLAG_C_MASK) == 0)
+#define COND_C ((REG(F) & FLAG_C_MASK) != 0)
+#define READ8(A) read_u8(e, A)
+#define READ16(A) read_u16(e, A)
+#define WRITE8(A, V) write_u8(e, A, V)
+#define READ_N READ8(REG(PC) + 1)
+#define READ_NN READ16(REG(PC) + 1)
+#define LD_R_R(RD, RS) REG(RD) = REG(RS)
+#define LD_R_N(R) REG(R) = READ_N
+#define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS)
+#define LD_RR_NN(RR) REG(RR) = READ_NN
+#define LD_R_MR(R, MR) REG(R) = read_u8(e, REG(MR))
+#define LD_R_MN(R) REG(R) = READ8(READ_NN)
+#define LD_MR_R(MR, R) WRITE8(REG(MR), REG(R))
+#define LD_MR_N(MR) WRITE8(REG(MR), READ_N)
+#define LD_MN_R(R) WRITE8(READ_NN, REG(R))
+#define JP_F_NN(COND) if (COND) { JP_NN(); }
+#define JP_RR(RR) new_pc = REG(RR)
+#define JP_NN() new_pc = READ_NN
+#define XOR_R(R) REG(A) ^= REG(R); REG(F) = (REG(A) == 0) << FLAG_Z_SHIFT
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); REG(F) = (REG(A) == 0) << FLAG_Z_SHIFT
+
+void execute_instruction(struct Emulator* e) {
+  print_instruction(e, e->reg.PC);
+  uint8_t opcode = read_u8(e, e->reg.PC);
+  Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
+  switch (opcode) {
+    case 0x00: NI; break;
+    case 0x01: LD_RR_NN(BC); break;
+    case 0x02: LD_MR_R(BC, A); break;
+    case 0x03: NI; break;
+    case 0x04: NI; break;
+    case 0x05: NI; break;
+    case 0x06: LD_R_N(B); break;
+    case 0x07: NI; break;
+    case 0x08: NI; break;
+    case 0x09: NI; break;
+    case 0x0a: LD_R_MR(A, BC); break;
+    case 0x0b: NI; break;
+    case 0x0c: NI; break;
+    case 0x0d: NI; break;
+    case 0x0e: LD_R_N(C); break;
+    case 0x0f: NI; break;
+    case 0x10: NI; break;
+    case 0x11: LD_RR_NN(DE); break;
+    case 0x12: LD_MR_R(DE, A); break;
+    case 0x13: NI; break;
+    case 0x14: NI; break;
+    case 0x15: NI; break;
+    case 0x16: LD_R_N(D); break;
+    case 0x17: NI; break;
+    case 0x18: NI; break;
+    case 0x19: NI; break;
+    case 0x1a: LD_R_MR(A, DE); break;
+    case 0x1b: NI; break;
+    case 0x1c: NI; break;
+    case 0x1d: NI; break;
+    case 0x1e: LD_R_N(E); break;
+    case 0x1f: NI; break;
+    case 0x20: NI; break;
+    case 0x21: LD_RR_NN(HL); break;
+    case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
+    case 0x23: NI; break;
+    case 0x24: NI; break;
+    case 0x25: NI; break;
+    case 0x26: LD_R_N(H); break;
+    case 0x27: NI; break;
+    case 0x28: NI; break;
+    case 0x29: NI; break;
+    case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
+    case 0x2b: NI; break;
+    case 0x2c: NI; break;
+    case 0x2d: NI; break;
+    case 0x2e: LD_R_N(L); break;
+    case 0x2f: NI; break;
+    case 0x30: NI; break;
+    case 0x31: LD_RR_NN(SP); break;
+    case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
+    case 0x33: NI; break;
+    case 0x34: NI; break;
+    case 0x35: NI; break;
+    case 0x36: LD_MR_N(HL); break;
+    case 0x37: NI; break;
+    case 0x38: NI; break;
+    case 0x39: NI; break;
+    case 0x3a: LD_MR_R(HL, A); REG(HL)--; break;
+    case 0x3b: NI; break;
+    case 0x3c: NI; break;
+    case 0x3d: NI; break;
+    case 0x3e: LD_R_N(A); break;
+    case 0x3f: NI; break;
+    case 0x40: LD_R_R(B, B); break;
+    case 0x41: LD_R_R(B, C); break;
+    case 0x42: LD_R_R(B, D); break;
+    case 0x43: LD_R_R(B, E); break;
+    case 0x44: LD_R_R(B, H); break;
+    case 0x45: LD_R_R(B, L); break;
+    case 0x46: LD_R_MR(B, HL); break;
+    case 0x47: LD_R_R(B, A); break;
+    case 0x48: LD_R_R(C, B); break;
+    case 0x49: LD_R_R(C, C); break;
+    case 0x4a: LD_R_R(C, D); break;
+    case 0x4b: LD_R_R(C, E); break;
+    case 0x4c: LD_R_R(C, H); break;
+    case 0x4d: LD_R_R(C, L); break;
+    case 0x4e: LD_R_MR(C, HL); break;
+    case 0x4f: LD_R_R(D, A); break;
+    case 0x50: LD_R_R(D, B); break;
+    case 0x51: LD_R_R(D, C); break;
+    case 0x52: LD_R_R(D, D); break;
+    case 0x53: LD_R_R(D, E); break;
+    case 0x54: LD_R_R(D, H); break;
+    case 0x55: LD_R_R(D, L); break;
+    case 0x56: LD_R_MR(D, HL); break;
+    case 0x57: LD_R_R(D, A); break;
+    case 0x58: LD_R_R(E, B); break;
+    case 0x59: LD_R_R(E, C); break;
+    case 0x5a: LD_R_R(E, D); break;
+    case 0x5b: LD_R_R(E, E); break;
+    case 0x5c: LD_R_R(E, H); break;
+    case 0x5d: LD_R_R(E, L); break;
+    case 0x5e: LD_R_MR(E, HL); break;
+    case 0x5f: LD_R_R(E, A); break;
+    case 0x60: LD_R_R(H, B); break;
+    case 0x61: LD_R_R(H, C); break;
+    case 0x62: LD_R_R(H, D); break;
+    case 0x63: LD_R_R(H, E); break;
+    case 0x64: LD_R_R(H, H); break;
+    case 0x65: LD_R_R(H, L); break;
+    case 0x66: LD_R_MR(H, HL); break;
+    case 0x67: LD_R_R(H, A); break;
+    case 0x68: LD_R_R(L, B); break;
+    case 0x69: LD_R_R(L, C); break;
+    case 0x6a: LD_R_R(L, D); break;
+    case 0x6b: LD_R_R(L, E); break;
+    case 0x6c: LD_R_R(L, H); break;
+    case 0x6d: LD_R_R(L, L); break;
+    case 0x6e: LD_R_MR(L, HL); break;
+    case 0x6f: LD_R_R(L, A); break;
+    case 0x70: LD_MR_R(HL, B); break;
+    case 0x71: LD_MR_R(HL, C); break;
+    case 0x72: LD_MR_R(HL, D); break;
+    case 0x73: LD_MR_R(HL, E); break;
+    case 0x74: LD_MR_R(HL, H); break;
+    case 0x75: LD_MR_R(HL, L); break;
+    case 0x76: NI; break;
+    case 0x77: LD_MR_R(HL, A); break;
+    case 0x78: LD_R_R(A, B); break;
+    case 0x79: LD_R_R(A, C); break;
+    case 0x7a: LD_R_R(A, D); break;
+    case 0x7b: LD_R_R(A, E); break;
+    case 0x7c: LD_R_R(A, H); break;
+    case 0x7d: LD_R_R(A, L); break;
+    case 0x7e: LD_R_MR(A, HL); break;
+    case 0x7f: LD_R_R(A, A); break;
+    case 0x80: NI; break;
+    case 0x81: NI; break;
+    case 0x82: NI; break;
+    case 0x83: NI; break;
+    case 0x84: NI; break;
+    case 0x85: NI; break;
+    case 0x86: NI; break;
+    case 0x87: NI; break;
+    case 0x88: NI; break;
+    case 0x89: NI; break;
+    case 0x8a: NI; break;
+    case 0x8b: NI; break;
+    case 0x8c: NI; break;
+    case 0x8d: NI; break;
+    case 0x8e: NI; break;
+    case 0x8f: NI; break;
+    case 0x90: NI; break;
+    case 0x91: NI; break;
+    case 0x92: NI; break;
+    case 0x93: NI; break;
+    case 0x94: NI; break;
+    case 0x95: NI; break;
+    case 0x96: NI; break;
+    case 0x97: NI; break;
+    case 0x98: NI; break;
+    case 0x99: NI; break;
+    case 0x9a: NI; break;
+    case 0x9b: NI; break;
+    case 0x9c: NI; break;
+    case 0x9d: NI; break;
+    case 0x9e: NI; break;
+    case 0x9f: NI; break;
+    case 0xa0: NI; break;
+    case 0xa1: NI; break;
+    case 0xa2: NI; break;
+    case 0xa3: NI; break;
+    case 0xa4: NI; break;
+    case 0xa5: NI; break;
+    case 0xa6: NI; break;
+    case 0xa7: NI; break;
+    case 0xa8: XOR_R(B); break;
+    case 0xa9: XOR_R(C); break;
+    case 0xaa: XOR_R(D); break;
+    case 0xab: XOR_R(E); break;
+    case 0xac: XOR_R(H); break;
+    case 0xad: XOR_R(L); break;
+    case 0xae: XOR_MR(HL); break;
+    case 0xaf: XOR_R(A); break;
+    case 0xb0: NI; break;
+    case 0xb1: NI; break;
+    case 0xb2: NI; break;
+    case 0xb3: NI; break;
+    case 0xb4: NI; break;
+    case 0xb5: NI; break;
+    case 0xb6: NI; break;
+    case 0xb7: NI; break;
+    case 0xb8: NI; break;
+    case 0xb9: NI; break;
+    case 0xba: NI; break;
+    case 0xbb: NI; break;
+    case 0xbc: NI; break;
+    case 0xbd: NI; break;
+    case 0xbe: NI; break;
+    case 0xbf: NI; break;
+    case 0xc0: NI; break;
+    case 0xc1: NI; break;
+    case 0xc2: JP_F_NN(COND_NZ); break;
+    case 0xc3: JP_NN(); break;
+    case 0xc4: NI; break;
+    case 0xc5: NI; break;
+    case 0xc6: NI; break;
+    case 0xc7: NI; break;
+    case 0xc8: NI; break;
+    case 0xc9: NI; break;
+    case 0xca: JP_F_NN(COND_Z); break;
+    case 0xcb: NI; break;
+    case 0xcc: NI; break;
+    case 0xcd: NI; break;
+    case 0xce: NI; break;
+    case 0xcf: NI; break;
+    case 0xd0: NI; break;
+    case 0xd1: NI; break;
+    case 0xd2: JP_F_NN(COND_NC); break;
+    case 0xd3: NI; break;
+    case 0xd4: NI; break;
+    case 0xd5: NI; break;
+    case 0xd6: NI; break;
+    case 0xd7: NI; break;
+    case 0xd8: NI; break;
+    case 0xd9: NI; break;
+    case 0xda: JP_F_NN(COND_C); break;
+    case 0xdb: NI; break;
+    case 0xdc: NI; break;
+    case 0xdd: NI; break;
+    case 0xde: NI; break;
+    case 0xdf: NI; break;
+    case 0xe0: NI; break;
+    case 0xe1: NI; break;
+    case 0xe2: NI; break;
+    case 0xe3: NI; break;
+    case 0xe4: NI; break;
+    case 0xe5: NI; break;
+    case 0xe6: NI; break;
+    case 0xe7: NI; break;
+    case 0xe8: NI; break;
+    case 0xe9: JP_RR(HL); break;
+    case 0xea: LD_MN_R(A); break;
+    case 0xeb: NI; break;
+    case 0xec: NI; break;
+    case 0xed: NI; break;
+    case 0xee: NI; break;
+    case 0xef: NI; break;
+    case 0xf0: NI; break;
+    case 0xf1: NI; break;
+    case 0xf2: NI; break;
+    case 0xf3: NI; break;
+    case 0xf4: NI; break;
+    case 0xf5: NI; break;
+    case 0xf6: NI; break;
+    case 0xf7: NI; break;
+    case 0xf8: NI; break;
+    case 0xf9: LD_RR_RR(SP, HL); break;
+    case 0xfa: LD_R_MN(A); break;
+    case 0xfb: NI; break;
+    case 0xfc: NI; break;
+    case 0xfd: NI; break;
+    case 0xfe: NI; break;
+    case 0xff: NI; break;
+    default:
+      UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
+      break;
+  }
+  e->reg.PC = new_pc;
+}
+
 int main(int argc, char** argv) {
   --argc; ++argv;
   CHECK_MSG(argc == 1, "no rom file given.\n");
@@ -1081,9 +1447,8 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(emulator);
   CHECK(SUCCESS(init_emulator(&emulator, &rom_data)));
   int i;
-  Address a = read_u16(&emulator, 1);
   for (i = 0; i < 30; ++i) {
-    a += print_instruction(&emulator, a);
+    execute_instruction(&emulator);
   }
   return 0;
 error:
