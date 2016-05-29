@@ -65,15 +65,26 @@ typedef uint16_t MaskedAddress;
 #define HEADER_CHECKSUM_RANGE_END 0x14c
 
 #define MINIMUM_ROM_SIZE 32768
-#define BANK_BYTE_SIZE 16384
+#define ROM_BANK_SHIFT 14
+#define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 
 #define ADDR_MASK_8K 0x1fff
 #define ADDR_MASK_16K 0x3fff
 #define ADDR_MASK_32K 0x7fff
 
+#define MBC1_RAM_ENABLED_MASK 0xf
+#define MBC1_RAM_ENABLED_VALUE 0xa
+#define MBC1_ROM_BANK_LO_MASK 0x1f
+#define MBC1_BANK_HI_MASK 0x3
+#define MBC1_BANK_HI_SHIFT 5
+
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
   V(ERROR, 1)
+
+#define FOREACH_BOOL(V) \
+  V(FALSE, 0)           \
+  V(TRUE, 1)
 
 #define FOREACH_CGB_FLAG(V)   \
   V(CGB_FLAG_NONE, 0)         \
@@ -158,6 +169,7 @@ const char* get_enum_string(const char** strings,
   }
 
 DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT)
+DEFINE_NAMED_ENUM(BOOL, Bool, bool, FOREACH_BOOL)
 DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG)
 DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG)
 DEFINE_NAMED_ENUM(CARTRIDGE_TYPE,
@@ -175,6 +187,11 @@ uint32_t s_rom_bank_size[] = {
 #define V(name, code, bank_size) [code] = bank_size,
     FOREACH_ROM_SIZE(V)
 #undef V
+};
+
+enum BankMode {
+  BANK_MODE_ROM = 0,
+  BANK_MODE_RAM = 1,
 };
 
 struct RomData {
@@ -212,10 +229,18 @@ struct MemoryMap {
   void (*write_rom)(struct Emulator*, MaskedAddress addr, uint8_t value);
 };
 
+struct Mbc {
+  uint32_t rom_bank;
+  uint32_t ram_bank;
+  enum Bool ram_enabled;
+  enum BankMode bank_mode;
+};
+
 struct Emulator {
   struct RomData* rom_data;
   struct RomInfo rom_info;
   struct MemoryMap* memory_map;
+  struct Mbc mbc;
 };
 
 enum Result read_rom_data_from_file(const char* filename,
@@ -318,7 +343,7 @@ uint32_t get_rom_bank_count(enum RomSize rom_size) {
 }
 
 uint32_t get_rom_byte_size(enum RomSize rom_size) {
-  return get_rom_bank_count(rom_size) * BANK_BYTE_SIZE;
+  return get_rom_bank_count(rom_size) * ROM_BANK_BYTE_SIZE;
 }
 
 enum Result get_rom_info(struct RomData* rom_data,
@@ -380,26 +405,101 @@ void print_rom_info(struct RomInfo* rom_info) {
 }
 
 uint8_t rom_only_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
-  /* always return ROM in range 0x4000-0x7fff */
+  /* Always return ROM in range 0x4000-0x7fff. */
   assert(addr <= ADDR_MASK_16K);
   addr += 0x4000;
   return e->rom_data->data[addr];
 }
 
-void dummy_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+void rom_only_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* TODO(binji): log? */
+}
+
+uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
+  assert(addr <= ADDR_MASK_16K);
+  uint32_t rom_addr = (e->mbc.rom_bank << ROM_BANK_SHIFT) | addr;
+  if (rom_addr < e->rom_data->size) {
+    return e->rom_data->data[rom_addr];
+  } else {
+    /* TODO(binji): log? */
+    return 0;
+  }
+}
+
+void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  switch (addr >> 14) {
+    case 0: /* 0000-1fff */
+      e->mbc.ram_enabled =
+          (value & MBC1_RAM_ENABLED_MASK) == MBC1_RAM_ENABLED_VALUE;
+      break;
+
+    case 1: /* 2000-3fff */
+      e->mbc.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+      e->mbc.rom_bank |= value & MBC1_ROM_BANK_LO_MASK;
+      /* Banks 0, 0x20, 0x40, 0x60 map to 1, 0x21, 0x41, 0x61 respectively. */
+      if (e->mbc.rom_bank == 0) {
+        e->mbc.rom_bank++;
+      }
+      break;
+
+    case 2: /* 4000-5fff */
+      value &= MBC1_BANK_HI_MASK;
+      if (e->mbc.bank_mode == BANK_MODE_ROM) {
+        e->mbc.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+        e->mbc.rom_bank |= value << MBC1_BANK_HI_SHIFT;
+      } else {
+        e->mbc.ram_bank = value;
+      }
+      break;
+
+    case 3: { /* 6000-7fff */
+      enum BankMode new_bank_mode = (enum BankMode)(value & 1);
+      if (e->mbc.bank_mode != new_bank_mode) {
+        if (new_bank_mode == BANK_MODE_ROM) {
+          /* Use the ram bank bits as the high rom bank bits. */
+          assert(e->mbc.rom_bank <= MBC1_ROM_BANK_LO_MASK);
+          e->mbc.rom_bank |= e->mbc.ram_bank << MBC1_BANK_HI_SHIFT;
+          e->mbc.ram_bank = 0;
+        } else {
+          /* Use the high rom bank bits as the ram bank bits. */
+          e->mbc.ram_bank = e->mbc.rom_bank >> MBC1_BANK_HI_SHIFT;
+          assert(e->mbc.ram_bank <= MBC1_BANK_HI_MASK);
+          e->mbc.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+        }
+        e->mbc.bank_mode = new_bank_mode;
+      }
+      break;
+    }
+
+    default:
+      UNREACHABLE("invalid addr: 0x%04x\n", addr);
+      break;
+  }
 }
 
 struct MemoryMap s_rom_only_memory_map = {
   .read_rom_bank_switch = rom_only_read_rom_bank_switch,
-  .write_rom = dummy_write_rom,
+  .write_rom = rom_only_write_rom,
+};
+
+struct MemoryMap s_mbc1_memory_map = {
+  .read_rom_bank_switch = mbc1_read_rom_bank_switch,
+  .write_rom = mbc1_write_rom,
 };
 
 enum Result get_memory_map(struct RomInfo* rom_info,
-                           struct MemoryMap** out_memory_map) {
+                           struct MemoryMap** out_memory_map,
+                           struct Mbc* out_mbc) {
   switch (rom_info->cartridge_type) {
     case CARTRIDGE_TYPE_ROM_ONLY:
       *out_memory_map = &s_rom_only_memory_map;
+      return OK;
+
+    case CARTRIDGE_TYPE_MBC1:
+    case CARTRIDGE_TYPE_MBC1_RAM:
+    case CARTRIDGE_TYPE_MBC1_RAM_BATTERY:
+      *out_memory_map = &s_mbc1_memory_map;
+      out_mbc->rom_bank = 1;
       return OK;
 
     default:
@@ -416,7 +516,7 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
 #if 1
   print_rom_info(&e->rom_info);
 #endif
-  CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
+  CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map, &e->mbc)));
   return OK;
 error:
   return ERROR;
@@ -576,6 +676,7 @@ int main(int argc, char** argv) {
   struct RomData rom_data;
   CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   struct Emulator emulator;
+  ZERO_MEMORY(emulator);
   CHECK(SUCCESS(init_emulator(&emulator, &rom_data)));
   return 0;
 error:
