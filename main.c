@@ -257,19 +257,25 @@ struct MemoryMap {
 #define REGISTER_PAIR(X, Y) \
   union {                   \
     struct {                \
-      uint8_t X;            \
       uint8_t Y;            \
+      uint8_t X;            \
     };                      \
     uint16_t X##Y;          \
   }
 
 struct Registers {
-  REGISTER_PAIR(A, F);
+  uint8_t A;
   REGISTER_PAIR(B, C);
   REGISTER_PAIR(D, E);
   REGISTER_PAIR(H, L);
   uint16_t SP;
   uint16_t PC;
+  struct {
+    enum Bool Z;
+    enum Bool N;
+    enum Bool H;
+    enum Bool C;
+  } flags;
 };
 
 struct Emulator {
@@ -278,6 +284,7 @@ struct Emulator {
   struct MemoryMap memory_map;
   struct Registers reg;
   struct WorkRam ram;
+  enum Bool IME;
 };
 
 enum Result read_rom_data_from_file(const char* filename,
@@ -573,6 +580,7 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   print_rom_info(&e->rom_info);
 #endif
   CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
+  e->IME = 1;
   return OK;
 error:
   return ERROR;
@@ -1086,28 +1094,29 @@ const char* s_cb_opcode_mnemonic[] = {
 };
 
 /* Returns the opcode size. */
-uint8_t print_instruction(struct Emulator* e, Address addr) {
+uint8_t print_instruction(struct Emulator* e, Address addr, enum Bool newline) {
   uint8_t opcode = read_u8(e, addr);
+  uint8_t bytes;
   if (opcode == 0xcb) {
     uint8_t cb_opcode = read_u8(e, addr + 1);
     const char* mnemonic = s_cb_opcode_mnemonic[cb_opcode];
-    printf("0x%04x: cb %02x     %s\n", addr, cb_opcode, mnemonic);
-    return 2;
+    printf("0x%04x: cb %02x     %-15s", addr, cb_opcode, mnemonic);
+    bytes = 2;
   } else {
     char buffer[64];
     const char* mnemonic = s_opcode_mnemonic[opcode];
-    uint8_t bytes = s_opcode_bytes[opcode];
+    bytes = s_opcode_bytes[opcode];
     switch (bytes) {
       case 0:
-        printf("0x%04x: %02x        *INVALID*\n", addr, opcode);
+        printf("0x%04x: %02x        %-15s", addr, opcode, "*INVALID*");
         break;
       case 1:
-        printf("0x%04x: %02x        %s\n", addr, opcode, mnemonic);
+        printf("0x%04x: %02x        %-15s", addr, opcode, mnemonic);
         break;
       case 2: {
         uint8_t byte = read_u8(e, addr + 1);
         snprintf(buffer, sizeof(buffer), mnemonic, byte);
-        printf("0x%04x: %02x %02x     %s\n", addr, opcode, byte, buffer);
+        printf("0x%04x: %02x %02x     %-15s", addr, opcode, byte, buffer);
         break;
       }
       case 3: {
@@ -1115,7 +1124,7 @@ uint8_t print_instruction(struct Emulator* e, Address addr) {
         uint8_t byte2 = read_u8(e, addr + 2);
         uint16_t word = (byte2 << 8) | byte1;
         snprintf(buffer, sizeof(buffer), mnemonic, word);
-        printf("0x%04x: %02x %02x %02x  %s\n", addr, opcode, byte1, byte2,
+        printf("0x%04x: %02x %02x %02x  %-15s", addr, opcode, byte1, byte2,
                buffer);
         break;
       }
@@ -1123,8 +1132,18 @@ uint8_t print_instruction(struct Emulator* e, Address addr) {
         UNREACHABLE("invalid opcode byte length.\n");
         break;
     }
-    return bytes;
   }
+  if (newline) {
+    printf("\n");
+  }
+  return bytes;
+}
+
+void print_registers(struct Registers* reg) {
+  printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x\n", reg->A,
+         reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
+         reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
+         reg->HL, reg->SP, reg->PC);
 }
 
 uint8_t s_opcode_cycles[] = {
@@ -1169,52 +1188,61 @@ uint8_t s_cb_opcode_cycles[] = {
     /* f0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
 };
 
-#define NI NOT_IMPLEMENTED("not implemented!\n")
+#define NI printf("\n"); NOT_IMPLEMENTED("not implemented!\n")
 
 #define REG(R) e->reg.R
-#define COND_NZ ((REG(F) & FLAG_Z_MASK) == 0)
-#define COND_Z ((REG(F) & FLAG_Z_MASK) != 0)
-#define COND_NC ((REG(F) & FLAG_C_MASK) == 0)
-#define COND_C ((REG(F) & FLAG_C_MASK) != 0)
-#define READ8(A) read_u8(e, A)
-#define READ16(A) read_u16(e, A)
-#define WRITE8(A, V) write_u8(e, A, V)
+#define FLAG(F) e->reg.flags.F
+#define COND_NZ (!FLAG(Z))
+#define COND_Z FLAG(Z)
+#define COND_NC (!FLAG(C))
+#define COND_C FLAG(C)
+#define SET_Z_FROM(X) FLAG(Z) = X == 0
+#define READ8(X) read_u8(e, X)
+#define READ16(X) read_u16(e, X)
+#define WRITE8(X, V) write_u8(e, X, V)
 #define READ_N READ8(REG(PC) + 1)
 #define READ_NN READ16(REG(PC) + 1)
 #define LD_R_R(RD, RS) REG(RD) = REG(RS)
 #define LD_R_N(R) REG(R) = READ_N
 #define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS)
 #define LD_RR_NN(RR) REG(RR) = READ_NN
-#define LD_R_MR(R, MR) REG(R) = read_u8(e, REG(MR))
+#define LD_R_MR(R, MR) REG(R) = READ8(REG(MR))
 #define LD_R_MN(R) REG(R) = READ8(READ_NN)
 #define LD_MR_R(MR, R) WRITE8(REG(MR), REG(R))
 #define LD_MR_N(MR) WRITE8(REG(MR), READ_N)
 #define LD_MN_R(R) WRITE8(READ_NN, REG(R))
+#define JR_F_N(COND) if (COND) { JR_N(); }
+#define JR_N(COND) new_pc += (int8_t)READ_N
 #define JP_F_NN(COND) if (COND) { JP_NN(); }
 #define JP_RR(RR) new_pc = REG(RR)
 #define JP_NN() new_pc = READ_NN
-#define XOR_R(R) REG(A) ^= REG(R); REG(F) = (REG(A) == 0) << FLAG_Z_SHIFT
-#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); REG(F) = (REG(A) == 0) << FLAG_Z_SHIFT
+#define XOR_R(R) REG(A) ^= REG(R); SET_Z_FROM(REG(A))
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z_FROM(REG(A))
+#define DEC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 1; FLAG(H) = X == 0xf
+#define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
+#define DEC_RR(RR) REG(RR)--
+#define DEC_MR(MR) u8 = READ8(REG(MR)); WRITE8(REG(MR), u8); DEC_FLAGS(u8)
 
 void execute_instruction(struct Emulator* e) {
-  print_instruction(e, e->reg.PC);
+  uint8_t u8;
+  print_instruction(e, e->reg.PC, FALSE);
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
   switch (opcode) {
-    case 0x00: NI; break;
+    case 0x00: break;
     case 0x01: LD_RR_NN(BC); break;
     case 0x02: LD_MR_R(BC, A); break;
     case 0x03: NI; break;
     case 0x04: NI; break;
-    case 0x05: NI; break;
+    case 0x05: DEC_R(B); break;
     case 0x06: LD_R_N(B); break;
     case 0x07: NI; break;
     case 0x08: NI; break;
     case 0x09: NI; break;
     case 0x0a: LD_R_MR(A, BC); break;
-    case 0x0b: NI; break;
+    case 0x0b: DEC_RR(BC); break;
     case 0x0c: NI; break;
-    case 0x0d: NI; break;
+    case 0x0d: DEC_R(C); break;
     case 0x0e: LD_R_N(C); break;
     case 0x0f: NI; break;
     case 0x10: NI; break;
@@ -1222,47 +1250,47 @@ void execute_instruction(struct Emulator* e) {
     case 0x12: LD_MR_R(DE, A); break;
     case 0x13: NI; break;
     case 0x14: NI; break;
-    case 0x15: NI; break;
+    case 0x15: DEC_R(D); break;
     case 0x16: LD_R_N(D); break;
     case 0x17: NI; break;
-    case 0x18: NI; break;
+    case 0x18: JR_N(); break;
     case 0x19: NI; break;
     case 0x1a: LD_R_MR(A, DE); break;
-    case 0x1b: NI; break;
+    case 0x1b: DEC_RR(DE); break;
     case 0x1c: NI; break;
-    case 0x1d: NI; break;
+    case 0x1d: DEC_R(E); break;
     case 0x1e: LD_R_N(E); break;
     case 0x1f: NI; break;
-    case 0x20: NI; break;
+    case 0x20: JR_F_N(COND_NZ); break;
     case 0x21: LD_RR_NN(HL); break;
     case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
     case 0x23: NI; break;
     case 0x24: NI; break;
-    case 0x25: NI; break;
+    case 0x25: DEC_R(H); break;
     case 0x26: LD_R_N(H); break;
     case 0x27: NI; break;
-    case 0x28: NI; break;
+    case 0x28: JR_F_N(COND_Z); break;
     case 0x29: NI; break;
     case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
-    case 0x2b: NI; break;
+    case 0x2b: DEC_RR(HL); break;
     case 0x2c: NI; break;
-    case 0x2d: NI; break;
+    case 0x2d: DEC_R(L); break;
     case 0x2e: LD_R_N(L); break;
     case 0x2f: NI; break;
-    case 0x30: NI; break;
+    case 0x30: JR_F_N(COND_NC); break;
     case 0x31: LD_RR_NN(SP); break;
     case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
     case 0x33: NI; break;
     case 0x34: NI; break;
-    case 0x35: NI; break;
+    case 0x35: DEC_MR(HL); break;
     case 0x36: LD_MR_N(HL); break;
     case 0x37: NI; break;
-    case 0x38: NI; break;
+    case 0x38: JR_F_N(COND_C); break;
     case 0x39: NI; break;
     case 0x3a: LD_MR_R(HL, A); REG(HL)--; break;
-    case 0x3b: NI; break;
+    case 0x3b: DEC_RR(SP); break;
     case 0x3c: NI; break;
-    case 0x3d: NI; break;
+    case 0x3d: DEC_R(A); break;
     case 0x3e: LD_R_N(A); break;
     case 0x3f: NI; break;
     case 0x40: LD_R_R(B, B); break;
@@ -1444,7 +1472,7 @@ void execute_instruction(struct Emulator* e) {
     case 0xf0: NI; break;
     case 0xf1: NI; break;
     case 0xf2: NI; break;
-    case 0xf3: NI; break;
+    case 0xf3: e->IME = 0; break;
     case 0xf4: NI; break;
     case 0xf5: NI; break;
     case 0xf6: NI; break;
@@ -1452,7 +1480,7 @@ void execute_instruction(struct Emulator* e) {
     case 0xf8: NI; break;
     case 0xf9: LD_RR_RR(SP, HL); break;
     case 0xfa: LD_R_MN(A); break;
-    case 0xfb: NI; break;
+    case 0xfb: e->IME = 1; break;
     case 0xfc: NI; break;
     case 0xfd: NI; break;
     case 0xfe: NI; break;
@@ -1462,6 +1490,7 @@ void execute_instruction(struct Emulator* e) {
       break;
   }
   e->reg.PC = new_pc;
+  print_registers(&e->reg);
 }
 
 int main(int argc, char** argv) {
@@ -1472,8 +1501,7 @@ int main(int argc, char** argv) {
   struct Emulator emulator;
   ZERO_MEMORY(emulator);
   CHECK(SUCCESS(init_emulator(&emulator, &rom_data)));
-  int i;
-  for (i = 0; i < 30; ++i) {
+  while (1) {
     execute_instruction(&emulator);
   }
   return 0;
