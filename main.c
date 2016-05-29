@@ -22,6 +22,17 @@
     goto error;  \
   }
 
+#define UNREACHABLE(...)      \
+  do {                        \
+    PRINT_ERROR(__VA_ARGS__); \
+    exit(1);                  \
+  } while (0)
+
+#define NOT_IMPLEMENTED(...) UNREACHABLE(__VA_ARGS__)
+
+typedef uint16_t Address;
+typedef uint16_t MaskedAddress;
+
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
   ((uint16_t)((ROM_U8(uint16_t, addr) << 8) | ROM_U8(uint16_t, addr + 1)))
@@ -48,13 +59,16 @@
 #define GLOBAL_CHECKSUM_START_ADDR 0x14e
 #define GLOBAL_CHECKSUM_END_ADDR 0x14f
 
+#define NEW_LICENSEE_CODE 0x33
+#define HEADER_CHECKSUM_RANGE_START 0x134
+#define HEADER_CHECKSUM_RANGE_END 0x14c
+
 #define MINIMUM_ROM_SIZE 32768
 #define BANK_BYTE_SIZE 16384
 
-#define NEW_LICENSEE_CODE 0x33
-
-#define HEADER_CHECKSUM_RANGE_START 0x134
-#define HEADER_CHECKSUM_RANGE_END 0x14c
+#define ADDR_MASK_8K 0x1fff
+#define ADDR_MASK_16K 0x3fff
+#define ADDR_MASK_32K 0x7fff
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -181,6 +195,7 @@ struct RomInfo {
   enum SgbFlag sgb_flag;
   enum CartridgeType cartridge_type;
   enum RomSize rom_size;
+  uint32_t rom_banks;
   enum RamSize ram_size;
   enum DestinationCode destination_code;
   uint8_t header_checksum;
@@ -189,7 +204,21 @@ struct RomInfo {
   enum Result global_checksum_valid;
 };
 
-enum Result read_rom(const char* filename, struct RomData* out_rom_data) {
+struct EmuState;
+
+struct MemoryMap {
+  uint8_t (*read_rom_bank_switch)(struct EmuState*, MaskedAddress addr);
+  void (*write_rom)(struct EmuState*, MaskedAddress addr, uint8_t value);
+};
+
+struct EmuState {
+  struct RomData* rom_data;
+  struct RomInfo* rom_info;
+  struct MemoryMap* memory_map;
+};
+
+enum Result read_rom_data_from_file(const char* filename,
+                                    struct RomData* out_rom_data) {
   FILE* f = fopen(filename, "rb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
@@ -283,12 +312,12 @@ enum Result validate_global_checksum(struct RomData* rom_data) {
   return checksum == expected_checksum ? OK : ERROR;
 }
 
-uint32_t get_rom_bank_size(enum RomSize rom_size) {
+uint32_t get_rom_bank_count(enum RomSize rom_size) {
   return is_rom_size_valid(rom_size) ? s_rom_bank_size[rom_size] : 0;
 }
 
 uint32_t get_rom_byte_size(enum RomSize rom_size) {
-  return get_rom_bank_size(rom_size) * BANK_BYTE_SIZE;
+  return get_rom_bank_count(rom_size) * BANK_BYTE_SIZE;
 }
 
 enum Result get_rom_info(struct RomData* rom_data,
@@ -301,6 +330,8 @@ enum Result get_rom_info(struct RomData* rom_data,
   CHECK_MSG(rom_data->size == rom_byte_size,
             "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
             rom_data->size);
+
+  rom_info.rom_banks = get_rom_bank_count(rom_info.rom_size);
 
   get_rom_title(rom_data, &rom_info.title);
   get_manufacturer_code(rom_data, &rom_info.manufacturer);
@@ -347,11 +378,158 @@ void print_rom_info(struct RomInfo* rom_info) {
          get_result_string(rom_info->global_checksum_valid));
 }
 
+uint8_t read_rom(struct EmuState* state, MaskedAddress addr) {
+  return state->rom_data->data[addr];
+}
+
+uint8_t read_rom_bank_switch(struct EmuState* state, MaskedAddress addr) {
+  return state->memory_map->read_rom_bank_switch(state, addr);
+}
+
+uint8_t read_vram(struct EmuState* state, MaskedAddress addr) {
+  NOT_IMPLEMENTED("vram not implemented. Addr: 0x%04x\n", addr);
+  return 0;
+}
+
+uint8_t read_external_ram(struct EmuState* state, MaskedAddress addr) {
+  NOT_IMPLEMENTED("ext ram not implemented. Addr: 0x%04x\n", addr);
+  return 0;
+}
+
+uint8_t read_work_ram(struct EmuState* state, MaskedAddress addr) {
+  NOT_IMPLEMENTED("work ram not implemented. Addr: 0x%04x\n", addr);
+  return 0;
+}
+
+uint8_t read_work_ram_bank_switch(struct EmuState* state,
+                                     MaskedAddress addr) {
+  NOT_IMPLEMENTED("work ram not implemented. Addr: 0x%04x\n", addr);
+  return 0;
+}
+
+uint8_t read_hardware(struct EmuState* state, Address addr) {
+  NOT_IMPLEMENTED("hardware not implemented. Addr: 0x%04x\n", addr);
+  return 0;
+}
+
+uint8_t read_u8(struct EmuState* state, Address addr) {
+  switch (addr >> 12) {
+    case 0x0:
+    case 0x1:
+    case 0x2:
+    case 0x3:
+      return read_rom(state, addr & ADDR_MASK_16K);
+
+    case 0x4:
+    case 0x5:
+    case 0x6:
+    case 0x7:
+      return read_rom_bank_switch(state, addr & ADDR_MASK_16K);
+
+    case 0x8:
+    case 0x9:
+      return read_vram(state, addr & ADDR_MASK_8K);
+
+    case 0xA:
+    case 0xB:
+      return read_external_ram(state, addr & ADDR_MASK_8K);
+
+    case 0xC:
+    case 0xE:
+      return read_work_ram(state, addr & ADDR_MASK_8K);
+
+    case 0xD:
+      return read_work_ram_bank_switch(state, addr & ADDR_MASK_8K);
+
+    case 0xF:
+      if (addr < 0xFE00) {
+        return read_work_ram_bank_switch(state, addr & ADDR_MASK_8K);
+      } else {
+        return read_hardware(state, addr);
+      }
+      break;
+
+    default:
+      UNREACHABLE("read_u8: invalid address: 0x%04X\n", addr);
+      break;
+  }
+}
+
+void write_rom(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+  state->memory_map->write_rom(state, addr, value);
+}
+
+void write_vram(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+  NOT_IMPLEMENTED("write_vram not implemented. Addr: 0x%04x\n", addr);
+}
+
+void write_external_ram(struct EmuState* state,
+                        MaskedAddress addr,
+                        uint8_t value) {
+  NOT_IMPLEMENTED("write_external_ram not implemented. Addr: 0x%04x\n", addr);
+}
+
+void write_work_ram(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+  NOT_IMPLEMENTED("write_work_ram not implemented. Addr: 0x%04x\n", addr);
+}
+
+void write_work_ram_bank_switch(struct EmuState* state,
+                                MaskedAddress addr,
+                                uint8_t value) {
+  NOT_IMPLEMENTED("write_work_ram_bank_switch not implemented. Addr: 0x%04x\n",
+                  addr);
+}
+
+void write_hardware(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+  NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
+}
+
+void write_u8(struct EmuState* state, Address addr, uint8_t value) {
+  switch (addr >> 12) {
+    case 0x0:
+    case 0x1:
+    case 0x2:
+    case 0x3:
+    case 0x4:
+    case 0x5:
+    case 0x6:
+    case 0x7:
+      return write_rom(state, addr & ADDR_MASK_32K, value);
+
+    case 0x8:
+    case 0x9:
+      return write_vram(state, addr & ADDR_MASK_8K, value);
+
+    case 0xA:
+    case 0xB:
+      return write_external_ram(state, addr & ADDR_MASK_8K, value);
+
+    case 0xC:
+    case 0xE:
+      return write_work_ram(state, addr & ADDR_MASK_8K, value);
+
+    case 0xD:
+      return write_work_ram_bank_switch(state, addr & ADDR_MASK_8K, value);
+
+    case 0xF:
+      if (addr < 0xFE00) {
+        return write_work_ram_bank_switch(state, addr & ADDR_MASK_8K, value);
+      } else {
+        return write_hardware(state, addr, value);
+      }
+      break;
+
+    default:
+      UNREACHABLE("write_u8: invalid address: 0x%04X\n", addr);
+      break;
+  }
+}
+
 int main(int argc, char** argv) {
   --argc; ++argv;
   CHECK_MSG(argc == 1, "no rom file given.\n");
   struct RomData rom_data;
-  CHECK(SUCCESS(read_rom(argv[0], &rom_data)));
+  CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   struct RomInfo rom_info;
   CHECK(SUCCESS(get_rom_info(&rom_data, &rom_info)));
   print_rom_info(&rom_info);
