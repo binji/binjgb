@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <inttypes.h>
 #include <string.h>
 #include <stdio.h>
@@ -204,16 +205,16 @@ struct RomInfo {
   enum Result global_checksum_valid;
 };
 
-struct EmuState;
+struct Emulator;
 
 struct MemoryMap {
-  uint8_t (*read_rom_bank_switch)(struct EmuState*, MaskedAddress addr);
-  void (*write_rom)(struct EmuState*, MaskedAddress addr, uint8_t value);
+  uint8_t (*read_rom_bank_switch)(struct Emulator*, MaskedAddress addr);
+  void (*write_rom)(struct Emulator*, MaskedAddress addr, uint8_t value);
 };
 
-struct EmuState {
+struct Emulator {
   struct RomData* rom_data;
-  struct RomInfo* rom_info;
+  struct RomInfo rom_info;
   struct MemoryMap* memory_map;
 };
 
@@ -378,74 +379,118 @@ void print_rom_info(struct RomInfo* rom_info) {
          get_result_string(rom_info->global_checksum_valid));
 }
 
-uint8_t read_rom(struct EmuState* state, MaskedAddress addr) {
-  return state->rom_data->data[addr];
+uint8_t rom_only_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
+  /* always return ROM in range 0x4000-0x7fff */
+  assert(addr <= ADDR_MASK_16K);
+  addr += 0x4000;
+  return e->rom_data->data[addr];
 }
 
-uint8_t read_rom_bank_switch(struct EmuState* state, MaskedAddress addr) {
-  return state->memory_map->read_rom_bank_switch(state, addr);
+void dummy_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  /* TODO(binji): log? */
 }
 
-uint8_t read_vram(struct EmuState* state, MaskedAddress addr) {
+struct MemoryMap s_rom_only_memory_map = {
+  .read_rom_bank_switch = rom_only_read_rom_bank_switch,
+  .write_rom = dummy_write_rom,
+};
+
+enum Result get_memory_map(struct RomInfo* rom_info,
+                           struct MemoryMap** out_memory_map) {
+  switch (rom_info->cartridge_type) {
+    case CARTRIDGE_TYPE_ROM_ONLY:
+      *out_memory_map = &s_rom_only_memory_map;
+      return OK;
+
+    default:
+      NOT_IMPLEMENTED("memory map for %s not implemented.\n",
+                      get_cartridge_type_string(rom_info->cartridge_type));
+  }
+  return ERROR;
+}
+
+enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
+  ZERO_MEMORY(*e);
+  e->rom_data = rom_data;
+  CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
+#if 1
+  print_rom_info(&e->rom_info);
+#endif
+  CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
+  return OK;
+error:
+  return ERROR;
+}
+
+
+uint8_t read_rom(struct Emulator* e, MaskedAddress addr) {
+  return e->rom_data->data[addr];
+}
+
+uint8_t read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
+  return e->memory_map->read_rom_bank_switch(e, addr);
+}
+
+uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   NOT_IMPLEMENTED("vram not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
 
-uint8_t read_external_ram(struct EmuState* state, MaskedAddress addr) {
+uint8_t read_external_ram(struct Emulator* e, MaskedAddress addr) {
   NOT_IMPLEMENTED("ext ram not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
 
-uint8_t read_work_ram(struct EmuState* state, MaskedAddress addr) {
+uint8_t read_work_ram(struct Emulator* e, MaskedAddress addr) {
   NOT_IMPLEMENTED("work ram not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
 
-uint8_t read_work_ram_bank_switch(struct EmuState* state,
+uint8_t read_work_ram_bank_switch(struct Emulator* e,
                                      MaskedAddress addr) {
   NOT_IMPLEMENTED("work ram not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
 
-uint8_t read_hardware(struct EmuState* state, Address addr) {
+uint8_t read_hardware(struct Emulator* e, Address addr) {
   NOT_IMPLEMENTED("hardware not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
 
-uint8_t read_u8(struct EmuState* state, Address addr) {
+uint8_t read_u8(struct Emulator* e, Address addr) {
   switch (addr >> 12) {
     case 0x0:
     case 0x1:
     case 0x2:
     case 0x3:
-      return read_rom(state, addr & ADDR_MASK_16K);
+      return read_rom(e, addr & ADDR_MASK_16K);
 
     case 0x4:
     case 0x5:
     case 0x6:
     case 0x7:
-      return read_rom_bank_switch(state, addr & ADDR_MASK_16K);
+      return read_rom_bank_switch(e, addr & ADDR_MASK_16K);
 
     case 0x8:
     case 0x9:
-      return read_vram(state, addr & ADDR_MASK_8K);
+      return read_vram(e, addr & ADDR_MASK_8K);
 
     case 0xA:
     case 0xB:
-      return read_external_ram(state, addr & ADDR_MASK_8K);
+      return read_external_ram(e, addr & ADDR_MASK_8K);
 
     case 0xC:
     case 0xE:
-      return read_work_ram(state, addr & ADDR_MASK_8K);
+      return read_work_ram(e, addr & ADDR_MASK_8K);
 
     case 0xD:
-      return read_work_ram_bank_switch(state, addr & ADDR_MASK_8K);
+      return read_work_ram_bank_switch(e, addr & ADDR_MASK_8K);
 
     case 0xF:
       if (addr < 0xFE00) {
-        return read_work_ram_bank_switch(state, addr & ADDR_MASK_8K);
+        return read_work_ram_bank_switch(e, addr & ADDR_MASK_8K);
       } else {
-        return read_hardware(state, addr);
+        return read_hardware(e, addr);
       }
       break;
 
@@ -455,36 +500,36 @@ uint8_t read_u8(struct EmuState* state, Address addr) {
   }
 }
 
-void write_rom(struct EmuState* state, MaskedAddress addr, uint8_t value) {
-  state->memory_map->write_rom(state, addr, value);
+void write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  e->memory_map->write_rom(e, addr, value);
 }
 
-void write_vram(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   NOT_IMPLEMENTED("write_vram not implemented. Addr: 0x%04x\n", addr);
 }
 
-void write_external_ram(struct EmuState* state,
+void write_external_ram(struct Emulator* e,
                         MaskedAddress addr,
                         uint8_t value) {
   NOT_IMPLEMENTED("write_external_ram not implemented. Addr: 0x%04x\n", addr);
 }
 
-void write_work_ram(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+void write_work_ram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   NOT_IMPLEMENTED("write_work_ram not implemented. Addr: 0x%04x\n", addr);
 }
 
-void write_work_ram_bank_switch(struct EmuState* state,
+void write_work_ram_bank_switch(struct Emulator* e,
                                 MaskedAddress addr,
                                 uint8_t value) {
   NOT_IMPLEMENTED("write_work_ram_bank_switch not implemented. Addr: 0x%04x\n",
                   addr);
 }
 
-void write_hardware(struct EmuState* state, MaskedAddress addr, uint8_t value) {
+void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
 }
 
-void write_u8(struct EmuState* state, Address addr, uint8_t value) {
+void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   switch (addr >> 12) {
     case 0x0:
     case 0x1:
@@ -494,28 +539,28 @@ void write_u8(struct EmuState* state, Address addr, uint8_t value) {
     case 0x5:
     case 0x6:
     case 0x7:
-      return write_rom(state, addr & ADDR_MASK_32K, value);
+      return write_rom(e, addr & ADDR_MASK_32K, value);
 
     case 0x8:
     case 0x9:
-      return write_vram(state, addr & ADDR_MASK_8K, value);
+      return write_vram(e, addr & ADDR_MASK_8K, value);
 
     case 0xA:
     case 0xB:
-      return write_external_ram(state, addr & ADDR_MASK_8K, value);
+      return write_external_ram(e, addr & ADDR_MASK_8K, value);
 
     case 0xC:
     case 0xE:
-      return write_work_ram(state, addr & ADDR_MASK_8K, value);
+      return write_work_ram(e, addr & ADDR_MASK_8K, value);
 
     case 0xD:
-      return write_work_ram_bank_switch(state, addr & ADDR_MASK_8K, value);
+      return write_work_ram_bank_switch(e, addr & ADDR_MASK_8K, value);
 
     case 0xF:
       if (addr < 0xFE00) {
-        return write_work_ram_bank_switch(state, addr & ADDR_MASK_8K, value);
+        return write_work_ram_bank_switch(e, addr & ADDR_MASK_8K, value);
       } else {
-        return write_hardware(state, addr, value);
+        return write_hardware(e, addr, value);
       }
       break;
 
@@ -530,9 +575,8 @@ int main(int argc, char** argv) {
   CHECK_MSG(argc == 1, "no rom file given.\n");
   struct RomData rom_data;
   CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
-  struct RomInfo rom_info;
-  CHECK(SUCCESS(get_rom_info(&rom_data, &rom_info)));
-  print_rom_info(&rom_info);
+  struct Emulator emulator;
+  CHECK(SUCCESS(init_emulator(&emulator, &rom_data)));
   return 0;
 error:
   return 1;
