@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#define SUCCESS(x) ((x) == OK)
+#define FAIL(x) ((x) != OK)
+
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 
@@ -19,7 +22,9 @@
     goto error;  \
   }
 
-#define ROM_BYTE(type, addr) ((type)*(rom_data->data + addr))
+#define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
+#define ROM_U16_BE(addr) \
+  ((uint16_t)((ROM_U8(uint16_t, addr) << 8) | ROM_U8(uint16_t, addr + 1)))
 
 #define ENTRY_POINT_START_ADDR 0x100
 #define ENTRY_POINT_END_ADDR 0x103
@@ -43,7 +48,17 @@
 #define GLOBAL_CHECKSUM_START_ADDR 0x14e
 #define GLOBAL_CHECKSUM_END_ADDR 0x14f
 
+#define MINIMUM_ROM_SIZE 32768
+#define BANK_BYTE_SIZE 16384
+
 #define NEW_LICENSEE_CODE 0x33
+
+#define HEADER_CHECKSUM_RANGE_START 0x134
+#define HEADER_CHECKSUM_RANGE_END 0x14c
+
+#define FOREACH_RESULT(V) \
+  V(OK, 0)                \
+  V(ERROR, 1)
 
 #define FOREACH_CGB_FLAG(V)   \
   V(CGB_FLAG_NONE, 0)         \
@@ -86,7 +101,7 @@
   V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff)
 
 #define FOREACH_ROM_SIZE(V)  \
-  V(ROM_SIZE_32K, 0, 0)      \
+  V(ROM_SIZE_32K, 0, 2)      \
   V(ROM_SIZE_64K, 1, 4)      \
   V(ROM_SIZE_128K, 2, 8)     \
   V(ROM_SIZE_256K, 3, 16)    \
@@ -108,8 +123,8 @@
   V(DESTINATION_CODE_JAPANESE, 0)   \
   V(DESTINATION_CODE_NON_JAPANESE, 1)
 
-#define DEFINE_ENUM(name, value, ...) name = value,
-#define DEFINE_STRING(name, value, ...) [value] = #name,
+#define DEFINE_ENUM(name, code, ...) name = code,
+#define DEFINE_STRING(name, code, ...) [code] = #name,
 
 const char* get_enum_string(const char** strings,
                             size_t string_count,
@@ -117,23 +132,34 @@ const char* get_enum_string(const char** strings,
   return value < string_count ? strings[value] : "unknown";
 }
 
-#define DEFINE_NAMED_ENUM(Name, name, foreach)                       \
-  enum Name { foreach (DEFINE_ENUM) };                               \
+#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                 \
+  enum Name { foreach (DEFINE_ENUM) NAME##_COUNT };                  \
+  enum Result is_##name##_valid(enum Name value) {                   \
+    return value < NAME##_COUNT;                                     \
+  }                                                                  \
   const char* get_##name##_string(enum Name value) {                 \
     static const char* s_strings[] = {foreach (DEFINE_STRING)};      \
     return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
   }
 
-DEFINE_NAMED_ENUM(CgbFlag, cgb_flag, FOREACH_CGB_FLAG)
-DEFINE_NAMED_ENUM(SgbFlag, sgb_flag, FOREACH_SGB_FLAG)
-DEFINE_NAMED_ENUM(CartridgeType, cartridge_type, FOREACH_CARTRIDGE_TYPE)
-DEFINE_NAMED_ENUM(RomSize, rom_size, FOREACH_ROM_SIZE)
-DEFINE_NAMED_ENUM(RamSize, ram_size, FOREACH_RAM_SIZE)
-DEFINE_NAMED_ENUM(DestinationCode, destination_code, FOREACH_DESTINATION_CODE)
+DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT)
+DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG)
+DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG)
+DEFINE_NAMED_ENUM(CARTRIDGE_TYPE,
+                  CartridgeType,
+                  cartridge_type,
+                  FOREACH_CARTRIDGE_TYPE)
+DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE)
+DEFINE_NAMED_ENUM(RAM_SIZE, RamSize, ram_size, FOREACH_RAM_SIZE)
+DEFINE_NAMED_ENUM(DESTINATION_CODE,
+                  DestinationCode,
+                  destination_code,
+                  FOREACH_DESTINATION_CODE)
 
-enum Result {
-  OK,
-  ERROR,
+uint32_t s_rom_bank_size[] = {
+#define V(name, code, bank_size) [code] = bank_size,
+    FOREACH_ROM_SIZE(V)
+#undef V
 };
 
 struct RomData {
@@ -157,6 +183,10 @@ struct RomInfo {
   enum RomSize rom_size;
   enum RamSize ram_size;
   enum DestinationCode destination_code;
+  uint8_t header_checksum;
+  uint16_t global_checksum;
+  enum Result header_checksum_valid;
+  enum Result global_checksum_valid;
 };
 
 enum Result read_rom(const char* filename, struct RomData* out_rom_data) {
@@ -166,6 +196,8 @@ enum Result read_rom(const char* filename, struct RomData* out_rom_data) {
   long size = ftell(f);
   CHECK_MSG(size >= 0, "ftell failed.");
   CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
+  CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
+            MINIMUM_ROM_SIZE);
   uint8_t* data = malloc(size);
   CHECK_MSG(data, "allocation failed.");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
@@ -229,21 +261,67 @@ void get_new_licensee(struct RomData* rom_data,
   }
 }
 
-void get_rom_info(struct RomData* rom_data, struct RomInfo* out_rom_info) {
-  ZERO_MEMORY(*out_rom_info);
-  get_rom_title(rom_data, &out_rom_info->title);
-  get_manufacturer_code(rom_data, &out_rom_info->manufacturer);
-  out_rom_info->cgb_flag = ROM_BYTE(enum CgbFlag, CGB_FLAG_ADDR);
-  out_rom_info->sgb_flag = ROM_BYTE(enum SgbFlag, SGB_FLAG_ADDR);
-  out_rom_info->cartridge_type =
-      ROM_BYTE(enum CartridgeType, CARTRIDGE_TYPE_ADDR);
-  out_rom_info->rom_size = ROM_BYTE(enum RomSize, ROM_SIZE_ADDR);
-  out_rom_info->ram_size = ROM_BYTE(enum RamSize, RAM_SIZE_ADDR);
-  out_rom_info->destination_code =
-      ROM_BYTE(enum DestinationCode, DESTINATATION_CODE_ADDR);
-  out_rom_info->old_licensee_code = ROM_BYTE(uint8_t, OLD_LICENSEE_CODE_ADDR);
-  get_new_licensee(rom_data, out_rom_info->old_licensee_code,
-                   &out_rom_info->new_licensee);
+enum Result validate_header_checksum(struct RomData* rom_data) {
+  uint8_t expected_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
+  uint8_t checksum = 0;
+  size_t i = 0;
+  for (i = HEADER_CHECKSUM_RANGE_START; i <= HEADER_CHECKSUM_RANGE_END; ++i) {
+    checksum = checksum - rom_data->data[i] - 1;
+  }
+  return checksum == expected_checksum ? OK : ERROR;
+}
+
+enum Result validate_global_checksum(struct RomData* rom_data) {
+  uint16_t expected_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
+  uint16_t checksum = 0;
+  size_t i = 0;
+  for (i = 0; i < rom_data->size; ++i) {
+    if (i == GLOBAL_CHECKSUM_START_ADDR || i == GLOBAL_CHECKSUM_END_ADDR)
+      continue;
+    checksum += rom_data->data[i];
+  }
+  return checksum == expected_checksum ? OK : ERROR;
+}
+
+uint32_t get_rom_bank_size(enum RomSize rom_size) {
+  return is_rom_size_valid(rom_size) ? s_rom_bank_size[rom_size] : 0;
+}
+
+uint32_t get_rom_byte_size(enum RomSize rom_size) {
+  return get_rom_bank_size(rom_size) * BANK_BYTE_SIZE;
+}
+
+enum Result get_rom_info(struct RomData* rom_data,
+                         struct RomInfo* out_rom_info) {
+  struct RomInfo rom_info;
+  ZERO_MEMORY(rom_info);
+
+  rom_info.rom_size = ROM_U8(enum RomSize, ROM_SIZE_ADDR);
+  uint32_t rom_byte_size = get_rom_byte_size(rom_info.rom_size);
+  CHECK_MSG(rom_data->size == rom_byte_size,
+            "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
+            rom_data->size);
+
+  get_rom_title(rom_data, &rom_info.title);
+  get_manufacturer_code(rom_data, &rom_info.manufacturer);
+  rom_info.cgb_flag = ROM_U8(enum CgbFlag, CGB_FLAG_ADDR);
+  rom_info.sgb_flag = ROM_U8(enum SgbFlag, SGB_FLAG_ADDR);
+  rom_info.cartridge_type = ROM_U8(enum CartridgeType, CARTRIDGE_TYPE_ADDR);
+  rom_info.ram_size = ROM_U8(enum RamSize, RAM_SIZE_ADDR);
+  rom_info.destination_code =
+      ROM_U8(enum DestinationCode, DESTINATATION_CODE_ADDR);
+  rom_info.old_licensee_code = ROM_U8(uint8_t, OLD_LICENSEE_CODE_ADDR);
+  get_new_licensee(rom_data, rom_info.old_licensee_code,
+                   &rom_info.new_licensee);
+  rom_info.header_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
+  rom_info.header_checksum_valid = validate_header_checksum(rom_data);
+  rom_info.global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
+  rom_info.global_checksum_valid = validate_global_checksum(rom_data);
+
+  *out_rom_info = rom_info;
+  return OK;
+error:
+  return ERROR;
 }
 
 void print_rom_info(struct RomInfo* rom_info) {
@@ -257,18 +335,25 @@ void print_rom_info(struct RomInfo* rom_info) {
          get_cartridge_type_string(rom_info->cartridge_type));
   printf("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
   printf("ram size: %s\n", get_ram_size_string(rom_info->ram_size));
+  printf("destination code: %s\n",
+         get_destination_code_string(rom_info->destination_code));
   printf("old licensee code: %u\n", rom_info->old_licensee_code);
   printf("new licensee: %.*s\n", (int)rom_info->new_licensee.length,
          rom_info->new_licensee.start);
+
+  printf("header checksum: 0x%02x [%s]\n", rom_info->header_checksum,
+         get_result_string(rom_info->header_checksum_valid));
+  printf("global checksum: 0x%04x [%s]\n", rom_info->global_checksum,
+         get_result_string(rom_info->global_checksum_valid));
 }
 
 int main(int argc, char** argv) {
   --argc; ++argv;
   CHECK_MSG(argc == 1, "no rom file given.\n");
   struct RomData rom_data;
-  CHECK(read_rom(argv[0], &rom_data) == OK);
+  CHECK(SUCCESS(read_rom(argv[0], &rom_data)));
   struct RomInfo rom_info;
-  get_rom_info(&rom_data, &rom_info);
+  CHECK(SUCCESS(get_rom_info(&rom_data, &rom_info)));
   print_rom_info(&rom_info);
   return 0;
 error:
