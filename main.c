@@ -1786,7 +1786,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x37: NI; break;
       case 0x38: JR_F_N(COND_C); break;
       case 0x39: NI; break;
-      case 0x3a: LD_MR_R(HL, A); REG(HL)--; break;
+      case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
       case 0x3b: DEC_RR(SP); break;
       case 0x3c: INC_R(A); break;
       case 0x3d: DEC_R(A); break;
