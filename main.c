@@ -11,6 +11,7 @@
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 
+#define LOG(...) fprintf(stdout, __VA_ARGS__)
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define CHECK_MSG(x, ...)                       \
   if (!(x)) {                                   \
@@ -85,6 +86,9 @@ typedef uint16_t MaskedAddress;
 #define WORK_RAM_SIZE 32768
 #define HIGH_RAM_SIZE 127
 
+#define OBJ_COUNT 40
+#define OBJ_PALETTE_COUNT 2
+
 #define SOUND_COUNT 5
 #define SOUND1 0
 #define SOUND2 1
@@ -151,6 +155,11 @@ typedef uint16_t MaskedAddress;
 #define DECODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) >> (LO))
 #define BITS(X, OP, HI, LO) OP(X, HI, LO)
 #define BIT(X, OP, B) OP(X, B, B)
+
+#define OBJ_PRIORITY(X, OP) BIT(X, OP, 7)
+#define OBJ_YFLIP(X, OP) BIT(X, OP, 6)
+#define OBJ_XFLIP(X, OP) BIT(X, OP, 5)
+#define OBJ_PALETTE(X, OP) BIT(X, OP, 4)
 
 #define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
 #define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
@@ -340,6 +349,11 @@ enum Color {
   COLOR_BLACK = 3,
 };
 
+enum ObjPriority {
+  OBJ_PRIORITY_ABOVE_BG = 0,
+  OBJ_PRIORITY_BEHIND_BG = 1,
+};
+
 struct RomData {
   uint8_t* data;
   size_t size;
@@ -422,6 +436,28 @@ struct VideoRam {
   uint8_t data[VIDEO_RAM_SIZE];
 };
 
+struct Palette {
+  enum Color color3;
+  enum Color color2;
+  enum Color color1;
+  enum Color color0;
+};
+
+struct Obj {
+  uint8_t y;
+  uint8_t x;
+  uint8_t tile;
+  enum ObjPriority priority;
+  enum Bool yflip;
+  enum Bool xflip;
+  uint8_t palette;
+};
+
+struct OAM {
+  struct Obj objs[OBJ_COUNT];
+  struct Palette obp[OBJ_PALETTE_COUNT];
+};
+
 struct Interrupts {
   enum Bool IME; /* Interrupt Master Enable */
   uint8_t IE;    /* Interrupt Enable */
@@ -462,13 +498,6 @@ struct LCDStatus {
   enum LCDMode mode;
 };
 
-struct Palette {
-  enum Color color3;
-  enum Color color2;
-  enum Color color1;
-  enum Color color0;
-};
-
 struct LCD {
   struct LCDControl lcdc; /* LCD control */
   struct LCDStatus stat;  /* LCD status */
@@ -477,8 +506,6 @@ struct LCD {
   uint8_t LY;             /* Line Y */
   uint8_t LYC;            /* Line Y Compare */
   struct Palette bgp;     /* BG Palette */
-  struct Palette obp0;    /* OBJ 0 Palette */
-  struct Palette obp1;    /* OBJ 1 Palette */
 };
 
 struct Emulator {
@@ -489,6 +516,7 @@ struct Emulator {
   struct VideoRam vram;
   struct WorkRam ram;
   struct Interrupts interrupts;
+  struct OAM oam;
   struct Serial serial;
   struct Sound sound;
   struct LCD lcd;
@@ -897,6 +925,21 @@ uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
+uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
+  uint8_t obj_index = addr >> 2;
+  struct Obj* obj = &e->oam.objs[obj_index];
+  switch (addr & 3) {
+    case 0: return obj->y;
+    case 1: return obj->x;
+    case 2: return obj->tile;
+    case 3:
+      return GET_BITS(obj->priority, OBJ_PRIORITY) |
+             GET_BITS(obj->yflip, OBJ_YFLIP) | GET_BITS(obj->xflip, OBJ_XFLIP) |
+             GET_BITS(obj->palette, OBJ_PALETTE);
+  }
+  UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
+}
+
 uint8_t read_hardware(struct Emulator* e, Address addr) {
   switch (addr) {
     case HW_SB_ADDR: return 0; /* TODO */
@@ -953,19 +996,18 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
              SET_BITS(e->lcd.bgp.color1, PALETTE_COLOR1) |
              SET_BITS(e->lcd.bgp.color0, PALETTE_COLOR0);
     case HW_OBP0_ADDR:
-      return SET_BITS(e->lcd.obp0.color3, PALETTE_COLOR3) |
-             SET_BITS(e->lcd.obp0.color2, PALETTE_COLOR2) |
-             SET_BITS(e->lcd.obp0.color1, PALETTE_COLOR1);
+      return SET_BITS(e->oam.obp[0].color3, PALETTE_COLOR3) |
+             SET_BITS(e->oam.obp[0].color2, PALETTE_COLOR2) |
+             SET_BITS(e->oam.obp[0].color1, PALETTE_COLOR1);
     case HW_OBP1_ADDR:
-      return SET_BITS(e->lcd.obp1.color3, PALETTE_COLOR3) |
-             SET_BITS(e->lcd.obp1.color2, PALETTE_COLOR2) |
-             SET_BITS(e->lcd.obp1.color1, PALETTE_COLOR1);
+      return SET_BITS(e->oam.obp[1].color3, PALETTE_COLOR3) |
+             SET_BITS(e->oam.obp[1].color2, PALETTE_COLOR2) |
+             SET_BITS(e->oam.obp[1].color1, PALETTE_COLOR1);
     case HW_IE_ADDR: return e->interrupts.IE;
     default:
-      break;
+      LOG("read_hardware(0x%04x) ignored.\n", addr);
+      return 0;
   }
-  NOT_IMPLEMENTED("hardware not implemented. Addr: 0x%04x\n", addr);
-  return 0;
 }
 
 uint8_t read_u8(struct Emulator* e, Address addr) {
@@ -990,7 +1032,7 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
       return e->memory_map.read_work_ram_bank_switch(e, pair.addr);
 
     case MEMORY_MAP_OAM:
-      NOT_IMPLEMENTED("OAM read not implemented.\n");
+      return read_oam(e, pair.addr);
 
     case MEMORY_MAP_UNUSED:
       return 0;
@@ -1015,6 +1057,32 @@ void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     e->vram.data[addr] = value;
   }
 }
+
+void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  uint8_t obj_index = addr >> 2;
+  struct Obj* obj = &e->oam.objs[obj_index];
+  switch (addr & 3) {
+    case 0:
+      obj->y = value;
+      break;
+
+    case 1:
+      obj->x = value;
+      break;
+
+    case 2:
+      obj->tile = value;
+      break;
+
+    case 3:
+      obj->priority = SET_BITS(value, OBJ_PRIORITY);
+      obj->yflip = SET_BITS(value, OBJ_YFLIP);
+      obj->xflip = SET_BITS(value, OBJ_XFLIP);
+      obj->palette = SET_BITS(value, OBJ_PALETTE);
+      break;
+  }
+}
+
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   switch (addr) {
@@ -1073,18 +1141,18 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->lcd.bgp.color0 = GET_BITS(value, PALETTE_COLOR0);
       break;
     case HW_OBP0_ADDR:
-      e->lcd.obp0.color3 = GET_BITS(value, PALETTE_COLOR3);
-      e->lcd.obp0.color2 = GET_BITS(value, PALETTE_COLOR2);
-      e->lcd.obp0.color1 = GET_BITS(value, PALETTE_COLOR1);
+      e->oam.obp[0].color3 = GET_BITS(value, PALETTE_COLOR3);
+      e->oam.obp[0].color2 = GET_BITS(value, PALETTE_COLOR2);
+      e->oam.obp[0].color1 = GET_BITS(value, PALETTE_COLOR1);
       break;
     case HW_OBP1_ADDR:
-      e->lcd.obp1.color3 = GET_BITS(value, PALETTE_COLOR3);
-      e->lcd.obp1.color2 = GET_BITS(value, PALETTE_COLOR2);
-      e->lcd.obp1.color1 = GET_BITS(value, PALETTE_COLOR1);
+      e->oam.obp[1].color3 = GET_BITS(value, PALETTE_COLOR3);
+      e->oam.obp[1].color2 = GET_BITS(value, PALETTE_COLOR2);
+      e->oam.obp[1].color1 = GET_BITS(value, PALETTE_COLOR1);
       break;
     case HW_IE_ADDR: e->interrupts.IE = value; break;
     default:
-      NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
+      LOG("write_hardware(0x%04x, %u) ignored.\n", addr, value);
       break;
   }
 }
@@ -1117,7 +1185,7 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       break;
 
     case MEMORY_MAP_OAM:
-      NOT_IMPLEMENTED("OAM write not implemented.\n");
+      write_oam(e, pair.addr, value);
       break;
 
     case MEMORY_MAP_UNUSED:
