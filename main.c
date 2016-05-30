@@ -81,6 +81,7 @@ typedef uint16_t MaskedAddress;
 #define MINIMUM_ROM_SIZE 32768
 #define ROM_BANK_SHIFT 14
 #define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
+#define VIDEO_RAM_SIZE 8192
 #define WORK_RAM_SIZE 32768
 #define HIGH_RAM_SIZE 127
 
@@ -110,6 +111,16 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
+#define HW_OAM_START_ADDR 0xfe00
+#define HW_OAM_END_ADDR 0xfe9f
+#define HW_UNUSED_START_ADDR 0xfea0
+#define HW_UNUSED_END_ADDR 0xfeff
+#define HW_IO_START_ADDR 0xff00
+#define HW_IO_END_ADDR 0xff7f
+#define HW_JOYP_ADDR 0xff00
+#define HW_HIGH_RAM_START_ADDR 0xff80
+#define HW_HIGH_RAM_END_ADDR 0xfffe
+
 #define HW_SB_ADDR 0xff01   /* Serial transfer data */
 #define HW_SC_ADDR 0xff02   /* Serial transfer control */
 #define HW_IF_ADDR 0xff0f   /* Interrupt request */
@@ -125,8 +136,6 @@ typedef uint16_t MaskedAddress;
 #define HW_BGP_ADDR 0xff47  /* BG palette */
 #define HW_OBP0_ADDR 0xff48 /* OBJ palette 0 */
 #define HW_OBP1_ADDR 0xff49 /* OBJ palette 1 */
-#define HW_HIGH_RAM_START_ADDR 0xff80
-#define HW_HIGH_RAM_END_ADDR 0xfffe
 #define HW_IE_ADDR 0xffff /* Interrupt enable */
 
 #define INTERRUPT_VBLANK_MASK 0x01
@@ -299,6 +308,19 @@ uint32_t s_rom_bank_size[] = {
 #undef V
 };
 
+enum MemoryMapType {
+  MEMORY_MAP_ROM,
+  MEMORY_MAP_ROM_BANK_SWITCH,
+  MEMORY_MAP_VRAM,
+  MEMORY_MAP_EXTERNAL_RAM,
+  MEMORY_MAP_WORK_RAM,
+  MEMORY_MAP_WORK_RAM_BANK_SWITCH,
+  MEMORY_MAP_OAM,
+  MEMORY_MAP_UNUSED,
+  MEMORY_MAP_HARDWARE,
+  MEMORY_MAP_HIGH_RAM,
+};
+
 enum BankMode {
   BANK_MODE_ROM = 0,
   BANK_MODE_RAM = 1,
@@ -366,6 +388,11 @@ struct MemoryMap {
                                      uint8_t value);
 };
 
+struct MemoryTypeAddressPair {
+  enum MemoryMapType type;
+  MaskedAddress addr;
+};
+
 /* TODO(binji): endianness */
 #define REGISTER_PAIR(X, Y) \
   union {                   \
@@ -389,6 +416,10 @@ struct Registers {
     enum Bool H;
     enum Bool C;
   } flags;
+};
+
+struct VideoRam {
+  uint8_t data[VIDEO_RAM_SIZE];
 };
 
 struct Interrupts {
@@ -455,6 +486,7 @@ struct Emulator {
   struct RomInfo rom_info;
   struct MemoryMap memory_map;
   struct Registers reg;
+  struct VideoRam vram;
   struct WorkRam ram;
   struct Interrupts interrupts;
   struct Serial serial;
@@ -769,19 +801,88 @@ error:
   return ERROR;
 }
 
+struct MemoryTypeAddressPair map_address(Address addr) {
+  struct MemoryTypeAddressPair result;
+  switch (addr >> 12) {
+    case 0x0:
+    case 0x1:
+    case 0x2:
+    case 0x3:
+      result.type = MEMORY_MAP_ROM;
+      result.addr = addr & ADDR_MASK_16K;
+      break;
 
-uint8_t read_rom(struct Emulator* e, MaskedAddress addr) {
-  assert(addr <= ADDR_MASK_16K);
-  return e->rom_data.data[addr];
+    case 0x4:
+    case 0x5:
+    case 0x6:
+    case 0x7:
+      result.type = MEMORY_MAP_ROM_BANK_SWITCH;
+      result.addr = addr & ADDR_MASK_16K;
+      break;
+
+    case 0x8:
+    case 0x9:
+      result.type = MEMORY_MAP_VRAM;
+      result.addr = addr & ADDR_MASK_8K;
+      break;
+
+    case 0xA:
+    case 0xB:
+      result.type = MEMORY_MAP_EXTERNAL_RAM;
+      result.addr = addr & ADDR_MASK_8K;
+      break;
+
+    case 0xC:
+    case 0xE: /* mirror of 0xc000..0xcfff */
+      result.type = MEMORY_MAP_WORK_RAM;
+      result.addr = addr & ADDR_MASK_4K;
+      break;
+
+    case 0xD:
+      result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
+      result.addr = addr & ADDR_MASK_4K;
+      break;
+
+    case 0xF:
+      if (addr < HW_OAM_START_ADDR) {
+        /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
+        result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
+        result.addr = addr & ADDR_MASK_4K;
+      } else if (addr <= HW_OAM_END_ADDR) {
+        /* 0xfe00 - 0xfe9f */
+        result.type = MEMORY_MAP_OAM;
+        result.addr = addr - HW_OAM_START_ADDR;
+      } else if (addr <= HW_UNUSED_END_ADDR) {
+        /* 0xfea0 - 0xfeff */
+        result.type = MEMORY_MAP_UNUSED;
+        result.addr = addr;
+      } else if (addr <= HW_IO_END_ADDR) {
+        /* 0xff00 - 0xff7f */
+        result.type = MEMORY_MAP_HARDWARE;
+        result.addr = addr;
+      } else if (addr <= HW_HIGH_RAM_END_ADDR) {
+        /* 0xff80 - 0xfffe */
+        result.type = MEMORY_MAP_HIGH_RAM;
+        result.addr = addr - HW_HIGH_RAM_START_ADDR;
+      } else {
+        /* 0xffff: IE register */
+        result.type = MEMORY_MAP_HARDWARE;
+        result.addr = addr;
+      }
+      break;
+  }
+  return result;
 }
 
-uint8_t read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
-  return e->memory_map.read_rom_bank_switch(e, addr);
-}
 
 uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
-  NOT_IMPLEMENTED("vram not implemented. Addr: 0x%04x\n", addr);
-  return 0;
+  if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
+    /* return garbage if read while the hardware is using vram */
+    return 0xff;
+  } else {
+    assert(addr <= ADDR_MASK_8K);
+    return e->vram.data[addr];
+  }
 }
 
 uint8_t read_external_ram(struct Emulator* e, MaskedAddress addr) {
@@ -789,20 +890,7 @@ uint8_t read_external_ram(struct Emulator* e, MaskedAddress addr) {
   return 0;
 }
 
-uint8_t read_work_ram(struct Emulator* e, MaskedAddress addr) {
-  assert(addr <= ADDR_MASK_4K);
-  return e->ram.data[addr];
-}
-
-uint8_t read_work_ram_bank_switch(struct Emulator* e, MaskedAddress addr) {
-  return e->memory_map.read_work_ram_bank_switch(e, addr);
-}
-
 uint8_t read_hardware(struct Emulator* e, Address addr) {
-  if (addr >= HW_HIGH_RAM_START_ADDR && addr <= HW_HIGH_RAM_END_ADDR) {
-    return e->hram[addr - HW_HIGH_RAM_START_ADDR];
-  }
-
   switch (addr) {
     case HW_SB_ADDR: return 0; /* TODO */
     case HW_SC_ADDR:
@@ -874,58 +962,51 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
 }
 
 uint8_t read_u8(struct Emulator* e, Address addr) {
-  switch (addr >> 12) {
-    case 0x0:
-    case 0x1:
-    case 0x2:
-    case 0x3:
-      return read_rom(e, addr & ADDR_MASK_16K);
+  struct MemoryTypeAddressPair pair = map_address(addr);
+  switch (pair.type) {
+    case MEMORY_MAP_ROM:
+      return e->rom_data.data[pair.addr];
 
-    case 0x4:
-    case 0x5:
-    case 0x6:
-    case 0x7:
-      return read_rom_bank_switch(e, addr & ADDR_MASK_16K);
+    case MEMORY_MAP_ROM_BANK_SWITCH:
+      return e->memory_map.read_rom_bank_switch(e, pair.addr);
 
-    case 0x8:
-    case 0x9:
-      return read_vram(e, addr & ADDR_MASK_8K);
+    case MEMORY_MAP_VRAM:
+      return read_vram(e, pair.addr);
 
-    case 0xA:
-    case 0xB:
-      return read_external_ram(e, addr & ADDR_MASK_8K);
+    case MEMORY_MAP_EXTERNAL_RAM:
+      return read_external_ram(e, pair.addr);
 
-    case 0xC:
-    case 0xE:
-      return read_work_ram(e, addr & ADDR_MASK_4K);
+    case MEMORY_MAP_WORK_RAM:
+      return e->ram.data[pair.addr];
 
-    case 0xD:
-      return read_work_ram_bank_switch(e, addr & ADDR_MASK_4K);
+    case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
+      return e->memory_map.read_work_ram_bank_switch(e, pair.addr);
 
-    case 0xF:
-      if (addr < 0xFE00) {
-        return read_work_ram_bank_switch(e, addr & ADDR_MASK_4K);
-      } else {
-        return read_hardware(e, addr);
-      }
-      break;
+    case MEMORY_MAP_OAM:
+      NOT_IMPLEMENTED("OAM read not implemented.\n");
 
-    default:
-      UNREACHABLE("read_u8: invalid address: 0x%04X\n", addr);
-      break;
+    case MEMORY_MAP_UNUSED:
+      return 0;
+
+    case MEMORY_MAP_HARDWARE:
+      return read_hardware(e, pair.addr);
+
+    case MEMORY_MAP_HIGH_RAM:
+      return e->hram[pair.addr];
   }
+  UNREACHABLE("invalid address: 0x%04x.\n", addr);
 }
 
 uint16_t read_u16(struct Emulator* e, Address addr) {
   return read_u8(e, addr) | (read_u8(e, addr + 1) << 8);
 }
 
-void write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  e->memory_map.write_rom(e, addr, value);
-}
-
 void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  NOT_IMPLEMENTED("write_vram not implemented. Addr: 0x%04x\n", addr);
+  /* ignore writes if the display is on, and the hardware is using vram */
+  if (!e->lcd.lcdc.display || e->lcd.stat.mode != LCD_MODE_USING_OAM_VRAM) {
+    assert(addr <= ADDR_MASK_8K);
+    e->vram.data[addr] = value;
+  }
 }
 
 void write_external_ram(struct Emulator* e,
@@ -934,23 +1015,7 @@ void write_external_ram(struct Emulator* e,
   NOT_IMPLEMENTED("write_external_ram not implemented. Addr: 0x%04x\n", addr);
 }
 
-void write_work_ram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  assert(addr <= ADDR_MASK_4K);
-  e->ram.data[addr] = value;
-}
-
-void write_work_ram_bank_switch(struct Emulator* e,
-                                MaskedAddress addr,
-                                uint8_t value) {
-  e->memory_map.write_work_ram_bank_switch(e, addr, value);
-}
-
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (addr >= HW_HIGH_RAM_START_ADDR && addr <= HW_HIGH_RAM_END_ADDR) {
-    e->hram[addr - HW_HIGH_RAM_START_ADDR] = value;
-    return;
-  }
-
   switch (addr) {
     case HW_SB_ADDR: /* TODO */ break;
     case HW_SC_ADDR:
@@ -965,14 +1030,14 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->sound.so1_volume = GET_BITS(value, NR50_SO1_VOLUME);
       break;
     case HW_NR51_ADDR:
-      e->sound.so2_output[3] = GET_BITS(value, NR51_SOUND4_SO2);
-      e->sound.so2_output[2] = GET_BITS(value, NR51_SOUND3_SO2);
-      e->sound.so2_output[1] = GET_BITS(value, NR51_SOUND2_SO2);
-      e->sound.so2_output[0] = GET_BITS(value, NR51_SOUND1_SO2);
-      e->sound.so1_output[3] = GET_BITS(value, NR51_SOUND4_SO1);
-      e->sound.so1_output[2] = GET_BITS(value, NR51_SOUND3_SO1);
-      e->sound.so1_output[1] = GET_BITS(value, NR51_SOUND2_SO1);
-      e->sound.so1_output[0] = GET_BITS(value, NR51_SOUND1_SO1);
+      e->sound.so2_output[SOUND4] = GET_BITS(value, NR51_SOUND4_SO2);
+      e->sound.so2_output[SOUND3] = GET_BITS(value, NR51_SOUND3_SO2);
+      e->sound.so2_output[SOUND2] = GET_BITS(value, NR51_SOUND2_SO2);
+      e->sound.so2_output[SOUND1] = GET_BITS(value, NR51_SOUND1_SO2);
+      e->sound.so1_output[SOUND4] = GET_BITS(value, NR51_SOUND4_SO1);
+      e->sound.so1_output[SOUND3] = GET_BITS(value, NR51_SOUND3_SO1);
+      e->sound.so1_output[SOUND2] = GET_BITS(value, NR51_SOUND2_SO1);
+      e->sound.so1_output[SOUND1] = GET_BITS(value, NR51_SOUND1_SO1);
       break;
     case HW_NR52_ADDR:
       e->sound.enabled = GET_BITS(value, NR52_ALL_SOUND_ENABLED);
@@ -1024,42 +1089,43 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 void write_u8(struct Emulator* e, Address addr, uint8_t value) {
-  switch (addr >> 12) {
-    case 0x0:
-    case 0x1:
-    case 0x2:
-    case 0x3:
-    case 0x4:
-    case 0x5:
-    case 0x6:
-    case 0x7:
-      return write_rom(e, addr & ADDR_MASK_32K, value);
-
-    case 0x8:
-    case 0x9:
-      return write_vram(e, addr & ADDR_MASK_8K, value);
-
-    case 0xA:
-    case 0xB:
-      return write_external_ram(e, addr & ADDR_MASK_8K, value);
-
-    case 0xC:
-    case 0xE:
-      return write_work_ram(e, addr & ADDR_MASK_4K, value);
-
-    case 0xD:
-      return write_work_ram_bank_switch(e, addr & ADDR_MASK_4K, value);
-
-    case 0xF:
-      if (addr < 0xFE00) {
-        return write_work_ram_bank_switch(e, addr & ADDR_MASK_4K, value);
-      } else {
-        return write_hardware(e, addr, value);
-      }
+  struct MemoryTypeAddressPair pair = map_address(addr);
+  switch (pair.type) {
+    case MEMORY_MAP_ROM:
+      e->memory_map.write_rom(e, pair.addr, value);
       break;
 
-    default:
-      UNREACHABLE("write_u8: invalid address: 0x%04X\n", addr);
+    case MEMORY_MAP_ROM_BANK_SWITCH:
+      /* TODO(binji): cleanup */
+      e->memory_map.write_rom(e, pair.addr + 0x4000, value);
+      break;
+
+    case MEMORY_MAP_VRAM:
+      return write_vram(e, pair.addr, value);
+
+    case MEMORY_MAP_EXTERNAL_RAM:
+      return write_external_ram(e, pair.addr, value);
+
+    case MEMORY_MAP_WORK_RAM:
+      e->ram.data[pair.addr] = value;
+      break;
+
+    case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
+      e->memory_map.write_work_ram_bank_switch(e, pair.addr, value);
+      break;
+
+    case MEMORY_MAP_OAM:
+      NOT_IMPLEMENTED("OAM write not implemented.\n");
+      break;
+
+    case MEMORY_MAP_UNUSED:
+      break;
+
+    case MEMORY_MAP_HARDWARE:
+      return write_hardware(e, pair.addr, value);
+
+    case MEMORY_MAP_HIGH_RAM:
+      e->hram[pair.addr] = value;
       break;
   }
 }
