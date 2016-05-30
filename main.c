@@ -69,6 +69,14 @@ typedef uint16_t MaskedAddress;
 #define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 #define WORK_RAM_SIZE 32768
 
+#define GB_CYCLES_PER_SECOND 4194304
+#define FRAME_CYCLES 70224
+#define LINE_CYCLES 456
+#define HBLANK_CYCLES 204         /* LCD STAT mode 0 */
+#define VBLANK_CYCLES 4560        /* LCD STAT mode 1 */
+#define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
+#define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
+
 #define ADDR_MASK_4K 0x0fff
 #define ADDR_MASK_8K 0x1fff
 #define ADDR_MASK_16K 0x3fff
@@ -88,6 +96,40 @@ typedef uint16_t MaskedAddress;
 #define FLAG_N_MASK (1 << FLAG_N_SHIFT)
 #define FLAG_H_MASK (1 << FLAG_H_SHIFT)
 #define FLAG_C_MASK (1 << FLAG_C_SHIFT)
+
+#define HW_IF_ADDR 0xff0f
+#define HW_LCDC_ADDR 0xff40
+#define HW_STAT_ADDR 0xff41
+#define HW_SCY_ADDR 0xff42
+#define HW_SCX_ADDR 0xff43
+#define HW_LY_ADDR 0xff44
+#define HW_LYC_ADDR 0xff45
+#define HW_IE_ADDR 0xffff
+
+#define INTERRUPT_VBLANK_MASK 0x01
+#define INTERRUPT_LCD_STAT_MASK 0x02
+#define INTERRUPT_TIMER_MASK 0x04
+#define INTERRUPT_SERIAL_MASK 0x08
+#define INTERRUPT_JOYPAD_MASK 0x10
+
+#define BIT(X, SHIFT) (((X) & 1) << (SHIFT))
+#define TEST(X, MACRO) (((X) & MACRO(1)) != 0)
+
+#define LCDC_DISPLAY(X) BIT(X, 7)
+#define LCDC_WINDOW_TILE_MAP_SELECT(X) BIT(X, 6)
+#define LCDC_WINDOW_DISPLAY(X) BIT(X, 5)
+#define LCDC_BG_TILE_DATA_SELECT(X) BIT(X, 4)
+#define LCDC_BG_TILE_MAP_SELECT(X) BIT(X, 3)
+#define LCDC_OBJ_SIZE(X) BIT(X, 2)
+#define LCDC_OBJ_DISPLAY(X) BIT(X, 1)
+#define LCDC_BG_DISPLAY(X) BIT(X, 0)
+
+#define STAT_YCOMPARE_INTR(X) BIT(X, 6)
+#define STAT_USING_OAM_INTR(X) BIT(X, 5)
+#define STAT_VBLANK_INTR(X) BIT(X, 4)
+#define STAT_HBLANK_INTR(X) BIT(X, 3)
+#define STAT_YCOMPARE(X) BIT(X, 2)
+#define STAT_MODE(X) ((X) & 3)
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -205,6 +247,13 @@ enum BankMode {
   BANK_MODE_RAM = 1,
 };
 
+enum LCDMode {
+  LCD_MODE_HBLANK = 0,         /* LCD mode 0 */
+  LCD_MODE_VBLANK = 1,         /* LCD mode 1 */
+  LCD_MODE_USING_OAM = 2,      /* LCD mode 2 */
+  LCD_MODE_USING_OAM_VRAM = 3, /* LCD mode 3 */
+};
+
 struct RomData {
   uint8_t* data;
   size_t size;
@@ -278,13 +327,49 @@ struct Registers {
   } flags;
 };
 
+struct Interrupts {
+  enum Bool IME; /* Interrupt Master Enable */
+  uint8_t IE;    /* Interrupt Enable */
+  uint8_t IF;    /* Interrupt Request */
+};
+
+struct LCDControl {
+  enum Bool display;
+  enum Bool window_tile_map_select;
+  enum Bool window_display;
+  enum Bool bg_tile_data_select;
+  enum Bool bg_tile_map_select;
+  enum Bool obj_size;
+  enum Bool obj_display;
+  enum Bool bg_display;
+};
+
+struct LCDStatus {
+  enum Bool y_compare_intr;
+  enum Bool using_oam_intr;
+  enum Bool vblank_intr;
+  enum Bool hblank_intr;
+  enum LCDMode mode;
+};
+
+struct LCD {
+  struct LCDControl lcdc; /* LCD control */
+  struct LCDStatus stat;  /* LCD status */
+  uint8_t SCY;            /* Screen Y */
+  uint8_t SCX;            /* Screen X */
+  uint8_t LY;             /* Line Y */
+  uint8_t LYC;            /* Line Y Compare */
+};
+
 struct Emulator {
   struct RomData rom_data;
   struct RomInfo rom_info;
   struct MemoryMap memory_map;
   struct Registers reg;
   struct WorkRam ram;
-  enum Bool IME;
+  struct Interrupts interrupts;
+  struct LCD lcd;
+  uint32_t cycles;
 };
 
 enum Result read_rom_data_from_file(const char* filename,
@@ -580,7 +665,7 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   print_rom_info(&e->rom_info);
 #endif
   CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
-  e->IME = 1;
+  e->interrupts.IME = 1;
   return OK;
 error:
   return ERROR;
@@ -616,6 +701,30 @@ uint8_t read_work_ram_bank_switch(struct Emulator* e, MaskedAddress addr) {
 }
 
 uint8_t read_hardware(struct Emulator* e, Address addr) {
+  switch (addr) {
+    case HW_IF_ADDR: return e->interrupts.IF;
+    case HW_LCDC_ADDR:
+      return LCDC_DISPLAY(e->lcd.lcdc.display) |
+             LCDC_WINDOW_TILE_MAP_SELECT(e->lcd.lcdc.window_tile_map_select) |
+             LCDC_WINDOW_DISPLAY(e->lcd.lcdc.window_display) |
+             LCDC_BG_TILE_DATA_SELECT(e->lcd.lcdc.bg_tile_data_select) |
+             LCDC_BG_TILE_MAP_SELECT(e->lcd.lcdc.bg_tile_map_select) |
+             LCDC_OBJ_SIZE(e->lcd.lcdc.obj_size) |
+             LCDC_OBJ_DISPLAY(e->lcd.lcdc.obj_display) |
+             LCDC_BG_DISPLAY(e->lcd.lcdc.bg_display);
+    case HW_STAT_ADDR:
+      return STAT_YCOMPARE_INTR(e->lcd.stat.y_compare_intr) |
+             STAT_USING_OAM_INTR(e->lcd.stat.using_oam_intr) |
+             STAT_VBLANK_INTR(e->lcd.stat.vblank_intr) |
+             STAT_HBLANK_INTR(e->lcd.stat.hblank_intr) |
+             STAT_YCOMPARE(e->lcd.LY == e->lcd.LYC) |
+             STAT_MODE(e->lcd.stat.mode);
+    case HW_SCY_ADDR: return e->lcd.SCY;
+    case HW_SCX_ADDR: return e->lcd.SCX;
+    case HW_IE_ADDR: return e->interrupts.IE;
+    default:
+      break;
+  }
   NOT_IMPLEMENTED("hardware not implemented. Addr: 0x%04x\n", addr);
   return 0;
 }
@@ -693,7 +802,32 @@ void write_work_ram_bank_switch(struct Emulator* e,
 }
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
+  switch (addr) {
+    case HW_IF_ADDR: e->interrupts.IF = value; break;
+    case HW_LCDC_ADDR:
+      e->lcd.lcdc.display = TEST(value, LCDC_DISPLAY);
+      e->lcd.lcdc.window_tile_map_select =
+          TEST(value, LCDC_WINDOW_TILE_MAP_SELECT);
+      e->lcd.lcdc.window_display = TEST(value, LCDC_WINDOW_DISPLAY);
+      e->lcd.lcdc.bg_tile_data_select = TEST(value, LCDC_BG_TILE_DATA_SELECT);
+      e->lcd.lcdc.bg_tile_map_select = TEST(value, LCDC_BG_TILE_MAP_SELECT);
+      e->lcd.lcdc.obj_size = TEST(value, LCDC_OBJ_SIZE);
+      e->lcd.lcdc.obj_display = TEST(value, LCDC_OBJ_DISPLAY);
+      e->lcd.lcdc.bg_display = TEST(value, LCDC_BG_DISPLAY);
+      break;
+    case HW_STAT_ADDR:
+      e->lcd.stat.y_compare_intr = TEST(value, STAT_YCOMPARE_INTR);
+      e->lcd.stat.using_oam_intr = TEST(value, STAT_USING_OAM_INTR);
+      e->lcd.stat.vblank_intr = TEST(value, STAT_VBLANK_INTR);
+      e->lcd.stat.hblank_intr = TEST(value, STAT_HBLANK_INTR);
+      break;
+    case HW_SCY_ADDR: e->lcd.SCY = value; break;
+    case HW_SCX_ADDR: e->lcd.SCX = value; break;
+    case HW_IE_ADDR: e->interrupts.IE = value; break;
+    default:
+      NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
+      break;
+  }
 }
 
 void write_u8(struct Emulator* e, Address addr, uint8_t value) {
@@ -1094,7 +1228,7 @@ const char* s_cb_opcode_mnemonic[] = {
 };
 
 /* Returns the opcode size. */
-uint8_t print_instruction(struct Emulator* e, Address addr, enum Bool newline) {
+uint8_t print_instruction(struct Emulator* e, Address addr) {
   uint8_t opcode = read_u8(e, addr);
   uint8_t bytes;
   if (opcode == 0xcb) {
@@ -1133,14 +1267,11 @@ uint8_t print_instruction(struct Emulator* e, Address addr, enum Bool newline) {
         break;
     }
   }
-  if (newline) {
-    printf("\n");
-  }
   return bytes;
 }
 
 void print_registers(struct Registers* reg) {
-  printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x\n", reg->A,
+  printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
          reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
          reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
          reg->HL, reg->SP, reg->PC);
@@ -1192,6 +1323,7 @@ uint8_t s_cb_opcode_cycles[] = {
 
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
+#define CYCLES(X) cycles += (X)
 #define COND_NZ (!FLAG(Z))
 #define COND_Z FLAG(Z)
 #define COND_NC (!FLAG(C))
@@ -1211,286 +1343,363 @@ uint8_t s_cb_opcode_cycles[] = {
 #define LD_MR_R(MR, R) WRITE8(REG(MR), REG(R))
 #define LD_MR_N(MR) WRITE8(REG(MR), READ_N)
 #define LD_MN_R(R) WRITE8(READ_NN, REG(R))
-#define JR_F_N(COND) if (COND) { JR_N(); }
+#define LD_MFF00_N_R(R) WRITE8(0xFF00 + READ_N, REG(A))
+#define LD_MFF00_R_R(R1, R2) WRITE8(0xFF00 + REG(R1), REG(R2))
+#define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
+#define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
+#define JR_F_N(COND) if (COND) { JR_N(); CYCLES(4); }
 #define JR_N(COND) new_pc += (int8_t)READ_N
-#define JP_F_NN(COND) if (COND) { JP_NN(); }
+#define JP_F_NN(COND) if (COND) { JP_NN(); CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
 #define JP_NN() new_pc = READ_NN
 #define XOR_R(R) REG(A) ^= REG(R); SET_Z_FROM(REG(A))
 #define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z_FROM(REG(A))
-#define DEC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 1; FLAG(H) = X == 0xf
+#define DEC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 1; FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
-#define DEC_MR(MR) u8 = READ8(REG(MR)); WRITE8(REG(MR), u8); DEC_FLAGS(u8)
+#define DEC_MR(MR) u8 = READ8(REG(MR)) - 1; WRITE8(REG(MR), u8); DEC_FLAGS(u8)
+#define INC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 0; FLAG(H) = (X & 0xf) == 0
+#define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
+#define INC_RR(RR) REG(RR)++
+#define INC_MR(MR) u8 = READ8(REG(MR)) + 1; WRITE8(REG(MR), u8); INC_FLAGS(u8)
 
-void execute_instruction(struct Emulator* e) {
+/* Returns the number of cycles executed */
+uint8_t execute_instruction(struct Emulator* e) {
+  uint8_t cycles = 0;
   uint8_t u8;
-  print_instruction(e, e->reg.PC, FALSE);
+  print_instruction(e, e->reg.PC);
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
-  switch (opcode) {
-    case 0x00: break;
-    case 0x01: LD_RR_NN(BC); break;
-    case 0x02: LD_MR_R(BC, A); break;
-    case 0x03: NI; break;
-    case 0x04: NI; break;
-    case 0x05: DEC_R(B); break;
-    case 0x06: LD_R_N(B); break;
-    case 0x07: NI; break;
-    case 0x08: NI; break;
-    case 0x09: NI; break;
-    case 0x0a: LD_R_MR(A, BC); break;
-    case 0x0b: DEC_RR(BC); break;
-    case 0x0c: NI; break;
-    case 0x0d: DEC_R(C); break;
-    case 0x0e: LD_R_N(C); break;
-    case 0x0f: NI; break;
-    case 0x10: NI; break;
-    case 0x11: LD_RR_NN(DE); break;
-    case 0x12: LD_MR_R(DE, A); break;
-    case 0x13: NI; break;
-    case 0x14: NI; break;
-    case 0x15: DEC_R(D); break;
-    case 0x16: LD_R_N(D); break;
-    case 0x17: NI; break;
-    case 0x18: JR_N(); break;
-    case 0x19: NI; break;
-    case 0x1a: LD_R_MR(A, DE); break;
-    case 0x1b: DEC_RR(DE); break;
-    case 0x1c: NI; break;
-    case 0x1d: DEC_R(E); break;
-    case 0x1e: LD_R_N(E); break;
-    case 0x1f: NI; break;
-    case 0x20: JR_F_N(COND_NZ); break;
-    case 0x21: LD_RR_NN(HL); break;
-    case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
-    case 0x23: NI; break;
-    case 0x24: NI; break;
-    case 0x25: DEC_R(H); break;
-    case 0x26: LD_R_N(H); break;
-    case 0x27: NI; break;
-    case 0x28: JR_F_N(COND_Z); break;
-    case 0x29: NI; break;
-    case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
-    case 0x2b: DEC_RR(HL); break;
-    case 0x2c: NI; break;
-    case 0x2d: DEC_R(L); break;
-    case 0x2e: LD_R_N(L); break;
-    case 0x2f: NI; break;
-    case 0x30: JR_F_N(COND_NC); break;
-    case 0x31: LD_RR_NN(SP); break;
-    case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
-    case 0x33: NI; break;
-    case 0x34: NI; break;
-    case 0x35: DEC_MR(HL); break;
-    case 0x36: LD_MR_N(HL); break;
-    case 0x37: NI; break;
-    case 0x38: JR_F_N(COND_C); break;
-    case 0x39: NI; break;
-    case 0x3a: LD_MR_R(HL, A); REG(HL)--; break;
-    case 0x3b: DEC_RR(SP); break;
-    case 0x3c: NI; break;
-    case 0x3d: DEC_R(A); break;
-    case 0x3e: LD_R_N(A); break;
-    case 0x3f: NI; break;
-    case 0x40: LD_R_R(B, B); break;
-    case 0x41: LD_R_R(B, C); break;
-    case 0x42: LD_R_R(B, D); break;
-    case 0x43: LD_R_R(B, E); break;
-    case 0x44: LD_R_R(B, H); break;
-    case 0x45: LD_R_R(B, L); break;
-    case 0x46: LD_R_MR(B, HL); break;
-    case 0x47: LD_R_R(B, A); break;
-    case 0x48: LD_R_R(C, B); break;
-    case 0x49: LD_R_R(C, C); break;
-    case 0x4a: LD_R_R(C, D); break;
-    case 0x4b: LD_R_R(C, E); break;
-    case 0x4c: LD_R_R(C, H); break;
-    case 0x4d: LD_R_R(C, L); break;
-    case 0x4e: LD_R_MR(C, HL); break;
-    case 0x4f: LD_R_R(D, A); break;
-    case 0x50: LD_R_R(D, B); break;
-    case 0x51: LD_R_R(D, C); break;
-    case 0x52: LD_R_R(D, D); break;
-    case 0x53: LD_R_R(D, E); break;
-    case 0x54: LD_R_R(D, H); break;
-    case 0x55: LD_R_R(D, L); break;
-    case 0x56: LD_R_MR(D, HL); break;
-    case 0x57: LD_R_R(D, A); break;
-    case 0x58: LD_R_R(E, B); break;
-    case 0x59: LD_R_R(E, C); break;
-    case 0x5a: LD_R_R(E, D); break;
-    case 0x5b: LD_R_R(E, E); break;
-    case 0x5c: LD_R_R(E, H); break;
-    case 0x5d: LD_R_R(E, L); break;
-    case 0x5e: LD_R_MR(E, HL); break;
-    case 0x5f: LD_R_R(E, A); break;
-    case 0x60: LD_R_R(H, B); break;
-    case 0x61: LD_R_R(H, C); break;
-    case 0x62: LD_R_R(H, D); break;
-    case 0x63: LD_R_R(H, E); break;
-    case 0x64: LD_R_R(H, H); break;
-    case 0x65: LD_R_R(H, L); break;
-    case 0x66: LD_R_MR(H, HL); break;
-    case 0x67: LD_R_R(H, A); break;
-    case 0x68: LD_R_R(L, B); break;
-    case 0x69: LD_R_R(L, C); break;
-    case 0x6a: LD_R_R(L, D); break;
-    case 0x6b: LD_R_R(L, E); break;
-    case 0x6c: LD_R_R(L, H); break;
-    case 0x6d: LD_R_R(L, L); break;
-    case 0x6e: LD_R_MR(L, HL); break;
-    case 0x6f: LD_R_R(L, A); break;
-    case 0x70: LD_MR_R(HL, B); break;
-    case 0x71: LD_MR_R(HL, C); break;
-    case 0x72: LD_MR_R(HL, D); break;
-    case 0x73: LD_MR_R(HL, E); break;
-    case 0x74: LD_MR_R(HL, H); break;
-    case 0x75: LD_MR_R(HL, L); break;
-    case 0x76: NI; break;
-    case 0x77: LD_MR_R(HL, A); break;
-    case 0x78: LD_R_R(A, B); break;
-    case 0x79: LD_R_R(A, C); break;
-    case 0x7a: LD_R_R(A, D); break;
-    case 0x7b: LD_R_R(A, E); break;
-    case 0x7c: LD_R_R(A, H); break;
-    case 0x7d: LD_R_R(A, L); break;
-    case 0x7e: LD_R_MR(A, HL); break;
-    case 0x7f: LD_R_R(A, A); break;
-    case 0x80: NI; break;
-    case 0x81: NI; break;
-    case 0x82: NI; break;
-    case 0x83: NI; break;
-    case 0x84: NI; break;
-    case 0x85: NI; break;
-    case 0x86: NI; break;
-    case 0x87: NI; break;
-    case 0x88: NI; break;
-    case 0x89: NI; break;
-    case 0x8a: NI; break;
-    case 0x8b: NI; break;
-    case 0x8c: NI; break;
-    case 0x8d: NI; break;
-    case 0x8e: NI; break;
-    case 0x8f: NI; break;
-    case 0x90: NI; break;
-    case 0x91: NI; break;
-    case 0x92: NI; break;
-    case 0x93: NI; break;
-    case 0x94: NI; break;
-    case 0x95: NI; break;
-    case 0x96: NI; break;
-    case 0x97: NI; break;
-    case 0x98: NI; break;
-    case 0x99: NI; break;
-    case 0x9a: NI; break;
-    case 0x9b: NI; break;
-    case 0x9c: NI; break;
-    case 0x9d: NI; break;
-    case 0x9e: NI; break;
-    case 0x9f: NI; break;
-    case 0xa0: NI; break;
-    case 0xa1: NI; break;
-    case 0xa2: NI; break;
-    case 0xa3: NI; break;
-    case 0xa4: NI; break;
-    case 0xa5: NI; break;
-    case 0xa6: NI; break;
-    case 0xa7: NI; break;
-    case 0xa8: XOR_R(B); break;
-    case 0xa9: XOR_R(C); break;
-    case 0xaa: XOR_R(D); break;
-    case 0xab: XOR_R(E); break;
-    case 0xac: XOR_R(H); break;
-    case 0xad: XOR_R(L); break;
-    case 0xae: XOR_MR(HL); break;
-    case 0xaf: XOR_R(A); break;
-    case 0xb0: NI; break;
-    case 0xb1: NI; break;
-    case 0xb2: NI; break;
-    case 0xb3: NI; break;
-    case 0xb4: NI; break;
-    case 0xb5: NI; break;
-    case 0xb6: NI; break;
-    case 0xb7: NI; break;
-    case 0xb8: NI; break;
-    case 0xb9: NI; break;
-    case 0xba: NI; break;
-    case 0xbb: NI; break;
-    case 0xbc: NI; break;
-    case 0xbd: NI; break;
-    case 0xbe: NI; break;
-    case 0xbf: NI; break;
-    case 0xc0: NI; break;
-    case 0xc1: NI; break;
-    case 0xc2: JP_F_NN(COND_NZ); break;
-    case 0xc3: JP_NN(); break;
-    case 0xc4: NI; break;
-    case 0xc5: NI; break;
-    case 0xc6: NI; break;
-    case 0xc7: NI; break;
-    case 0xc8: NI; break;
-    case 0xc9: NI; break;
-    case 0xca: JP_F_NN(COND_Z); break;
-    case 0xcb: NI; break;
-    case 0xcc: NI; break;
-    case 0xcd: NI; break;
-    case 0xce: NI; break;
-    case 0xcf: NI; break;
-    case 0xd0: NI; break;
-    case 0xd1: NI; break;
-    case 0xd2: JP_F_NN(COND_NC); break;
-    case 0xd3: NI; break;
-    case 0xd4: NI; break;
-    case 0xd5: NI; break;
-    case 0xd6: NI; break;
-    case 0xd7: NI; break;
-    case 0xd8: NI; break;
-    case 0xd9: NI; break;
-    case 0xda: JP_F_NN(COND_C); break;
-    case 0xdb: NI; break;
-    case 0xdc: NI; break;
-    case 0xdd: NI; break;
-    case 0xde: NI; break;
-    case 0xdf: NI; break;
-    case 0xe0: NI; break;
-    case 0xe1: NI; break;
-    case 0xe2: NI; break;
-    case 0xe3: NI; break;
-    case 0xe4: NI; break;
-    case 0xe5: NI; break;
-    case 0xe6: NI; break;
-    case 0xe7: NI; break;
-    case 0xe8: NI; break;
-    case 0xe9: JP_RR(HL); break;
-    case 0xea: LD_MN_R(A); break;
-    case 0xeb: NI; break;
-    case 0xec: NI; break;
-    case 0xed: NI; break;
-    case 0xee: NI; break;
-    case 0xef: NI; break;
-    case 0xf0: NI; break;
-    case 0xf1: NI; break;
-    case 0xf2: NI; break;
-    case 0xf3: e->IME = 0; break;
-    case 0xf4: NI; break;
-    case 0xf5: NI; break;
-    case 0xf6: NI; break;
-    case 0xf7: NI; break;
-    case 0xf8: NI; break;
-    case 0xf9: LD_RR_RR(SP, HL); break;
-    case 0xfa: LD_R_MN(A); break;
-    case 0xfb: e->IME = 1; break;
-    case 0xfc: NI; break;
-    case 0xfd: NI; break;
-    case 0xfe: NI; break;
-    case 0xff: NI; break;
-    default:
-      UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
-      break;
+  if (opcode == 0xcb) {
+    uint8_t opcode = read_u8(e, e->reg.PC + 1);
+    cycles = s_cb_opcode_cycles[opcode];
+    // TODO
+    NI;
+  } else {
+    cycles = s_opcode_cycles[opcode];
+    switch (opcode) {
+      case 0x00: break;
+      case 0x01: LD_RR_NN(BC); break;
+      case 0x02: LD_MR_R(BC, A); break;
+      case 0x03: INC_RR(BC); break;
+      case 0x04: INC_R(B); break;
+      case 0x05: DEC_R(B); break;
+      case 0x06: LD_R_N(B); break;
+      case 0x07: NI; break;
+      case 0x08: NI; break;
+      case 0x09: NI; break;
+      case 0x0a: LD_R_MR(A, BC); break;
+      case 0x0b: DEC_RR(BC); break;
+      case 0x0c: INC_R(C); break;
+      case 0x0d: DEC_R(C); break;
+      case 0x0e: LD_R_N(C); break;
+      case 0x0f: NI; break;
+      case 0x10: NI; break;
+      case 0x11: LD_RR_NN(DE); break;
+      case 0x12: LD_MR_R(DE, A); break;
+      case 0x13: INC_RR(DE); break;
+      case 0x14: INC_R(D); break;
+      case 0x15: DEC_R(D); break;
+      case 0x16: LD_R_N(D); break;
+      case 0x17: NI; break;
+      case 0x18: JR_N(); break;
+      case 0x19: NI; break;
+      case 0x1a: LD_R_MR(A, DE); break;
+      case 0x1b: DEC_RR(DE); break;
+      case 0x1c: INC_R(E); break;
+      case 0x1d: DEC_R(E); break;
+      case 0x1e: LD_R_N(E); break;
+      case 0x1f: NI; break;
+      case 0x20: JR_F_N(COND_NZ); break;
+      case 0x21: LD_RR_NN(HL); break;
+      case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
+      case 0x23: INC_RR(HL); break;
+      case 0x24: INC_R(H); break;
+      case 0x25: DEC_R(H); break;
+      case 0x26: LD_R_N(H); break;
+      case 0x27: NI; break;
+      case 0x28: JR_F_N(COND_Z); break;
+      case 0x29: NI; break;
+      case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
+      case 0x2b: DEC_RR(HL); break;
+      case 0x2c: INC_R(L); break;
+      case 0x2d: DEC_R(L); break;
+      case 0x2e: LD_R_N(L); break;
+      case 0x2f: NI; break;
+      case 0x30: JR_F_N(COND_NC); break;
+      case 0x31: LD_RR_NN(SP); break;
+      case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
+      case 0x33: INC_RR(SP); break;
+      case 0x34: INC_MR(HL); break;
+      case 0x35: DEC_MR(HL); break;
+      case 0x36: LD_MR_N(HL); break;
+      case 0x37: NI; break;
+      case 0x38: JR_F_N(COND_C); break;
+      case 0x39: NI; break;
+      case 0x3a: LD_MR_R(HL, A); REG(HL)--; break;
+      case 0x3b: DEC_RR(SP); break;
+      case 0x3c: INC_R(A); break;
+      case 0x3d: DEC_R(A); break;
+      case 0x3e: LD_R_N(A); break;
+      case 0x3f: NI; break;
+      case 0x40: LD_R_R(B, B); break;
+      case 0x41: LD_R_R(B, C); break;
+      case 0x42: LD_R_R(B, D); break;
+      case 0x43: LD_R_R(B, E); break;
+      case 0x44: LD_R_R(B, H); break;
+      case 0x45: LD_R_R(B, L); break;
+      case 0x46: LD_R_MR(B, HL); break;
+      case 0x47: LD_R_R(B, A); break;
+      case 0x48: LD_R_R(C, B); break;
+      case 0x49: LD_R_R(C, C); break;
+      case 0x4a: LD_R_R(C, D); break;
+      case 0x4b: LD_R_R(C, E); break;
+      case 0x4c: LD_R_R(C, H); break;
+      case 0x4d: LD_R_R(C, L); break;
+      case 0x4e: LD_R_MR(C, HL); break;
+      case 0x4f: LD_R_R(D, A); break;
+      case 0x50: LD_R_R(D, B); break;
+      case 0x51: LD_R_R(D, C); break;
+      case 0x52: LD_R_R(D, D); break;
+      case 0x53: LD_R_R(D, E); break;
+      case 0x54: LD_R_R(D, H); break;
+      case 0x55: LD_R_R(D, L); break;
+      case 0x56: LD_R_MR(D, HL); break;
+      case 0x57: LD_R_R(D, A); break;
+      case 0x58: LD_R_R(E, B); break;
+      case 0x59: LD_R_R(E, C); break;
+      case 0x5a: LD_R_R(E, D); break;
+      case 0x5b: LD_R_R(E, E); break;
+      case 0x5c: LD_R_R(E, H); break;
+      case 0x5d: LD_R_R(E, L); break;
+      case 0x5e: LD_R_MR(E, HL); break;
+      case 0x5f: LD_R_R(E, A); break;
+      case 0x60: LD_R_R(H, B); break;
+      case 0x61: LD_R_R(H, C); break;
+      case 0x62: LD_R_R(H, D); break;
+      case 0x63: LD_R_R(H, E); break;
+      case 0x64: LD_R_R(H, H); break;
+      case 0x65: LD_R_R(H, L); break;
+      case 0x66: LD_R_MR(H, HL); break;
+      case 0x67: LD_R_R(H, A); break;
+      case 0x68: LD_R_R(L, B); break;
+      case 0x69: LD_R_R(L, C); break;
+      case 0x6a: LD_R_R(L, D); break;
+      case 0x6b: LD_R_R(L, E); break;
+      case 0x6c: LD_R_R(L, H); break;
+      case 0x6d: LD_R_R(L, L); break;
+      case 0x6e: LD_R_MR(L, HL); break;
+      case 0x6f: LD_R_R(L, A); break;
+      case 0x70: LD_MR_R(HL, B); break;
+      case 0x71: LD_MR_R(HL, C); break;
+      case 0x72: LD_MR_R(HL, D); break;
+      case 0x73: LD_MR_R(HL, E); break;
+      case 0x74: LD_MR_R(HL, H); break;
+      case 0x75: LD_MR_R(HL, L); break;
+      case 0x76: NI; break;
+      case 0x77: LD_MR_R(HL, A); break;
+      case 0x78: LD_R_R(A, B); break;
+      case 0x79: LD_R_R(A, C); break;
+      case 0x7a: LD_R_R(A, D); break;
+      case 0x7b: LD_R_R(A, E); break;
+      case 0x7c: LD_R_R(A, H); break;
+      case 0x7d: LD_R_R(A, L); break;
+      case 0x7e: LD_R_MR(A, HL); break;
+      case 0x7f: LD_R_R(A, A); break;
+      case 0x80: NI; break;
+      case 0x81: NI; break;
+      case 0x82: NI; break;
+      case 0x83: NI; break;
+      case 0x84: NI; break;
+      case 0x85: NI; break;
+      case 0x86: NI; break;
+      case 0x87: NI; break;
+      case 0x88: NI; break;
+      case 0x89: NI; break;
+      case 0x8a: NI; break;
+      case 0x8b: NI; break;
+      case 0x8c: NI; break;
+      case 0x8d: NI; break;
+      case 0x8e: NI; break;
+      case 0x8f: NI; break;
+      case 0x90: NI; break;
+      case 0x91: NI; break;
+      case 0x92: NI; break;
+      case 0x93: NI; break;
+      case 0x94: NI; break;
+      case 0x95: NI; break;
+      case 0x96: NI; break;
+      case 0x97: NI; break;
+      case 0x98: NI; break;
+      case 0x99: NI; break;
+      case 0x9a: NI; break;
+      case 0x9b: NI; break;
+      case 0x9c: NI; break;
+      case 0x9d: NI; break;
+      case 0x9e: NI; break;
+      case 0x9f: NI; break;
+      case 0xa0: NI; break;
+      case 0xa1: NI; break;
+      case 0xa2: NI; break;
+      case 0xa3: NI; break;
+      case 0xa4: NI; break;
+      case 0xa5: NI; break;
+      case 0xa6: NI; break;
+      case 0xa7: NI; break;
+      case 0xa8: XOR_R(B); break;
+      case 0xa9: XOR_R(C); break;
+      case 0xaa: XOR_R(D); break;
+      case 0xab: XOR_R(E); break;
+      case 0xac: XOR_R(H); break;
+      case 0xad: XOR_R(L); break;
+      case 0xae: XOR_MR(HL); break;
+      case 0xaf: XOR_R(A); break;
+      case 0xb0: NI; break;
+      case 0xb1: NI; break;
+      case 0xb2: NI; break;
+      case 0xb3: NI; break;
+      case 0xb4: NI; break;
+      case 0xb5: NI; break;
+      case 0xb6: NI; break;
+      case 0xb7: NI; break;
+      case 0xb8: NI; break;
+      case 0xb9: NI; break;
+      case 0xba: NI; break;
+      case 0xbb: NI; break;
+      case 0xbc: NI; break;
+      case 0xbd: NI; break;
+      case 0xbe: NI; break;
+      case 0xbf: NI; break;
+      case 0xc0: NI; break;
+      case 0xc1: NI; break;
+      case 0xc2: JP_F_NN(COND_NZ); break;
+      case 0xc3: JP_NN(); break;
+      case 0xc4: NI; break;
+      case 0xc5: NI; break;
+      case 0xc6: NI; break;
+      case 0xc7: NI; break;
+      case 0xc8: NI; break;
+      case 0xc9: NI; break;
+      case 0xca: JP_F_NN(COND_Z); break;
+      case 0xcb: NI; break;
+      case 0xcc: NI; break;
+      case 0xcd: NI; break;
+      case 0xce: NI; break;
+      case 0xcf: NI; break;
+      case 0xd0: NI; break;
+      case 0xd1: NI; break;
+      case 0xd2: JP_F_NN(COND_NC); break;
+      case 0xd3: NI; break;
+      case 0xd4: NI; break;
+      case 0xd5: NI; break;
+      case 0xd6: NI; break;
+      case 0xd7: NI; break;
+      case 0xd8: NI; break;
+      case 0xd9: NI; break;
+      case 0xda: JP_F_NN(COND_C); break;
+      case 0xdb: NI; break;
+      case 0xdc: NI; break;
+      case 0xdd: NI; break;
+      case 0xde: NI; break;
+      case 0xdf: NI; break;
+      case 0xe0: LD_MFF00_N_R(A); break;
+      case 0xe1: NI; break;
+      case 0xe2: LD_MFF00_R_R(C, A); break;
+      case 0xe3: NI; break;
+      case 0xe4: NI; break;
+      case 0xe5: NI; break;
+      case 0xe6: NI; break;
+      case 0xe7: NI; break;
+      case 0xe8: NI; break;
+      case 0xe9: JP_RR(HL); break;
+      case 0xea: LD_MN_R(A); break;
+      case 0xeb: NI; break;
+      case 0xec: NI; break;
+      case 0xed: NI; break;
+      case 0xee: NI; break;
+      case 0xef: NI; break;
+      case 0xf0: LD_R_MFF00_N(A); break;
+      case 0xf1: LD_R_MFF00_R(A, C); break;
+      case 0xf2: NI; break;
+      case 0xf3: e->interrupts.IME = 0; break;
+      case 0xf4: NI; break;
+      case 0xf5: NI; break;
+      case 0xf6: NI; break;
+      case 0xf7: NI; break;
+      case 0xf8: NI; break;
+      case 0xf9: LD_RR_RR(SP, HL); break;
+      case 0xfa: LD_R_MN(A); break;
+      case 0xfb: e->interrupts.IME = 1; break;
+      case 0xfc: NI; break;
+      case 0xfd: NI; break;
+      case 0xfe: NI; break;
+      case 0xff: NI; break;
+      default:
+        UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
+        break;
+    }
   }
   e->reg.PC = new_pc;
   print_registers(&e->reg);
+  return cycles;
+}
+
+void update_cycles(struct Emulator* e, uint8_t cycles) {
+  enum Bool line_edge = FALSE;
+  e->cycles += cycles;
+  switch (e->lcd.stat.mode) {
+    case LCD_MODE_USING_OAM:
+      if (e->cycles >= USING_OAM_CYCLES) {
+        e->cycles -= USING_OAM_CYCLES;
+        e->lcd.stat.mode = LCD_MODE_USING_OAM_VRAM;
+      }
+      break;
+    case LCD_MODE_USING_OAM_VRAM:
+      if (e->cycles >= USING_OAM_VRAM_CYCLES) {
+        e->cycles -= USING_OAM_VRAM_CYCLES;
+        e->lcd.stat.mode = LCD_MODE_HBLANK;
+        if (e->lcd.stat.hblank_intr) {
+          e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+        }
+      }
+      break;
+    case LCD_MODE_HBLANK:
+      if (e->cycles >= HBLANK_CYCLES) {
+        line_edge = TRUE;
+        e->cycles -= HBLANK_CYCLES;
+        e->lcd.LY++;
+        if (e->lcd.LY == 144) {
+          e->lcd.stat.mode = LCD_MODE_VBLANK;
+          e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
+          if (e->lcd.stat.vblank_intr) {
+            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+          }
+        } else {
+          e->lcd.stat.mode = LCD_MODE_USING_OAM;
+          if (e->lcd.stat.using_oam_intr) {
+            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+          }
+        }
+      }
+      break;
+    case LCD_MODE_VBLANK:
+      if (e->cycles >= LINE_CYCLES) {
+        line_edge = TRUE;
+        e->cycles -= LINE_CYCLES;
+        e->lcd.LY++;
+        if (e->lcd.LY == 154) {
+          e->lcd.LY = 0;
+          e->lcd.stat.mode = LCD_MODE_USING_OAM;
+          if (e->lcd.stat.using_oam_intr) {
+            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+          }
+        }
+      }
+      break;
+  }
+  if (line_edge && e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC) {
+    e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+  }
 }
 
 int main(int argc, char** argv) {
@@ -1500,9 +1709,12 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   struct Emulator emulator;
   ZERO_MEMORY(emulator);
-  CHECK(SUCCESS(init_emulator(&emulator, &rom_data)));
+  struct Emulator* e = &emulator;
+  CHECK(SUCCESS(init_emulator(e, &rom_data)));
   while (1) {
-    execute_instruction(&emulator);
+    uint8_t cycles = execute_instruction(e);
+    update_cycles(e, cycles);
+    printf(" cycles: %u mode: %u\n", e->cycles, e->lcd.stat.mode);
   }
   return 0;
 error:
