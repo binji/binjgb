@@ -380,12 +380,12 @@ struct MemoryMap {
   uint32_t ram_bank;
   enum Bool ram_enabled;
   enum BankMode bank_mode;
-  uint8_t (*read_rom_bank_switch)(struct Emulator*, MaskedAddress addr);
-  uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress addr);
-  void (*write_rom)(struct Emulator*, MaskedAddress addr, uint8_t value);
-  void (*write_work_ram_bank_switch)(struct Emulator*,
-                                     MaskedAddress addr,
-                                     uint8_t value);
+  uint8_t (*read_rom_bank_switch)(struct Emulator*, MaskedAddress);
+  uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
+  uint8_t (*read_external_ram)(struct Emulator*, MaskedAddress);
+  void (*write_rom)(struct Emulator*, MaskedAddress, uint8_t);
+  void (*write_work_ram_bank_switch)(struct Emulator*, MaskedAddress, uint8_t);
+  void (*write_external_ram)(struct Emulator*, MaskedAddress, uint8_t);
 };
 
 struct MemoryTypeAddressPair {
@@ -748,11 +748,21 @@ void gb_write_work_ram_bank_switch(struct Emulator* e,
   e->rom_data.data[0x1000 + addr] = value;
 }
 
+uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
+  return 0;
+}
+
+void dummy_write_external_ram(struct Emulator* e,
+                              MaskedAddress addr,
+                              uint8_t value) {}
+
 struct MemoryMap s_rom_only_memory_map = {
   .read_rom_bank_switch = rom_only_read_rom_bank_switch,
   .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
+  .read_external_ram = dummy_read_external_ram,
   .write_rom = rom_only_write_rom,
   .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
+  .write_external_ram = dummy_write_external_ram,
 };
 
 struct MemoryMap s_mbc1_memory_map = {
@@ -762,8 +772,10 @@ struct MemoryMap s_mbc1_memory_map = {
   .bank_mode = BANK_MODE_ROM,
   .read_rom_bank_switch = mbc1_read_rom_bank_switch,
   .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
+  .read_external_ram = dummy_read_external_ram,
   .write_rom = mbc1_write_rom,
   .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
+  .write_external_ram = dummy_write_external_ram,
 };
 
 enum Result get_memory_map(struct RomInfo* rom_info,
@@ -885,11 +897,6 @@ uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-uint8_t read_external_ram(struct Emulator* e, MaskedAddress addr) {
-  NOT_IMPLEMENTED("ext ram not implemented. Addr: 0x%04x\n", addr);
-  return 0;
-}
-
 uint8_t read_hardware(struct Emulator* e, Address addr) {
   switch (addr) {
     case HW_SB_ADDR: return 0; /* TODO */
@@ -974,7 +981,7 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
       return read_vram(e, pair.addr);
 
     case MEMORY_MAP_EXTERNAL_RAM:
-      return read_external_ram(e, pair.addr);
+      return e->memory_map.read_external_ram(e, pair.addr);
 
     case MEMORY_MAP_WORK_RAM:
       return e->ram.data[pair.addr];
@@ -1007,12 +1014,6 @@ void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     assert(addr <= ADDR_MASK_8K);
     e->vram.data[addr] = value;
   }
-}
-
-void write_external_ram(struct Emulator* e,
-                        MaskedAddress addr,
-                        uint8_t value) {
-  NOT_IMPLEMENTED("write_external_ram not implemented. Addr: 0x%04x\n", addr);
 }
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -1104,7 +1105,8 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       return write_vram(e, pair.addr, value);
 
     case MEMORY_MAP_EXTERNAL_RAM:
-      return write_external_ram(e, pair.addr, value);
+      e->memory_map.write_external_ram(e, pair.addr, value);
+      break;
 
     case MEMORY_MAP_WORK_RAM:
       e->ram.data[pair.addr] = value;
