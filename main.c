@@ -68,6 +68,7 @@ typedef uint16_t MaskedAddress;
 #define ROM_BANK_SHIFT 14
 #define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 #define WORK_RAM_SIZE 32768
+#define HIGH_RAM_SIZE 127
 
 #define GB_CYCLES_PER_SECOND 4194304
 #define FRAME_CYCLES 70224
@@ -88,15 +89,6 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
-#define FLAG_Z_SHIFT 7
-#define FLAG_N_SHIFT 6
-#define FLAG_H_SHIFT 5
-#define FLAG_C_SHIFT 4
-#define FLAG_Z_MASK (1 << FLAG_Z_SHIFT)
-#define FLAG_N_MASK (1 << FLAG_N_SHIFT)
-#define FLAG_H_MASK (1 << FLAG_H_SHIFT)
-#define FLAG_C_MASK (1 << FLAG_C_SHIFT)
-
 #define HW_IF_ADDR 0xff0f
 #define HW_LCDC_ADDR 0xff40
 #define HW_STAT_ADDR 0xff41
@@ -104,6 +96,8 @@ typedef uint16_t MaskedAddress;
 #define HW_SCX_ADDR 0xff43
 #define HW_LY_ADDR 0xff44
 #define HW_LYC_ADDR 0xff45
+#define HW_HIGH_RAM_START_ADDR 0xff80
+#define HW_HIGH_RAM_END_ADDR 0xfffe
 #define HW_IE_ADDR 0xffff
 
 #define INTERRUPT_VBLANK_MASK 0x01
@@ -369,6 +363,7 @@ struct Emulator {
   struct WorkRam ram;
   struct Interrupts interrupts;
   struct LCD lcd;
+  uint8_t hram[HIGH_RAM_SIZE];
   uint32_t cycles;
 };
 
@@ -701,6 +696,10 @@ uint8_t read_work_ram_bank_switch(struct Emulator* e, MaskedAddress addr) {
 }
 
 uint8_t read_hardware(struct Emulator* e, Address addr) {
+  if (addr >= HW_HIGH_RAM_START_ADDR && addr <= HW_HIGH_RAM_END_ADDR) {
+    return e->hram[addr - HW_HIGH_RAM_START_ADDR];
+  }
+
   switch (addr) {
     case HW_IF_ADDR: return e->interrupts.IF;
     case HW_LCDC_ADDR:
@@ -721,6 +720,8 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
              STAT_MODE(e->lcd.stat.mode);
     case HW_SCY_ADDR: return e->lcd.SCY;
     case HW_SCX_ADDR: return e->lcd.SCX;
+    case HW_LY_ADDR: return e->lcd.LY;
+    case HW_LYC_ADDR: return e->lcd.LYC;
     case HW_IE_ADDR: return e->interrupts.IE;
     default:
       break;
@@ -802,6 +803,11 @@ void write_work_ram_bank_switch(struct Emulator* e,
 }
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  if (addr >= HW_HIGH_RAM_START_ADDR && addr <= HW_HIGH_RAM_END_ADDR) {
+    e->hram[addr - HW_HIGH_RAM_START_ADDR] = value;
+    return;
+  }
+
   switch (addr) {
     case HW_IF_ADDR: e->interrupts.IF = value; break;
     case HW_LCDC_ADDR:
@@ -823,6 +829,8 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case HW_SCY_ADDR: e->lcd.SCY = value; break;
     case HW_SCX_ADDR: e->lcd.SCX = value; break;
+    case HW_LY_ADDR: break;
+    case HW_LYC_ADDR: e->lcd.LYC = value; break;
     case HW_IE_ADDR: e->interrupts.IE = value; break;
     default:
       NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
@@ -1328,7 +1336,13 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_Z FLAG(Z)
 #define COND_NC (!FLAG(C))
 #define COND_C FLAG(C)
-#define SET_Z_FROM(X) FLAG(Z) = X == 0
+#define SET_Z(X) FLAG(Z) = (X) == 0
+#define TEST_CARRY(X, OP, Y, CMP, TO) (((int16_t)(X) OP (int16_t)(Y)) CMP TO)
+#define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
+#define SET_C_SUB(X, Y) FLAG(C) = TEST_CARRY(X, -, Y, <, 0)
+#define SET_H_ADD(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, +, Y & 0x3f, >, 0x3f)
+#define SET_H_SUB(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, -, Y & 0x3f, <, 0)
+#define SET_N(X) FLAG(N) = (X)
 #define READ8(X) read_u8(e, X)
 #define READ16(X) read_u16(e, X)
 #define WRITE8(X, V) write_u8(e, X, V)
@@ -1352,21 +1366,25 @@ uint8_t s_cb_opcode_cycles[] = {
 #define JP_F_NN(COND) if (COND) { JP_NN(); CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
 #define JP_NN() new_pc = READ_NN
-#define XOR_R(R) REG(A) ^= REG(R); SET_Z_FROM(REG(A))
-#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z_FROM(REG(A))
-#define DEC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 1; FLAG(H) = (X & 0xf) == 0xf
+#define XOR_R(R) REG(A) ^= REG(R); SET_Z(REG(A))
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z(REG(A))
+#define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
-#define DEC_MR(MR) u8 = READ8(REG(MR)) - 1; WRITE8(REG(MR), u8); DEC_FLAGS(u8)
-#define INC_FLAGS(X) SET_Z_FROM(X); FLAG(N) = 0; FLAG(H) = (X & 0xf) == 0
+#define DEC_MR(MR) t = READ8(REG(MR)) - 1; WRITE8(REG(MR), t); DEC_FLAGS(t)
+#define INC_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = (X & 0xf) == 0
 #define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
 #define INC_RR(RR) REG(RR)++
-#define INC_MR(MR) u8 = READ8(REG(MR)) + 1; WRITE8(REG(MR), u8); INC_FLAGS(u8)
+#define INC_MR(MR) t = READ8(REG(MR)) + 1; WRITE8(REG(MR), t); INC_FLAGS(t)
+#define CP_FLAGS(X, Y) SET_Z(X - Y); SET_N(1); SET_H_SUB(X, Y); SET_C_SUB(X, Y);
+#define CP_R(R) CP_FLAGS(REG(A), REG(R))
+#define CP_N() t = READ_N; CP_FLAGS(REG(A), t)
+#define CP_MR(MR) t = READ8(REG(MR)); CP_FLAGS(REG(A), t)
 
 /* Returns the number of cycles executed */
 uint8_t execute_instruction(struct Emulator* e) {
   uint8_t cycles = 0;
-  uint8_t u8;
+  uint8_t t;
   print_instruction(e, e->reg.PC);
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
@@ -1562,14 +1580,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xb5: NI; break;
       case 0xb6: NI; break;
       case 0xb7: NI; break;
-      case 0xb8: NI; break;
-      case 0xb9: NI; break;
-      case 0xba: NI; break;
-      case 0xbb: NI; break;
-      case 0xbc: NI; break;
-      case 0xbd: NI; break;
-      case 0xbe: NI; break;
-      case 0xbf: NI; break;
+      case 0xb8: CP_R(B); break;
+      case 0xb9: CP_R(C); break;
+      case 0xba: CP_R(D); break;
+      case 0xbb: CP_R(E); break;
+      case 0xbc: CP_R(H); break;
+      case 0xbd: CP_R(L); break;
+      case 0xbe: CP_MR(HL); break;
+      case 0xbf: CP_R(A); break;
       case 0xc0: NI; break;
       case 0xc1: NI; break;
       case 0xc2: JP_F_NN(COND_NZ); break;
@@ -1632,7 +1650,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xfb: e->interrupts.IME = 1; break;
       case 0xfc: NI; break;
       case 0xfd: NI; break;
-      case 0xfe: NI; break;
+      case 0xfe: CP_N(); break;
       case 0xff: NI; break;
       default:
         UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
