@@ -1691,8 +1691,15 @@ uint8_t s_cb_opcode_cycles[] = {
 #define JP_F_NN(COND) if (COND) { JP_NN(); CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
 #define JP_NN() new_pc = READ_NN
+#define CALL_NN() REG(SP) -= 2; WRITE8(REG(SP), new_pc); new_pc = READ_NN
+#define CALL_F_NN(COND) if (COND) { CALL_NN(); CYCLES(12); }
+#define RET() new_pc = READ8(REG(SP)); REG(SP) += 2
+#define RET_F(COND) if (COND) { RET(); CYCLES(12); }
+#define RETI() e->interrupts.IME = 1; RET()
 #define XOR_R(R) REG(A) ^= REG(R); SET_Z(REG(A))
 #define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z(REG(A))
+#define OR_R(R) REG(A) |= REG(R); SET_Z(REG(A))
+#define OR_MR(MR) REG(A) |= READ8(REG(MR)); SET_Z(REG(A))
 #define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
@@ -1897,14 +1904,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xad: XOR_R(L); break;
       case 0xae: XOR_MR(HL); break;
       case 0xaf: XOR_R(A); break;
-      case 0xb0: NI; break;
-      case 0xb1: NI; break;
-      case 0xb2: NI; break;
-      case 0xb3: NI; break;
-      case 0xb4: NI; break;
-      case 0xb5: NI; break;
-      case 0xb6: NI; break;
-      case 0xb7: NI; break;
+      case 0xb0: OR_R(B); break;
+      case 0xb1: OR_R(C); break;
+      case 0xb2: OR_R(D); break;
+      case 0xb3: OR_R(E); break;
+      case 0xb4: OR_R(H); break;
+      case 0xb5: OR_R(L); break;
+      case 0xb6: OR_MR(HL); break;
+      case 0xb7: OR_R(A); break;
       case 0xb8: CP_R(B); break;
       case 0xb9: CP_R(C); break;
       case 0xba: CP_R(D); break;
@@ -1913,35 +1920,35 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xbd: CP_R(L); break;
       case 0xbe: CP_MR(HL); break;
       case 0xbf: CP_R(A); break;
-      case 0xc0: NI; break;
+      case 0xc0: RET_F(COND_NZ); break;
       case 0xc1: NI; break;
       case 0xc2: JP_F_NN(COND_NZ); break;
       case 0xc3: JP_NN(); break;
-      case 0xc4: NI; break;
+      case 0xc4: CALL_F_NN(COND_NZ); break;
       case 0xc5: NI; break;
       case 0xc6: NI; break;
       case 0xc7: NI; break;
-      case 0xc8: NI; break;
-      case 0xc9: NI; break;
+      case 0xc8: RET_F(COND_Z); break;
+      case 0xc9: RET(); break;
       case 0xca: JP_F_NN(COND_Z); break;
       case 0xcb: NI; break;
-      case 0xcc: NI; break;
-      case 0xcd: NI; break;
+      case 0xcc: CALL_F_NN(COND_Z); break;
+      case 0xcd: CALL_NN(); break;
       case 0xce: NI; break;
       case 0xcf: NI; break;
-      case 0xd0: NI; break;
+      case 0xd0: RET_F(COND_NC); break;
       case 0xd1: NI; break;
       case 0xd2: JP_F_NN(COND_NC); break;
       case 0xd3: NI; break;
-      case 0xd4: NI; break;
+      case 0xd4: CALL_F_NN(COND_NC); break;
       case 0xd5: NI; break;
       case 0xd6: NI; break;
       case 0xd7: NI; break;
-      case 0xd8: NI; break;
-      case 0xd9: NI; break;
+      case 0xd8: RET_F(COND_C); break;
+      case 0xd9: RETI(); break;
       case 0xda: JP_F_NN(COND_C); break;
       case 0xdb: NI; break;
-      case 0xdc: NI; break;
+      case 0xdc: CALL_F_NN(COND_C); break;
       case 0xdd: NI; break;
       case 0xde: NI; break;
       case 0xdf: NI; break;
