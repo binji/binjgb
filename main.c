@@ -84,6 +84,13 @@ typedef uint16_t MaskedAddress;
 #define WORK_RAM_SIZE 32768
 #define HIGH_RAM_SIZE 127
 
+#define SOUND_COUNT 5
+#define SOUND1 0
+#define SOUND2 1
+#define SOUND3 2
+#define SOUND4 3
+#define VIN 4
+
 #define GB_CYCLES_PER_SECOND 4194304
 #define FRAME_CYCLES 70224
 #define LINE_CYCLES 456
@@ -106,6 +113,9 @@ typedef uint16_t MaskedAddress;
 #define HW_SB_ADDR 0xff01   /* Serial transfer data */
 #define HW_SC_ADDR 0xff02   /* Serial transfer control */
 #define HW_IF_ADDR 0xff0f   /* Interrupt request */
+#define HW_NR50_ADDR 0xff24 /* Sound volume */
+#define HW_NR51_ADDR 0xff25 /* Sound output select */
+#define HW_NR52_ADDR 0xff26 /* Sound enabled */
 #define HW_LCDC_ADDR 0xff40 /* LCD control */
 #define HW_STAT_ADDR 0xff41 /* LCD status */
 #define HW_SCY_ADDR 0xff42  /* Screen Y */
@@ -136,6 +146,26 @@ typedef uint16_t MaskedAddress;
 #define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
 #define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
 #define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
+
+#define NR50_VIN_SO2(X, OP) BIT(X, OP, 7)
+#define NR50_SO2_VOLUME(X, OP) BITS(X, OP, 6, 4)
+#define NR50_VIN_SO1(X, OP) BIT(X, OP, 3)
+#define NR50_SO1_VOLUME(X, OP) BITS(X, OP, 2, 0)
+
+#define NR51_SOUND4_SO2(X, OP) BIT(X, OP, 7)
+#define NR51_SOUND3_SO2(X, OP) BIT(X, OP, 6)
+#define NR51_SOUND2_SO2(X, OP) BIT(X, OP, 5)
+#define NR51_SOUND1_SO2(X, OP) BIT(X, OP, 4)
+#define NR51_SOUND4_SO1(X, OP) BIT(X, OP, 3)
+#define NR51_SOUND3_SO1(X, OP) BIT(X, OP, 2)
+#define NR51_SOUND2_SO1(X, OP) BIT(X, OP, 1)
+#define NR51_SOUND1_SO1(X, OP) BIT(X, OP, 0)
+
+#define NR52_ALL_SOUND_ENABLED(X, OP) BIT(X, OP, 7)
+#define NR52_SOUND4_ON(X, OP) BIT(X, OP, 3)
+#define NR52_SOUND3_ON(X, OP) BIT(X, OP, 2)
+#define NR52_SOUND2_ON(X, OP) BIT(X, OP, 1)
+#define NR52_SOUND1_ON(X, OP) BIT(X, OP, 0)
 
 #define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
 #define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
@@ -373,6 +403,15 @@ struct Serial {
   enum Bool shift_clock;
 };
 
+struct Sound {
+  uint8_t so2_volume;
+  uint8_t so1_volume;
+  enum Bool so2_output[SOUND_COUNT];
+  enum Bool so1_output[SOUND_COUNT];
+  enum Bool enabled;
+  enum Bool sound_on[SOUND_COUNT];
+};
+
 struct LCDControl {
   enum Bool display;
   enum Bool window_tile_map_select;
@@ -419,6 +458,7 @@ struct Emulator {
   struct WorkRam ram;
   struct Interrupts interrupts;
   struct Serial serial;
+  struct Sound sound;
   struct LCD lcd;
   uint8_t hram[HIGH_RAM_SIZE];
   uint32_t cycles;
@@ -770,6 +810,26 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
              SET_BITS(e->serial.clock_speed, SC_CLOCK_SPEED) |
              SET_BITS(e->serial.shift_clock, SC_SHIFT_CLOCK);
     case HW_IF_ADDR: return e->interrupts.IF;
+    case HW_NR50_ADDR:
+      return SET_BITS(e->sound.so2_output[VIN], NR50_VIN_SO2) |
+             SET_BITS(e->sound.so2_volume, NR50_SO2_VOLUME) |
+             SET_BITS(e->sound.so1_output[VIN], NR50_VIN_SO1) |
+             SET_BITS(e->sound.so1_volume, NR50_SO1_VOLUME);
+    case HW_NR51_ADDR:
+      return SET_BITS(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
+             SET_BITS(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
+             SET_BITS(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
+             SET_BITS(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
+             SET_BITS(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
+             SET_BITS(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
+             SET_BITS(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
+             SET_BITS(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
+    case HW_NR52_ADDR:
+      return SET_BITS(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
+             SET_BITS(e->sound.sound_on[SOUND4], NR52_SOUND4_ON) |
+             SET_BITS(e->sound.sound_on[SOUND3], NR52_SOUND3_ON) |
+             SET_BITS(e->sound.sound_on[SOUND2], NR52_SOUND2_ON) |
+             SET_BITS(e->sound.sound_on[SOUND1], NR52_SOUND1_ON);
     case HW_LCDC_ADDR:
       return SET_BITS(e->lcd.lcdc.display, LCDC_DISPLAY) |
              SET_BITS(e->lcd.lcdc.window_tile_map_select,
@@ -897,6 +957,25 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->serial.transfer_start = GET_BITS(value, SC_TRANSFER_START);
       e->serial.clock_speed = GET_BITS(value, SC_CLOCK_SPEED);
       e->serial.shift_clock = GET_BITS(value, SC_SHIFT_CLOCK);
+      break;
+    case HW_NR50_ADDR:
+      e->sound.so2_output[VIN] = GET_BITS(value, NR50_VIN_SO2);
+      e->sound.so2_volume = GET_BITS(value, NR50_SO2_VOLUME);
+      e->sound.so1_output[VIN] = GET_BITS(value, NR50_VIN_SO1);
+      e->sound.so1_volume = GET_BITS(value, NR50_SO1_VOLUME);
+      break;
+    case HW_NR51_ADDR:
+      e->sound.so2_output[3] = GET_BITS(value, NR51_SOUND4_SO2);
+      e->sound.so2_output[2] = GET_BITS(value, NR51_SOUND3_SO2);
+      e->sound.so2_output[1] = GET_BITS(value, NR51_SOUND2_SO2);
+      e->sound.so2_output[0] = GET_BITS(value, NR51_SOUND1_SO2);
+      e->sound.so1_output[3] = GET_BITS(value, NR51_SOUND4_SO1);
+      e->sound.so1_output[2] = GET_BITS(value, NR51_SOUND3_SO1);
+      e->sound.so1_output[1] = GET_BITS(value, NR51_SOUND2_SO1);
+      e->sound.so1_output[0] = GET_BITS(value, NR51_SOUND1_SO1);
+      break;
+    case HW_NR52_ADDR:
+      e->sound.enabled = GET_BITS(value, NR52_ALL_SOUND_ENABLED);
       break;
     case HW_IF_ADDR: e->interrupts.IF = value; break;
     case HW_LCDC_ADDR:
