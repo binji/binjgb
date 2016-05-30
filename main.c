@@ -140,7 +140,7 @@ typedef uint16_t MaskedAddress;
 #define HW_BGP_ADDR 0xff47  /* BG palette */
 #define HW_OBP0_ADDR 0xff48 /* OBJ palette 0 */
 #define HW_OBP1_ADDR 0xff49 /* OBJ palette 1 */
-#define HW_IE_ADDR 0xffff /* Interrupt enable */
+#define HW_IE_ADDR 0xffff   /* Interrupt enable */
 
 #define INTERRUPT_VBLANK_MASK 0x01
 #define INTERRUPT_LCD_STAT_MASK 0x02
@@ -155,6 +155,11 @@ typedef uint16_t MaskedAddress;
 #define DECODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) >> (LO))
 #define BITS(X, OP, HI, LO) OP(X, HI, LO)
 #define BIT(X, OP, B) OP(X, B, B)
+
+#define CPU_FLAG_Z(X, OP) BIT(X, OP, 7)
+#define CPU_FLAG_N(X, OP) BIT(X, OP, 6)
+#define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
+#define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
 
 #define OBJ_PRIORITY(X, OP) BIT(X, OP, 7)
 #define OBJ_YFLIP(X, OP) BIT(X, OP, 6)
@@ -827,6 +832,25 @@ enum Result get_memory_map(struct RomInfo* rom_info,
   return ERROR;
 }
 
+uint8_t get_f_reg(struct Registers* reg) {
+  return SET_BITS(reg->flags.Z, CPU_FLAG_Z) |
+         SET_BITS(reg->flags.N, CPU_FLAG_N) |
+         SET_BITS(reg->flags.H, CPU_FLAG_H) |
+         SET_BITS(reg->flags.C, CPU_FLAG_C);
+}
+
+uint16_t get_af_reg(struct Registers* reg) {
+  return (reg->A << 8) | get_f_reg(reg);
+}
+
+void set_af_reg(struct Registers* reg, uint16_t af) {
+  reg->A = af >> 8;
+  reg->flags.Z = GET_BITS(af, CPU_FLAG_Z);
+  reg->flags.N = GET_BITS(af, CPU_FLAG_N);
+  reg->flags.H = GET_BITS(af, CPU_FLAG_H);
+  reg->flags.C = GET_BITS(af, CPU_FLAG_C);
+}
+
 enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
@@ -835,7 +859,36 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   print_rom_info(&e->rom_info);
 #endif
   CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
-  e->interrupts.IME = 1;
+  set_af_reg(&e->reg, 0x01b0);
+  e->reg.BC = 0x0013;
+  e->reg.DE = 0x00d8;
+  e->reg.HL = 0x014d;
+  e->reg.SP = 0xfffe;
+  e->reg.PC = 0x0100;
+  e->interrupts.IME = TRUE;
+  e->lcd.lcdc.display = TRUE;
+  e->lcd.lcdc.bg_tile_data_select = TRUE;
+  e->lcd.lcdc.bg_display = TRUE;
+  e->lcd.bgp.color3 = COLOR_BLACK;
+  e->lcd.bgp.color2 = COLOR_BLACK;
+  e->lcd.bgp.color1 = COLOR_BLACK;
+  e->lcd.bgp.color0 = COLOR_WHITE;
+  e->oam.obp[1].color3 = COLOR_BLACK;
+  e->oam.obp[1].color2 = COLOR_BLACK;
+  e->oam.obp[1].color1 = COLOR_BLACK;
+  e->oam.obp[1].color0 = COLOR_BLACK;
+  e->oam.obp[0].color3 = COLOR_BLACK;
+  e->oam.obp[0].color2 = COLOR_BLACK;
+  e->oam.obp[0].color1 = COLOR_BLACK;
+  e->oam.obp[0].color0 = COLOR_BLACK;
+  e->sound.so2_volume = 7;
+  e->sound.so1_volume = 7;
+  e->sound.so2_output[SOUND4] = TRUE;
+  e->sound.so2_output[SOUND3] = TRUE;
+  e->sound.so2_output[SOUND2] = TRUE;
+  e->sound.so2_output[SOUND1] = TRUE;
+  e->sound.so1_output[SOUND2] = TRUE;
+  e->sound.so1_output[SOUND1] = TRUE;
   return OK;
 error:
   return ERROR;
@@ -1085,6 +1138,7 @@ void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  LOG("write_hardware(0x%04x, %u)\n", addr, value);
   switch (addr) {
     case HW_SB_ADDR: /* TODO */ break;
     case HW_SC_ADDR:
@@ -1198,6 +1252,11 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       e->hram[pair.addr] = value;
       break;
   }
+}
+
+void write_u16(struct Emulator* e, Address addr, uint16_t value) {
+  write_u8(e, addr, value);
+  write_u8(e, addr + 1, value >> 8);
 }
 
 uint8_t s_opcode_bytes[] = {
@@ -1671,6 +1730,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define READ8(X) read_u8(e, X)
 #define READ16(X) read_u16(e, X)
 #define WRITE8(X, V) write_u8(e, X, V)
+#define WRITE16(X, V) write_u16(e, X, V)
 #define READ_N READ8(REG(PC) + 1)
 #define READ_NN READ16(REG(PC) + 1)
 #define LD_R_R(RD, RS) REG(RD) = REG(RS)
@@ -1691,11 +1751,16 @@ uint8_t s_cb_opcode_cycles[] = {
 #define JP_F_NN(COND) if (COND) { JP_NN(); CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
 #define JP_NN() new_pc = READ_NN
-#define CALL_NN() REG(SP) -= 2; WRITE8(REG(SP), new_pc); new_pc = READ_NN
+#define CALL(X) REG(SP) -= 2; WRITE16(REG(SP), new_pc); new_pc = X
+#define CALL_NN() CALL(READ_NN)
 #define CALL_F_NN(COND) if (COND) { CALL_NN(); CYCLES(12); }
-#define RET() new_pc = READ8(REG(SP)); REG(SP) += 2
+#define RET() new_pc = READ16(REG(SP)); REG(SP) += 2
 #define RET_F(COND) if (COND) { RET(); CYCLES(12); }
-#define RETI() e->interrupts.IME = 1; RET()
+#define RETI() e->interrupts.IME = TRUE; RET()
+#define PUSH_RR(RR) REG(SP) -= 2; WRITE16(REG(SP), REG(RR))
+#define POP_RR(RR) REG(RR) = READ16(REG(SP)); REG(SP) += 2
+#define PUSH_AF() REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
+#define POP_AF() set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
 #define XOR_R(R) REG(A) ^= REG(R); SET_Z(REG(A))
 #define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z(REG(A))
 #define OR_R(R) REG(A) |= REG(R); SET_Z(REG(A))
@@ -1921,13 +1986,13 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xbe: CP_MR(HL); break;
       case 0xbf: CP_R(A); break;
       case 0xc0: RET_F(COND_NZ); break;
-      case 0xc1: NI; break;
+      case 0xc1: POP_RR(BC); break;
       case 0xc2: JP_F_NN(COND_NZ); break;
       case 0xc3: JP_NN(); break;
       case 0xc4: CALL_F_NN(COND_NZ); break;
-      case 0xc5: NI; break;
+      case 0xc5: PUSH_RR(BC); break;
       case 0xc6: NI; break;
-      case 0xc7: NI; break;
+      case 0xc7: CALL(0x00); break;
       case 0xc8: RET_F(COND_Z); break;
       case 0xc9: RET(); break;
       case 0xca: JP_F_NN(COND_Z); break;
@@ -1935,15 +2000,15 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xcc: CALL_F_NN(COND_Z); break;
       case 0xcd: CALL_NN(); break;
       case 0xce: NI; break;
-      case 0xcf: NI; break;
+      case 0xcf: CALL(0x08); break;
       case 0xd0: RET_F(COND_NC); break;
-      case 0xd1: NI; break;
+      case 0xd1: POP_RR(DE); break;
       case 0xd2: JP_F_NN(COND_NC); break;
       case 0xd3: NI; break;
       case 0xd4: CALL_F_NN(COND_NC); break;
-      case 0xd5: NI; break;
+      case 0xd5: PUSH_RR(DE); break;
       case 0xd6: NI; break;
-      case 0xd7: NI; break;
+      case 0xd7: CALL(0x10); break;
       case 0xd8: RET_F(COND_C); break;
       case 0xd9: RETI(); break;
       case 0xda: JP_F_NN(COND_C); break;
@@ -1951,15 +2016,15 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xdc: CALL_F_NN(COND_C); break;
       case 0xdd: NI; break;
       case 0xde: NI; break;
-      case 0xdf: NI; break;
+      case 0xdf: CALL(0x18); break;
       case 0xe0: LD_MFF00_N_R(A); break;
-      case 0xe1: NI; break;
+      case 0xe1: POP_RR(HL); break;
       case 0xe2: LD_MFF00_R_R(C, A); break;
       case 0xe3: NI; break;
       case 0xe4: NI; break;
-      case 0xe5: NI; break;
+      case 0xe5: PUSH_RR(HL); break;
       case 0xe6: NI; break;
-      case 0xe7: NI; break;
+      case 0xe7: CALL(0x20); break;
       case 0xe8: NI; break;
       case 0xe9: JP_RR(HL); break;
       case 0xea: LD_MN_R(A); break;
@@ -1967,23 +2032,23 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xec: NI; break;
       case 0xed: NI; break;
       case 0xee: NI; break;
-      case 0xef: NI; break;
+      case 0xef: CALL(0x28); break;
       case 0xf0: LD_R_MFF00_N(A); break;
-      case 0xf1: LD_R_MFF00_R(A, C); break;
-      case 0xf2: NI; break;
-      case 0xf3: e->interrupts.IME = 0; break;
+      case 0xf1: POP_AF(); break;
+      case 0xf2: LD_R_MFF00_R(A, C); break;
+      case 0xf3: e->interrupts.IME = FALSE; break;
       case 0xf4: NI; break;
-      case 0xf5: NI; break;
+      case 0xf5: PUSH_AF(); break;
       case 0xf6: NI; break;
-      case 0xf7: NI; break;
+      case 0xf7: CALL(0x30); break;
       case 0xf8: NI; break;
       case 0xf9: LD_RR_RR(SP, HL); break;
       case 0xfa: LD_R_MN(A); break;
-      case 0xfb: e->interrupts.IME = 1; break;
+      case 0xfb: e->interrupts.IME = TRUE; break;
       case 0xfc: NI; break;
       case 0xfd: NI; break;
       case 0xfe: CP_N(); break;
-      case 0xff: NI; break;
+      case 0xff: CALL(0x38); break;
       default:
         UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
         break;
@@ -2052,6 +2117,33 @@ void update_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
+void handle_interrupts(struct Emulator* e) {
+  if (e->interrupts.IME == 0) {
+    return;
+  }
+
+  uint8_t interrupts = e->interrupts.IF & e->interrupts.IE;
+  if (interrupts == 0) {
+    return;
+  }
+
+  Address vector;
+  if (interrupts & INTERRUPT_VBLANK_MASK) {
+    LOG(">> VBLANK interrupt\n");
+    vector = 0x40;
+  } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
+    LOG(">> LCD_STAT interrupt\n");
+    vector = 0x48;
+  } else {
+    return;
+  }
+
+  Address new_pc = REG(PC);
+  CALL(vector);
+  REG(PC) = new_pc;
+  e->interrupts.IME = 0;
+}
+
 int main(int argc, char** argv) {
   --argc; ++argv;
   CHECK_MSG(argc == 1, "no rom file given.\n");
@@ -2067,6 +2159,7 @@ int main(int argc, char** argv) {
     if (s_trace) {
       printf(" cycles: %u mode: %u\n", e->cycles, e->lcd.stat.mode);
     }
+    handle_interrupts(e);
   }
   return 0;
 error:
