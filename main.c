@@ -29,7 +29,21 @@
     exit(1);                  \
   } while (0)
 
-#define NOT_IMPLEMENTED(...) UNREACHABLE(__VA_ARGS__)
+#define NOT_IMPLEMENTED_NO_EMULATOR(...)  \
+  do {                                    \
+    printf("%s:%d:", __FILE__, __LINE__); \
+    UNREACHABLE(__VA_ARGS__);             \
+  } while (0)
+
+#define NOT_IMPLEMENTED(...)         \
+  do {                               \
+    s_trace = TRUE;                  \
+    printf("\n\n");                  \
+    print_instruction(e, e->reg.PC); \
+    print_registers(&e->reg);        \
+    printf("\n");                    \
+    UNREACHABLE(__VA_ARGS__);        \
+  } while (0)
 
 typedef uint16_t Address;
 typedef uint16_t MaskedAddress;
@@ -89,16 +103,21 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
-#define HW_IF_ADDR 0xff0f
-#define HW_LCDC_ADDR 0xff40
-#define HW_STAT_ADDR 0xff41
-#define HW_SCY_ADDR 0xff42
-#define HW_SCX_ADDR 0xff43
-#define HW_LY_ADDR 0xff44
-#define HW_LYC_ADDR 0xff45
+#define HW_SB_ADDR 0xff01   /* Serial transfer data */
+#define HW_SC_ADDR 0xff02   /* Serial transfer control */
+#define HW_IF_ADDR 0xff0f   /* Interrupt request */
+#define HW_LCDC_ADDR 0xff40 /* LCD control */
+#define HW_STAT_ADDR 0xff41 /* LCD status */
+#define HW_SCY_ADDR 0xff42  /* Screen Y */
+#define HW_SCX_ADDR 0xff43  /* Screen X */
+#define HW_LY_ADDR 0xff44   /* Y Line */
+#define HW_LYC_ADDR 0xff45  /* Y Line compare */
+#define HW_BGP_ADDR 0xff47  /* BG palette */
+#define HW_OBP0_ADDR 0xff48 /* OBJ palette 0 */
+#define HW_OBP1_ADDR 0xff49 /* OBJ palette 1 */
 #define HW_HIGH_RAM_START_ADDR 0xff80
 #define HW_HIGH_RAM_END_ADDR 0xfffe
-#define HW_IE_ADDR 0xffff
+#define HW_IE_ADDR 0xffff /* Interrupt enable */
 
 #define INTERRUPT_VBLANK_MASK 0x01
 #define INTERRUPT_LCD_STAT_MASK 0x02
@@ -106,24 +125,38 @@ typedef uint16_t MaskedAddress;
 #define INTERRUPT_SERIAL_MASK 0x08
 #define INTERRUPT_JOYPAD_MASK 0x10
 
-#define BIT(X, SHIFT) (((X) & 1) << (SHIFT))
-#define TEST(X, MACRO) (((X) & MACRO(1)) != 0)
+#define GET_BITS(X, MACRO) MACRO(X, DECODE)
+#define SET_BITS(X, MACRO) MACRO(X, ENCODE)
+#define BITS_MASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
+#define ENCODE(X, HI, LO) (((X) << (LO)) & BITS_MASK(HI, LO))
+#define DECODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) >> (LO))
+#define BITS(X, OP, HI, LO) OP(X, HI, LO)
+#define BIT(X, OP, B) OP(X, B, B)
 
-#define LCDC_DISPLAY(X) BIT(X, 7)
-#define LCDC_WINDOW_TILE_MAP_SELECT(X) BIT(X, 6)
-#define LCDC_WINDOW_DISPLAY(X) BIT(X, 5)
-#define LCDC_BG_TILE_DATA_SELECT(X) BIT(X, 4)
-#define LCDC_BG_TILE_MAP_SELECT(X) BIT(X, 3)
-#define LCDC_OBJ_SIZE(X) BIT(X, 2)
-#define LCDC_OBJ_DISPLAY(X) BIT(X, 1)
-#define LCDC_BG_DISPLAY(X) BIT(X, 0)
+#define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
+#define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
+#define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
 
-#define STAT_YCOMPARE_INTR(X) BIT(X, 6)
-#define STAT_USING_OAM_INTR(X) BIT(X, 5)
-#define STAT_VBLANK_INTR(X) BIT(X, 4)
-#define STAT_HBLANK_INTR(X) BIT(X, 3)
-#define STAT_YCOMPARE(X) BIT(X, 2)
-#define STAT_MODE(X) ((X) & 3)
+#define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
+#define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
+#define LCDC_WINDOW_DISPLAY(X, OP) BIT(X, OP, 5)
+#define LCDC_BG_TILE_DATA_SELECT(X, OP) BIT(X, OP, 4)
+#define LCDC_BG_TILE_MAP_SELECT(X, OP) BIT(X, OP, 3)
+#define LCDC_OBJ_SIZE(X, OP) BIT(X, OP, 2)
+#define LCDC_OBJ_DISPLAY(X, OP) BIT(X, OP, 1)
+#define LCDC_BG_DISPLAY(X, OP) BIT(X, OP, 0)
+
+#define STAT_YCOMPARE_INTR(X, OP) BIT(X, OP, 6)
+#define STAT_USING_OAM_INTR(X, OP) BIT(X, OP, 5)
+#define STAT_VBLANK_INTR(X, OP) BIT(X, OP, 4)
+#define STAT_HBLANK_INTR(X, OP) BIT(X, OP, 3)
+#define STAT_YCOMPARE(X, OP) BIT(X, OP, 2)
+#define STAT_MODE(X, OP) BITS(X, OP, 1, 0)
+
+#define PALETTE_COLOR3(X, OP) BITS(X, OP, 7, 6)
+#define PALETTE_COLOR2(X, OP) BITS(X, OP, 5, 4)
+#define PALETTE_COLOR1(X, OP) BITS(X, OP, 3, 2)
+#define PALETTE_COLOR0(X, OP) BITS(X, OP, 1, 0)
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -248,6 +281,13 @@ enum LCDMode {
   LCD_MODE_USING_OAM_VRAM = 3, /* LCD mode 3 */
 };
 
+enum Color {
+  COLOR_WHITE = 0,
+  COLOR_LIGHT_GRAY = 1,
+  COLOR_DARK_GRAY = 2,
+  COLOR_BLACK = 3,
+};
+
 struct RomData {
   uint8_t* data;
   size_t size;
@@ -327,6 +367,12 @@ struct Interrupts {
   uint8_t IF;    /* Interrupt Request */
 };
 
+struct Serial {
+  enum Bool transfer_start;
+  enum Bool clock_speed;
+  enum Bool shift_clock;
+};
+
 struct LCDControl {
   enum Bool display;
   enum Bool window_tile_map_select;
@@ -346,6 +392,13 @@ struct LCDStatus {
   enum LCDMode mode;
 };
 
+struct Palette {
+  enum Color color3;
+  enum Color color2;
+  enum Color color1;
+  enum Color color0;
+};
+
 struct LCD {
   struct LCDControl lcdc; /* LCD control */
   struct LCDStatus stat;  /* LCD status */
@@ -353,6 +406,9 @@ struct LCD {
   uint8_t SCX;            /* Screen X */
   uint8_t LY;             /* Line Y */
   uint8_t LYC;            /* Line Y Compare */
+  struct Palette bgp;     /* BG Palette */
+  struct Palette obp0;    /* OBJ 0 Palette */
+  struct Palette obp1;    /* OBJ 1 Palette */
 };
 
 struct Emulator {
@@ -362,10 +418,16 @@ struct Emulator {
   struct Registers reg;
   struct WorkRam ram;
   struct Interrupts interrupts;
+  struct Serial serial;
   struct LCD lcd;
   uint8_t hram[HIGH_RAM_SIZE];
   uint32_t cycles;
 };
+
+enum Bool s_trace = FALSE;
+
+void print_instruction(struct Emulator*, Address);
+void print_registers(struct Registers*);
 
 enum Result read_rom_data_from_file(const char* filename,
                                     struct RomData* out_rom_data) {
@@ -646,8 +708,9 @@ enum Result get_memory_map(struct RomInfo* rom_info,
       return OK;
 
     default:
-      NOT_IMPLEMENTED("memory map for %s not implemented.\n",
-                      get_cartridge_type_string(rom_info->cartridge_type));
+      NOT_IMPLEMENTED_NO_EMULATOR(
+          "memory map for %s not implemented.\n",
+          get_cartridge_type_string(rom_info->cartridge_type));
   }
   return ERROR;
 }
@@ -701,27 +764,47 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
   }
 
   switch (addr) {
+    case HW_SB_ADDR: return 0; /* TODO */
+    case HW_SC_ADDR:
+      return SET_BITS(e->serial.transfer_start, SC_TRANSFER_START) |
+             SET_BITS(e->serial.clock_speed, SC_CLOCK_SPEED) |
+             SET_BITS(e->serial.shift_clock, SC_SHIFT_CLOCK);
     case HW_IF_ADDR: return e->interrupts.IF;
     case HW_LCDC_ADDR:
-      return LCDC_DISPLAY(e->lcd.lcdc.display) |
-             LCDC_WINDOW_TILE_MAP_SELECT(e->lcd.lcdc.window_tile_map_select) |
-             LCDC_WINDOW_DISPLAY(e->lcd.lcdc.window_display) |
-             LCDC_BG_TILE_DATA_SELECT(e->lcd.lcdc.bg_tile_data_select) |
-             LCDC_BG_TILE_MAP_SELECT(e->lcd.lcdc.bg_tile_map_select) |
-             LCDC_OBJ_SIZE(e->lcd.lcdc.obj_size) |
-             LCDC_OBJ_DISPLAY(e->lcd.lcdc.obj_display) |
-             LCDC_BG_DISPLAY(e->lcd.lcdc.bg_display);
+      return SET_BITS(e->lcd.lcdc.display, LCDC_DISPLAY) |
+             SET_BITS(e->lcd.lcdc.window_tile_map_select,
+                      LCDC_WINDOW_TILE_MAP_SELECT) |
+             SET_BITS(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
+             SET_BITS(e->lcd.lcdc.bg_tile_data_select,
+                      LCDC_BG_TILE_DATA_SELECT) |
+             SET_BITS(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
+             SET_BITS(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
+             SET_BITS(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
+             SET_BITS(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
     case HW_STAT_ADDR:
-      return STAT_YCOMPARE_INTR(e->lcd.stat.y_compare_intr) |
-             STAT_USING_OAM_INTR(e->lcd.stat.using_oam_intr) |
-             STAT_VBLANK_INTR(e->lcd.stat.vblank_intr) |
-             STAT_HBLANK_INTR(e->lcd.stat.hblank_intr) |
-             STAT_YCOMPARE(e->lcd.LY == e->lcd.LYC) |
-             STAT_MODE(e->lcd.stat.mode);
+      return SET_BITS(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
+             SET_BITS(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
+             SET_BITS(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
+             SET_BITS(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
+             SET_BITS(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
+             SET_BITS(e->lcd.stat.mode, STAT_MODE);
     case HW_SCY_ADDR: return e->lcd.SCY;
     case HW_SCX_ADDR: return e->lcd.SCX;
     case HW_LY_ADDR: return e->lcd.LY;
     case HW_LYC_ADDR: return e->lcd.LYC;
+    case HW_BGP_ADDR:
+      return SET_BITS(e->lcd.bgp.color3, PALETTE_COLOR3) |
+             SET_BITS(e->lcd.bgp.color2, PALETTE_COLOR2) |
+             SET_BITS(e->lcd.bgp.color1, PALETTE_COLOR1) |
+             SET_BITS(e->lcd.bgp.color0, PALETTE_COLOR0);
+    case HW_OBP0_ADDR:
+      return SET_BITS(e->lcd.obp0.color3, PALETTE_COLOR3) |
+             SET_BITS(e->lcd.obp0.color2, PALETTE_COLOR2) |
+             SET_BITS(e->lcd.obp0.color1, PALETTE_COLOR1);
+    case HW_OBP1_ADDR:
+      return SET_BITS(e->lcd.obp1.color3, PALETTE_COLOR3) |
+             SET_BITS(e->lcd.obp1.color2, PALETTE_COLOR2) |
+             SET_BITS(e->lcd.obp1.color1, PALETTE_COLOR1);
     case HW_IE_ADDR: return e->interrupts.IE;
     default:
       break;
@@ -809,28 +892,51 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 
   switch (addr) {
+    case HW_SB_ADDR: /* TODO */ break;
+    case HW_SC_ADDR:
+      e->serial.transfer_start = GET_BITS(value, SC_TRANSFER_START);
+      e->serial.clock_speed = GET_BITS(value, SC_CLOCK_SPEED);
+      e->serial.shift_clock = GET_BITS(value, SC_SHIFT_CLOCK);
+      break;
     case HW_IF_ADDR: e->interrupts.IF = value; break;
     case HW_LCDC_ADDR:
-      e->lcd.lcdc.display = TEST(value, LCDC_DISPLAY);
+      e->lcd.lcdc.display = GET_BITS(value, LCDC_DISPLAY);
       e->lcd.lcdc.window_tile_map_select =
-          TEST(value, LCDC_WINDOW_TILE_MAP_SELECT);
-      e->lcd.lcdc.window_display = TEST(value, LCDC_WINDOW_DISPLAY);
-      e->lcd.lcdc.bg_tile_data_select = TEST(value, LCDC_BG_TILE_DATA_SELECT);
-      e->lcd.lcdc.bg_tile_map_select = TEST(value, LCDC_BG_TILE_MAP_SELECT);
-      e->lcd.lcdc.obj_size = TEST(value, LCDC_OBJ_SIZE);
-      e->lcd.lcdc.obj_display = TEST(value, LCDC_OBJ_DISPLAY);
-      e->lcd.lcdc.bg_display = TEST(value, LCDC_BG_DISPLAY);
+          GET_BITS(value, LCDC_WINDOW_TILE_MAP_SELECT);
+      e->lcd.lcdc.window_display = GET_BITS(value, LCDC_WINDOW_DISPLAY);
+      e->lcd.lcdc.bg_tile_data_select =
+          GET_BITS(value, LCDC_BG_TILE_DATA_SELECT);
+      e->lcd.lcdc.bg_tile_map_select = GET_BITS(value, LCDC_BG_TILE_MAP_SELECT);
+      e->lcd.lcdc.obj_size = GET_BITS(value, LCDC_OBJ_SIZE);
+      e->lcd.lcdc.obj_display = GET_BITS(value, LCDC_OBJ_DISPLAY);
+      e->lcd.lcdc.bg_display = GET_BITS(value, LCDC_BG_DISPLAY);
       break;
     case HW_STAT_ADDR:
-      e->lcd.stat.y_compare_intr = TEST(value, STAT_YCOMPARE_INTR);
-      e->lcd.stat.using_oam_intr = TEST(value, STAT_USING_OAM_INTR);
-      e->lcd.stat.vblank_intr = TEST(value, STAT_VBLANK_INTR);
-      e->lcd.stat.hblank_intr = TEST(value, STAT_HBLANK_INTR);
+      e->lcd.stat.y_compare_intr = GET_BITS(value, STAT_YCOMPARE_INTR);
+      e->lcd.stat.using_oam_intr = GET_BITS(value, STAT_USING_OAM_INTR);
+      e->lcd.stat.vblank_intr = GET_BITS(value, STAT_VBLANK_INTR);
+      e->lcd.stat.hblank_intr = GET_BITS(value, STAT_HBLANK_INTR);
       break;
     case HW_SCY_ADDR: e->lcd.SCY = value; break;
     case HW_SCX_ADDR: e->lcd.SCX = value; break;
     case HW_LY_ADDR: break;
     case HW_LYC_ADDR: e->lcd.LYC = value; break;
+    case HW_BGP_ADDR:
+      e->lcd.bgp.color3 = GET_BITS(value, PALETTE_COLOR3);
+      e->lcd.bgp.color2 = GET_BITS(value, PALETTE_COLOR2);
+      e->lcd.bgp.color1 = GET_BITS(value, PALETTE_COLOR1);
+      e->lcd.bgp.color0 = GET_BITS(value, PALETTE_COLOR0);
+      break;
+    case HW_OBP0_ADDR:
+      e->lcd.obp0.color3 = GET_BITS(value, PALETTE_COLOR3);
+      e->lcd.obp0.color2 = GET_BITS(value, PALETTE_COLOR2);
+      e->lcd.obp0.color1 = GET_BITS(value, PALETTE_COLOR1);
+      break;
+    case HW_OBP1_ADDR:
+      e->lcd.obp1.color3 = GET_BITS(value, PALETTE_COLOR3);
+      e->lcd.obp1.color2 = GET_BITS(value, PALETTE_COLOR2);
+      e->lcd.obp1.color1 = GET_BITS(value, PALETTE_COLOR1);
+      break;
     case HW_IE_ADDR: e->interrupts.IE = value; break;
     default:
       NOT_IMPLEMENTED("write_hardware not implemented. Addr: 0x%04x\n", addr);
@@ -1235,19 +1341,20 @@ const char* s_cb_opcode_mnemonic[] = {
         [0xFF] = "SET 7,A",
 };
 
-/* Returns the opcode size. */
-uint8_t print_instruction(struct Emulator* e, Address addr) {
+void print_instruction(struct Emulator* e, Address addr) {
+  if (!s_trace) {
+    return;
+  }
+
   uint8_t opcode = read_u8(e, addr);
-  uint8_t bytes;
   if (opcode == 0xcb) {
     uint8_t cb_opcode = read_u8(e, addr + 1);
     const char* mnemonic = s_cb_opcode_mnemonic[cb_opcode];
     printf("0x%04x: cb %02x     %-15s", addr, cb_opcode, mnemonic);
-    bytes = 2;
   } else {
     char buffer[64];
     const char* mnemonic = s_opcode_mnemonic[opcode];
-    bytes = s_opcode_bytes[opcode];
+    uint8_t bytes = s_opcode_bytes[opcode];
     switch (bytes) {
       case 0:
         printf("0x%04x: %02x        %-15s", addr, opcode, "*INVALID*");
@@ -1275,10 +1382,13 @@ uint8_t print_instruction(struct Emulator* e, Address addr) {
         break;
     }
   }
-  return bytes;
 }
 
 void print_registers(struct Registers* reg) {
+  if (!s_trace) {
+    return;
+  }
+
   printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
          reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
          reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
@@ -1327,7 +1437,7 @@ uint8_t s_cb_opcode_cycles[] = {
     /* f0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
 };
 
-#define NI printf("\n"); NOT_IMPLEMENTED("not implemented!\n")
+#define NI NOT_IMPLEMENTED("opcode not implemented!\n")
 
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
@@ -1732,7 +1842,9 @@ int main(int argc, char** argv) {
   while (1) {
     uint8_t cycles = execute_instruction(e);
     update_cycles(e, cycles);
-    printf(" cycles: %u mode: %u\n", e->cycles, e->lcd.stat.mode);
+    if (s_trace) {
+      printf(" cycles: %u mode: %u\n", e->cycles, e->lcd.stat.mode);
+    }
   }
   return 0;
 error:
