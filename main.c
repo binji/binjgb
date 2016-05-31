@@ -109,6 +109,7 @@ typedef uint16_t MaskedAddress;
 #define VBLANK_CYCLES 4560        /* LCD STAT mode 1 */
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
+#define DMA_CYCLES 640
 
 #define ADDR_MASK_4K 0x0fff
 #define ADDR_MASK_8K 0x1fff
@@ -130,6 +131,8 @@ typedef uint16_t MaskedAddress;
 #define IO_JOYP_ADDR 0xff00
 #define IO_HIGH_RAM_START_ADDR 0xff80
 #define IO_HIGH_RAM_END_ADDR 0xfffe
+
+#define OAM_TRANSFER_SIZE (IO_OAM_END_ADDR - IO_OAM_START_ADDR + 1)
 
 #define IO_SB_ADDR 0xff01   /* Serial transfer data */
 #define IO_SC_ADDR 0xff02   /* Serial transfer control */
@@ -161,6 +164,7 @@ typedef uint16_t MaskedAddress;
 #define IO_SCX_ADDR 0xff43  /* Screen X */
 #define IO_LY_ADDR 0xff44   /* Y Line */
 #define IO_LYC_ADDR 0xff45  /* Y Line compare */
+#define IO_DMA_ADDR 0xff46  /* DMA transfer to OAM */
 #define IO_BGP_ADDR 0xff47  /* BG palette */
 #define IO_OBP0_ADDR 0xff48 /* OBJ palette 0 */
 #define IO_OBP1_ADDR 0xff49 /* OBJ palette 1 */
@@ -608,6 +612,13 @@ struct LCD {
   uint8_t LY;             /* Line Y */
   uint8_t LYC;            /* Line Y Compare */
   struct Palette bgp;     /* BG Palette */
+  uint32_t cycles;
+};
+
+struct DMA {
+  enum Bool active;
+  Address addr;
+  uint32_t cycles;
 };
 
 struct Emulator {
@@ -622,8 +633,8 @@ struct Emulator {
   struct Serial serial;
   struct Sound sound;
   struct LCD lcd;
+  struct DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
-  uint32_t cycles;
 };
 
 enum Bool s_trace = FALSE;
@@ -1209,6 +1220,8 @@ uint8_t read_io(struct Emulator* e, Address addr) {
       return e->lcd.LY;
     case IO_LYC_ADDR:
       return e->lcd.LYC;
+    case IO_DMA_ADDR:
+      return 0; /* Write only. */
     case IO_BGP_ADDR:
       return TO_REG(e->lcd.bgp.color3, PALETTE_COLOR3) |
              TO_REG(e->lcd.bgp.color2, PALETTE_COLOR2) |
@@ -1232,6 +1245,11 @@ uint8_t read_io(struct Emulator* e, Address addr) {
 
 uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
+  if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
+    LOG("read_u8(0x%04x) during DMA.\n", addr);
+    return 0;
+  }
+
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
@@ -1276,14 +1294,22 @@ uint16_t read_u16(struct Emulator* e, Address addr) {
 }
 
 void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  /* ignore writes if the display is on, and the io is using vram */
-  if (!e->lcd.lcdc.display || e->lcd.stat.mode != LCD_MODE_USING_OAM_VRAM) {
-    assert(addr <= ADDR_MASK_8K);
-    e->vram.data[addr] = value;
+  /* Ignore writes if the display is on, and the hardware is using vram. */
+  if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
+    return;
   }
+
+  assert(addr <= ADDR_MASK_8K);
+  e->vram.data[addr] = value;
 }
 
 void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  /* Ignore writes if the display is on, and the hardware is using OAM. */
+  if (e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
+                              e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM)) {
+    return;
+  }
+
   uint8_t obj_index = addr >> 2;
   struct Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
@@ -1456,6 +1482,11 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     case IO_LYC_ADDR:
       e->lcd.LYC = value;
       break;
+    case IO_DMA_ADDR:
+      e->dma.active = TRUE;
+      e->dma.addr = value << 8;
+      e->dma.cycles = 0;
+      break;
     case IO_BGP_ADDR:
       e->lcd.bgp.color3 = FROM_REG(value, PALETTE_COLOR3);
       e->lcd.bgp.color2 = FROM_REG(value, PALETTE_COLOR2);
@@ -1483,6 +1514,11 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 
 void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   struct MemoryTypeAddressPair pair = map_address(addr);
+  if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
+    LOG("write_u8(0x%04x, 0x%02x) during DMA.\n", addr, value);
+    return;
+  }
+
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       e->memory_map.write_rom(e, pair.addr, value);
@@ -2338,19 +2374,34 @@ uint8_t execute_instruction(struct Emulator* e) {
   return cycles;
 }
 
-void update_cycles(struct Emulator* e, uint8_t cycles) {
+void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
+  if (!e->dma.active) {
+    return;
+  }
+
+  e->dma.cycles += cycles;
+  if (e->dma.cycles >= DMA_CYCLES) {
+    e->dma.active = FALSE;
+    Address i;
+    for (i = 0; i < OAM_TRANSFER_SIZE; ++i) {
+      write_u8(e, IO_OAM_START_ADDR + i, read_u8(e, e->dma.addr + i));
+    }
+  }
+}
+
+void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   enum Bool line_edge = FALSE;
-  e->cycles += cycles;
+  e->lcd.cycles += cycles;
   switch (e->lcd.stat.mode) {
     case LCD_MODE_USING_OAM:
-      if (e->cycles >= USING_OAM_CYCLES) {
-        e->cycles -= USING_OAM_CYCLES;
+      if (e->lcd.cycles >= USING_OAM_CYCLES) {
+        e->lcd.cycles -= USING_OAM_CYCLES;
         e->lcd.stat.mode = LCD_MODE_USING_OAM_VRAM;
       }
       break;
     case LCD_MODE_USING_OAM_VRAM:
-      if (e->cycles >= USING_OAM_VRAM_CYCLES) {
-        e->cycles -= USING_OAM_VRAM_CYCLES;
+      if (e->lcd.cycles >= USING_OAM_VRAM_CYCLES) {
+        e->lcd.cycles -= USING_OAM_VRAM_CYCLES;
         e->lcd.stat.mode = LCD_MODE_HBLANK;
         if (e->lcd.stat.hblank_intr) {
           e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
@@ -2358,9 +2409,9 @@ void update_cycles(struct Emulator* e, uint8_t cycles) {
       }
       break;
     case LCD_MODE_HBLANK:
-      if (e->cycles >= HBLANK_CYCLES) {
+      if (e->lcd.cycles >= HBLANK_CYCLES) {
         line_edge = TRUE;
-        e->cycles -= HBLANK_CYCLES;
+        e->lcd.cycles -= HBLANK_CYCLES;
         e->lcd.LY++;
         if (e->lcd.LY == 144) {
           e->lcd.stat.mode = LCD_MODE_VBLANK;
@@ -2377,9 +2428,9 @@ void update_cycles(struct Emulator* e, uint8_t cycles) {
       }
       break;
     case LCD_MODE_VBLANK:
-      if (e->cycles >= LINE_CYCLES) {
+      if (e->lcd.cycles >= LINE_CYCLES) {
         line_edge = TRUE;
-        e->cycles -= LINE_CYCLES;
+        e->lcd.cycles -= LINE_CYCLES;
         e->lcd.LY++;
         if (e->lcd.LY == 154) {
           e->lcd.LY = 0;
@@ -2393,6 +2444,9 @@ void update_cycles(struct Emulator* e, uint8_t cycles) {
   }
   if (line_edge && e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC) {
     e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+  }
+  if (s_trace) {
+    printf(" cycles: %u mode: %u\n", e->lcd.cycles, e->lcd.stat.mode);
   }
 }
 
@@ -2436,10 +2490,8 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(init_emulator(e, &rom_data)));
   while (1) {
     uint8_t cycles = execute_instruction(e);
-    update_cycles(e, cycles);
-    if (s_trace) {
-      printf(" cycles: %u mode: %u\n", e->cycles, e->lcd.stat.mode);
-    }
+    update_dma_cycles(e, cycles);
+    update_lcd_cycles(e, cycles);
     handle_interrupts(e);
   }
   return 0;
