@@ -134,41 +134,49 @@ typedef uint16_t MaskedAddress;
 
 #define OAM_TRANSFER_SIZE (IO_OAM_END_ADDR - IO_OAM_START_ADDR + 1)
 
-#define IO_SB_ADDR 0xff01   /* Serial transfer data */
-#define IO_SC_ADDR 0xff02   /* Serial transfer control */
-#define IO_IF_ADDR 0xff0f   /* Interrupt request */
-#define IO_NR10_ADDR 0xff10 /* Channel 1 sweep */
-#define IO_NR11_ADDR 0xff11 /* Channel 1 sound length/wave pattern */
-#define IO_NR12_ADDR 0xff12 /* Channel 1 volume envelope */
-#define IO_NR13_ADDR 0xff13 /* Channel 1 frequency lo */
-#define IO_NR14_ADDR 0xff14 /* Channel 1 frequency hi */
-#define IO_NR21_ADDR 0xff16 /* Channel 2 sound length/wave pattern */
-#define IO_NR22_ADDR 0xff17 /* Channel 2 volume envelope */
-#define IO_NR23_ADDR 0xff18 /* Channel 2 frequency lo */
-#define IO_NR24_ADDR 0xff19 /* Channel 2 frequency hi */
-#define IO_NR30_ADDR 0xff1a /* Channel 3 sound on/off */
-#define IO_NR31_ADDR 0xff1b /* Channel 3 sound length */
-#define IO_NR32_ADDR 0xff1c /* Channel 3 select output level */
-#define IO_NR33_ADDR 0xff1d /* Channel 3 frequency lo */
-#define IO_NR34_ADDR 0xff1e /* Channel 3 frequency hi */
-#define IO_NR41_ADDR 0xff20 /* Channel 4 sound length */
-#define IO_NR42_ADDR 0xff21 /* Channel 4 volume envelope */
-#define IO_NR43_ADDR 0xff22 /* Channel 4 polynomial counter */
-#define IO_NR44_ADDR 0xff23 /* Channel 4 counter/consecutive; initial */
-#define IO_NR50_ADDR 0xff24 /* Sound volume */
-#define IO_NR51_ADDR 0xff25 /* Sound output select */
-#define IO_NR52_ADDR 0xff26 /* Sound enabled */
-#define IO_LCDC_ADDR 0xff40 /* LCD control */
-#define IO_STAT_ADDR 0xff41 /* LCD status */
-#define IO_SCY_ADDR 0xff42  /* Screen Y */
-#define IO_SCX_ADDR 0xff43  /* Screen X */
-#define IO_LY_ADDR 0xff44   /* Y Line */
-#define IO_LYC_ADDR 0xff45  /* Y Line compare */
-#define IO_DMA_ADDR 0xff46  /* DMA transfer to OAM */
-#define IO_BGP_ADDR 0xff47  /* BG palette */
-#define IO_OBP0_ADDR 0xff48 /* OBJ palette 0 */
-#define IO_OBP1_ADDR 0xff49 /* OBJ palette 1 */
-#define IO_IE_ADDR 0xffff   /* Interrupt enable */
+#define FOREACH_IO_REG(V)                                    \
+  V(P1, 0x00)   /* Joypad */                                 \
+  V(SB, 0x01)   /* Serial transfer data */                   \
+  V(SC, 0x02)   /* Serial transfer control */                \
+  V(DIV, 0x04)  /* Divider */                                \
+  V(TIMA, 0x05) /* Timer counter */                          \
+  V(TMA, 0x06)  /* Timer modulo */                           \
+  V(TAC, 0x07)  /* Timer control */                          \
+  V(IF, 0x0f)   /* Interrupt request */                      \
+  V(NR10, 0x10) /* Channel 1 sweep */                        \
+  V(NR11, 0x11) /* Channel 1 sound length/wave pattern */    \
+  V(NR12, 0x12) /* Channel 1 volume envelope */              \
+  V(NR13, 0x13) /* Channel 1 frequency lo */                 \
+  V(NR14, 0x14) /* Channel 1 frequency hi */                 \
+  V(NR21, 0x16) /* Channel 2 sound length/wave pattern */    \
+  V(NR22, 0x17) /* Channel 2 volume envelope */              \
+  V(NR23, 0x18) /* Channel 2 frequency lo */                 \
+  V(NR24, 0x19) /* Channel 2 frequency hi */                 \
+  V(NR30, 0x1a) /* Channel 3 sound on/off */                 \
+  V(NR31, 0x1b) /* Channel 3 sound length */                 \
+  V(NR32, 0x1c) /* Channel 3 select output level */          \
+  V(NR33, 0x1d) /* Channel 3 frequency lo */                 \
+  V(NR34, 0x1e) /* Channel 3 frequency hi */                 \
+  V(NR41, 0x20) /* Channel 4 sound length */                 \
+  V(NR42, 0x21) /* Channel 4 volume envelope */              \
+  V(NR43, 0x22) /* Channel 4 polynomial counter */           \
+  V(NR44, 0x23) /* Channel 4 counter/consecutive; initial */ \
+  V(NR50, 0x24) /* Sound volume */                           \
+  V(NR51, 0x25) /* Sound output select */                    \
+  V(NR52, 0x26) /* Sound enabled */                          \
+  V(LCDC, 0x40) /* LCD control */                            \
+  V(STAT, 0x41) /* LCD status */                             \
+  V(SCY, 0x42)  /* Screen Y */                               \
+  V(SCX, 0x43)  /* Screen X */                               \
+  V(LY, 0x44)   /* Y Line */                                 \
+  V(LYC, 0x45)  /* Y Line compare */                         \
+  V(DMA, 0x46)  /* DMA transfer to OAM */                    \
+  V(BGP, 0x47)  /* BG palette */                             \
+  V(OBP0, 0x48) /* OBJ palette 0 */                          \
+  V(OBP1, 0x49) /* OBJ palette 1 */                          \
+  V(WY, 0x4a)   /* Window Y */                               \
+  V(WX, 0x4b)   /* Window X */                               \
+  V(IE, 0xff)   /* Interrupt enable */
 
 #define INTERRUPT_VBLANK_MASK 0x01
 #define INTERRUPT_LCD_STAT_MASK 0x02
@@ -367,6 +375,21 @@ DEFINE_NAMED_ENUM(DESTINATION_CODE,
                   DestinationCode,
                   destination_code,
                   FOREACH_DESTINATION_CODE)
+
+enum IOReg {
+#define V(name, offset) IO_##name##_ADDR = 0xff00 + offset,
+  FOREACH_IO_REG(V)
+#undef V
+};
+
+const char* get_io_reg_string(Address addr) {
+  assert(addr >= 0xff00);
+  static const char* s_strings[] = {FOREACH_IO_REG(DEFINE_STRING)};
+  uint8_t offset = addr - 0xff00;
+  const char* result =
+      get_enum_string(s_strings, ARRAY_SIZE(s_strings), offset);
+  return result != NULL ? result : "???";
+}
 
 uint32_t s_rom_bank_size[] = {
 #define V(name, code, bank_size) [code] = bank_size,
@@ -1238,7 +1261,7 @@ uint8_t read_io(struct Emulator* e, Address addr) {
     case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
-      LOG("read_io(0x%04x) ignored.\n", addr);
+      LOG("read_io(0x%04x [%s]) ignored.\n", addr, get_io_reg_string(addr));
       return 0;
   }
 }
@@ -1358,7 +1381,7 @@ void from_nrx4_reg(struct Channel* channel, uint8_t value) {
 }
 
 void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  LOG("write_io(0x%04x, %u)\n", addr, value);
+  LOG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_SB_ADDR: /* TODO */
       break;
