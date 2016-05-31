@@ -1257,8 +1257,13 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
     case MEMORY_MAP_UNUSED:
       return 0;
 
-    case MEMORY_MAP_HARDWARE:
-      return read_hardware(e, pair.addr);
+    case MEMORY_MAP_HARDWARE: {
+      uint8_t value = read_hardware(e, pair.addr);
+#if 1
+      LOG("read_hardware(0x%04x) = 0x%02x\n", pair.addr, value);
+#endif
+      return value;
+    }
 
     case MEMORY_MAP_HIGH_RAM:
       return e->hram[pair.addr];
@@ -1985,6 +1990,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_Z FLAG(Z)
 #define COND_NC (!FLAG(C))
 #define COND_C FLAG(C)
+#define CLEAR_F() FLAG(Z) = 0; FLAG(N) = 0; FLAG(H) = 0; FLAG(C) = 0
 #define SET_Z(X) FLAG(Z) = (X) == 0
 #define TEST_CARRY(X, OP, Y, CMP, TO) (((int16_t)(X) OP (int16_t)(Y)) CMP TO)
 #define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
@@ -2026,10 +2032,15 @@ uint8_t s_cb_opcode_cycles[] = {
 #define POP_RR(RR) REG(RR) = READ16(REG(SP)); REG(SP) += 2
 #define PUSH_AF() REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
 #define POP_AF() set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
-#define XOR_R(R) REG(A) ^= REG(R); SET_Z(REG(A))
-#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); SET_Z(REG(A))
-#define OR_R(R) REG(A) |= REG(R); SET_Z(REG(A))
-#define OR_MR(MR) REG(A) |= READ8(REG(MR)); SET_Z(REG(A))
+#define AND_FLAGS(X) CLEAR_F(); SET_Z(X); SET_N(1)
+#define AND_R(R) REG(A) &= REG(R); AND_FLAGS(REG(A))
+#define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS(REG(A))
+#define XOR_FLAGS(X) CLEAR_F(); SET_Z(REG(A))
+#define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS(REG(A))
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); XOR_FLAGS(REG(A))
+#define OR_FLAGS(X) XOR_FLAGS(X)
+#define OR_R(R) REG(A) |= REG(R); OR_FLAGS(REG(A))
+#define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS(REG(A))
 #define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
@@ -2218,14 +2229,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x9d: NI; break;
       case 0x9e: NI; break;
       case 0x9f: NI; break;
-      case 0xa0: NI; break;
-      case 0xa1: NI; break;
-      case 0xa2: NI; break;
-      case 0xa3: NI; break;
-      case 0xa4: NI; break;
-      case 0xa5: NI; break;
-      case 0xa6: NI; break;
-      case 0xa7: NI; break;
+      case 0xa0: AND_R(B); break;
+      case 0xa1: AND_R(C); break;
+      case 0xa2: AND_R(D); break;
+      case 0xa3: AND_R(E); break;
+      case 0xa4: AND_R(H); break;
+      case 0xa5: AND_R(L); break;
+      case 0xa6: AND_MR(HL); break;
+      case 0xa7: AND_R(A); break;
       case 0xa8: XOR_R(B); break;
       case 0xa9: XOR_R(C); break;
       case 0xaa: XOR_R(D); break;
