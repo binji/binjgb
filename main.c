@@ -121,50 +121,50 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
-#define HW_OAM_START_ADDR 0xfe00
-#define HW_OAM_END_ADDR 0xfe9f
-#define HW_UNUSED_START_ADDR 0xfea0
-#define HW_UNUSED_END_ADDR 0xfeff
-#define HW_IO_START_ADDR 0xff00
-#define HW_IO_END_ADDR 0xff7f
-#define HW_JOYP_ADDR 0xff00
-#define HW_HIGH_RAM_START_ADDR 0xff80
-#define HW_HIGH_RAM_END_ADDR 0xfffe
+#define IO_OAM_START_ADDR 0xfe00
+#define IO_OAM_END_ADDR 0xfe9f
+#define IO_UNUSED_START_ADDR 0xfea0
+#define IO_UNUSED_END_ADDR 0xfeff
+#define IO_IO_START_ADDR 0xff00
+#define IO_IO_END_ADDR 0xff7f
+#define IO_JOYP_ADDR 0xff00
+#define IO_HIGH_RAM_START_ADDR 0xff80
+#define IO_HIGH_RAM_END_ADDR 0xfffe
 
-#define HW_SB_ADDR 0xff01   /* Serial transfer data */
-#define HW_SC_ADDR 0xff02   /* Serial transfer control */
-#define HW_IF_ADDR 0xff0f   /* Interrupt request */
-#define HW_NR10_ADDR 0xff10 /* Channel 1 sweep */
-#define HW_NR11_ADDR 0xff11 /* Channel 1 sound length/wave pattern */
-#define HW_NR12_ADDR 0xff12 /* Channel 1 volume envelope */
-#define HW_NR13_ADDR 0xff13 /* Channel 1 frequency lo */
-#define HW_NR14_ADDR 0xff14 /* Channel 1 frequency hi */
-#define HW_NR21_ADDR 0xff16 /* Channel 2 sound length/wave pattern */
-#define HW_NR22_ADDR 0xff17 /* Channel 2 volume envelope */
-#define HW_NR23_ADDR 0xff18 /* Channel 2 frequency lo */
-#define HW_NR24_ADDR 0xff19 /* Channel 2 frequency hi */
-#define HW_NR30_ADDR 0xff1a /* Channel 3 sound on/off */
-#define HW_NR31_ADDR 0xff1b /* Channel 3 sound length */
-#define HW_NR32_ADDR 0xff1c /* Channel 3 select output level */
-#define HW_NR33_ADDR 0xff1d /* Channel 3 frequency lo */
-#define HW_NR34_ADDR 0xff1e /* Channel 3 frequency hi */
-#define HW_NR41_ADDR 0xff20 /* Channel 4 sound length */
-#define HW_NR42_ADDR 0xff21 /* Channel 4 volume envelope */
-#define HW_NR43_ADDR 0xff22 /* Channel 4 polynomial counter */
-#define HW_NR44_ADDR 0xff23 /* Channel 4 counter/consecutive; initial */
-#define HW_NR50_ADDR 0xff24 /* Sound volume */
-#define HW_NR51_ADDR 0xff25 /* Sound output select */
-#define HW_NR52_ADDR 0xff26 /* Sound enabled */
-#define HW_LCDC_ADDR 0xff40 /* LCD control */
-#define HW_STAT_ADDR 0xff41 /* LCD status */
-#define HW_SCY_ADDR 0xff42  /* Screen Y */
-#define HW_SCX_ADDR 0xff43  /* Screen X */
-#define HW_LY_ADDR 0xff44   /* Y Line */
-#define HW_LYC_ADDR 0xff45  /* Y Line compare */
-#define HW_BGP_ADDR 0xff47  /* BG palette */
-#define HW_OBP0_ADDR 0xff48 /* OBJ palette 0 */
-#define HW_OBP1_ADDR 0xff49 /* OBJ palette 1 */
-#define HW_IE_ADDR 0xffff   /* Interrupt enable */
+#define IO_SB_ADDR 0xff01   /* Serial transfer data */
+#define IO_SC_ADDR 0xff02   /* Serial transfer control */
+#define IO_IF_ADDR 0xff0f   /* Interrupt request */
+#define IO_NR10_ADDR 0xff10 /* Channel 1 sweep */
+#define IO_NR11_ADDR 0xff11 /* Channel 1 sound length/wave pattern */
+#define IO_NR12_ADDR 0xff12 /* Channel 1 volume envelope */
+#define IO_NR13_ADDR 0xff13 /* Channel 1 frequency lo */
+#define IO_NR14_ADDR 0xff14 /* Channel 1 frequency hi */
+#define IO_NR21_ADDR 0xff16 /* Channel 2 sound length/wave pattern */
+#define IO_NR22_ADDR 0xff17 /* Channel 2 volume envelope */
+#define IO_NR23_ADDR 0xff18 /* Channel 2 frequency lo */
+#define IO_NR24_ADDR 0xff19 /* Channel 2 frequency hi */
+#define IO_NR30_ADDR 0xff1a /* Channel 3 sound on/off */
+#define IO_NR31_ADDR 0xff1b /* Channel 3 sound length */
+#define IO_NR32_ADDR 0xff1c /* Channel 3 select output level */
+#define IO_NR33_ADDR 0xff1d /* Channel 3 frequency lo */
+#define IO_NR34_ADDR 0xff1e /* Channel 3 frequency hi */
+#define IO_NR41_ADDR 0xff20 /* Channel 4 sound length */
+#define IO_NR42_ADDR 0xff21 /* Channel 4 volume envelope */
+#define IO_NR43_ADDR 0xff22 /* Channel 4 polynomial counter */
+#define IO_NR44_ADDR 0xff23 /* Channel 4 counter/consecutive; initial */
+#define IO_NR50_ADDR 0xff24 /* Sound volume */
+#define IO_NR51_ADDR 0xff25 /* Sound output select */
+#define IO_NR52_ADDR 0xff26 /* Sound enabled */
+#define IO_LCDC_ADDR 0xff40 /* LCD control */
+#define IO_STAT_ADDR 0xff41 /* LCD status */
+#define IO_SCY_ADDR 0xff42  /* Screen Y */
+#define IO_SCX_ADDR 0xff43  /* Screen X */
+#define IO_LY_ADDR 0xff44   /* Y Line */
+#define IO_LYC_ADDR 0xff45  /* Y Line compare */
+#define IO_BGP_ADDR 0xff47  /* BG palette */
+#define IO_OBP0_ADDR 0xff48 /* OBJ palette 0 */
+#define IO_OBP1_ADDR 0xff49 /* OBJ palette 1 */
+#define IO_IE_ADDR 0xffff   /* Interrupt enable */
 
 #define INTERRUPT_VBLANK_MASK 0x01
 #define INTERRUPT_LCD_STAT_MASK 0x02
@@ -379,7 +379,7 @@ enum MemoryMapType {
   MEMORY_MAP_WORK_RAM_BANK_SWITCH,
   MEMORY_MAP_OAM,
   MEMORY_MAP_UNUSED,
-  MEMORY_MAP_HARDWARE,
+  MEMORY_MAP_IO,
   MEMORY_MAP_HIGH_RAM,
 };
 
@@ -630,7 +630,7 @@ enum Bool s_trace = FALSE;
 
 void print_instruction(struct Emulator*, Address);
 void print_registers(struct Registers*);
-void write_hardware(struct Emulator*, Address, uint8_t);
+void write_io(struct Emulator*, Address, uint8_t);
 
 enum Result read_rom_data_from_file(const char* filename,
                                     struct RomData* out_rom_data) {
@@ -964,32 +964,32 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   e->reg.SP = 0xfffe;
   e->reg.PC = 0x0100;
   e->interrupts.IME = TRUE;
-  write_hardware(e, HW_NR10_ADDR, 0x80);
-  write_hardware(e, HW_NR11_ADDR, 0xbf);
-  write_hardware(e, HW_NR12_ADDR, 0xf3);
-  write_hardware(e, HW_NR14_ADDR, 0xbf);
-  write_hardware(e, HW_NR21_ADDR, 0x3f);
-  write_hardware(e, HW_NR22_ADDR, 0x00);
-  write_hardware(e, HW_NR24_ADDR, 0xbf);
-  write_hardware(e, HW_NR30_ADDR, 0x7f);
-  write_hardware(e, HW_NR31_ADDR, 0xff);
-  write_hardware(e, HW_NR32_ADDR, 0x9f);
-  write_hardware(e, HW_NR33_ADDR, 0xbf);
-  write_hardware(e, HW_NR41_ADDR, 0xff);
-  write_hardware(e, HW_NR42_ADDR, 0x00);
-  write_hardware(e, HW_NR43_ADDR, 0x00);
-  write_hardware(e, HW_NR44_ADDR, 0xbf);
-  write_hardware(e, HW_NR50_ADDR, 0x77);
-  write_hardware(e, HW_NR51_ADDR, 0xf3);
-  write_hardware(e, HW_NR52_ADDR, 0xf1);
-  write_hardware(e, HW_LCDC_ADDR, 0x91);
-  write_hardware(e, HW_SCY_ADDR, 0x00);
-  write_hardware(e, HW_SCX_ADDR, 0x00);
-  write_hardware(e, HW_LYC_ADDR, 0x00);
-  write_hardware(e, HW_BGP_ADDR, 0xfc);
-  write_hardware(e, HW_OBP0_ADDR, 0xff);
-  write_hardware(e, HW_OBP1_ADDR, 0xff);
-  write_hardware(e, HW_IE_ADDR, 0x0);
+  write_io(e, IO_NR10_ADDR, 0x80);
+  write_io(e, IO_NR11_ADDR, 0xbf);
+  write_io(e, IO_NR12_ADDR, 0xf3);
+  write_io(e, IO_NR14_ADDR, 0xbf);
+  write_io(e, IO_NR21_ADDR, 0x3f);
+  write_io(e, IO_NR22_ADDR, 0x00);
+  write_io(e, IO_NR24_ADDR, 0xbf);
+  write_io(e, IO_NR30_ADDR, 0x7f);
+  write_io(e, IO_NR31_ADDR, 0xff);
+  write_io(e, IO_NR32_ADDR, 0x9f);
+  write_io(e, IO_NR33_ADDR, 0xbf);
+  write_io(e, IO_NR41_ADDR, 0xff);
+  write_io(e, IO_NR42_ADDR, 0x00);
+  write_io(e, IO_NR43_ADDR, 0x00);
+  write_io(e, IO_NR44_ADDR, 0xbf);
+  write_io(e, IO_NR50_ADDR, 0x77);
+  write_io(e, IO_NR51_ADDR, 0xf3);
+  write_io(e, IO_NR52_ADDR, 0xf1);
+  write_io(e, IO_LCDC_ADDR, 0x91);
+  write_io(e, IO_SCY_ADDR, 0x00);
+  write_io(e, IO_SCX_ADDR, 0x00);
+  write_io(e, IO_LYC_ADDR, 0x00);
+  write_io(e, IO_BGP_ADDR, 0xfc);
+  write_io(e, IO_OBP0_ADDR, 0xff);
+  write_io(e, IO_OBP1_ADDR, 0xff);
+  write_io(e, IO_IE_ADDR, 0x0);
   return OK;
 error:
   return ERROR;
@@ -1038,29 +1038,29 @@ struct MemoryTypeAddressPair map_address(Address addr) {
       break;
 
     case 0xF:
-      if (addr < HW_OAM_START_ADDR) {
+      if (addr < IO_OAM_START_ADDR) {
         /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
         result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
         result.addr = addr & ADDR_MASK_4K;
-      } else if (addr <= HW_OAM_END_ADDR) {
+      } else if (addr <= IO_OAM_END_ADDR) {
         /* 0xfe00 - 0xfe9f */
         result.type = MEMORY_MAP_OAM;
-        result.addr = addr - HW_OAM_START_ADDR;
-      } else if (addr <= HW_UNUSED_END_ADDR) {
+        result.addr = addr - IO_OAM_START_ADDR;
+      } else if (addr <= IO_UNUSED_END_ADDR) {
         /* 0xfea0 - 0xfeff */
         result.type = MEMORY_MAP_UNUSED;
         result.addr = addr;
-      } else if (addr <= HW_IO_END_ADDR) {
+      } else if (addr <= IO_IO_END_ADDR) {
         /* 0xff00 - 0xff7f */
-        result.type = MEMORY_MAP_HARDWARE;
+        result.type = MEMORY_MAP_IO;
         result.addr = addr;
-      } else if (addr <= HW_HIGH_RAM_END_ADDR) {
+      } else if (addr <= IO_HIGH_RAM_END_ADDR) {
         /* 0xff80 - 0xfffe */
         result.type = MEMORY_MAP_HIGH_RAM;
-        result.addr = addr - HW_HIGH_RAM_START_ADDR;
+        result.addr = addr - IO_HIGH_RAM_START_ADDR;
       } else {
         /* 0xffff: IE register */
-        result.type = MEMORY_MAP_HARDWARE;
+        result.type = MEMORY_MAP_IO;
         result.addr = addr;
       }
       break;
@@ -1071,7 +1071,7 @@ struct MemoryTypeAddressPair map_address(Address addr) {
 
 uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    /* return garbage if read while the hardware is using vram */
+    /* return garbage if read while the io is using vram */
     return 0xff;
   } else {
     assert(addr <= ADDR_MASK_8K);
@@ -1108,68 +1108,68 @@ uint8_t to_nrx4_reg(struct Channel* channel) {
   return TO_REG(channel->consecutive, NRX4_COUNTER_CONSECUTIVE);
 }
 
-uint8_t read_hardware(struct Emulator* e, Address addr) {
+uint8_t read_io(struct Emulator* e, Address addr) {
   switch (addr) {
-    case HW_SB_ADDR:
+    case IO_SB_ADDR:
       return 0; /* TODO */
-    case HW_SC_ADDR:
+    case IO_SC_ADDR:
       return TO_REG(e->serial.transfer_start, SC_TRANSFER_START) |
              TO_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
              TO_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
-    case HW_IF_ADDR:
+    case IO_IF_ADDR:
       return e->interrupts.IF;
-    case HW_NR10_ADDR: {
+    case IO_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
       return TO_REG(channel->sweep_time, NR10_SWEEP_TIME) |
              TO_REG(channel->sweep_direction, NR10_SWEEP_DIRECTION) |
              TO_REG(channel->sweep_count, NR10_SWEEP_COUNT);
     }
-    case HW_NR11_ADDR:
+    case IO_NR11_ADDR:
       return to_nrx1_reg(&e->sound.channel[CHANNEL1]);
-    case HW_NR12_ADDR:
+    case IO_NR12_ADDR:
       return to_nrx2_reg(&e->sound.channel[CHANNEL1]);
-    case HW_NR13_ADDR:
+    case IO_NR13_ADDR:
       return 0; /* Write only */
-    case HW_NR14_ADDR:
+    case IO_NR14_ADDR:
       return to_nrx4_reg(&e->sound.channel[CHANNEL1]);
-    case HW_NR21_ADDR:
+    case IO_NR21_ADDR:
       return to_nrx1_reg(&e->sound.channel[CHANNEL2]);
-    case HW_NR22_ADDR:
+    case IO_NR22_ADDR:
       return to_nrx2_reg(&e->sound.channel[CHANNEL2]);
-    case HW_NR23_ADDR:
+    case IO_NR23_ADDR:
       return 0; /* Write only */
-    case HW_NR24_ADDR:
+    case IO_NR24_ADDR:
       return to_nrx4_reg(&e->sound.channel[CHANNEL2]);
-    case HW_NR30_ADDR:
+    case IO_NR30_ADDR:
       return TO_REG(e->sound.channel[CHANNEL3].on, NR30_SOUND_ON);
-    case HW_NR31_ADDR:
+    case IO_NR31_ADDR:
       return e->sound.channel[CHANNEL3].sound_length;
-    case HW_NR32_ADDR:
+    case IO_NR32_ADDR:
       return TO_REG(e->sound.channel[CHANNEL3].output_level,
                     NR32_SELECT_OUTPUT_LEVEL);
-    case HW_NR33_ADDR:
+    case IO_NR33_ADDR:
       return 0; /* Write only */
-    case HW_NR34_ADDR:
+    case IO_NR34_ADDR:
       return to_nrx4_reg(&e->sound.channel[CHANNEL3]);
-    case HW_NR41_ADDR:
+    case IO_NR41_ADDR:
       return TO_REG(e->sound.channel[CHANNEL4].sound_length, NRX1_SOUND_LENGTH);
-    case HW_NR42_ADDR:
+    case IO_NR42_ADDR:
       return to_nrx2_reg(&e->sound.channel[CHANNEL4]);
-    case HW_NR43_ADDR: {
+    case IO_NR43_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL4];
       return TO_REG(channel->shift_clock_frequency,
                     NR43_SHIFT_CLOCK_FREQUENCY) |
              TO_REG(channel->counter_step, NR43_COUNTER_STEP) |
              TO_REG(channel->divide_ratio, NR43_DIVIDE_RATIO);
     }
-    case HW_NR44_ADDR:
+    case IO_NR44_ADDR:
       return to_nrx4_reg(&e->sound.channel[CHANNEL4]);
-    case HW_NR50_ADDR:
+    case IO_NR50_ADDR:
       return TO_REG(e->sound.so2_output[VIN], NR50_VIN_SO2) |
              TO_REG(e->sound.so2_volume, NR50_SO2_VOLUME) |
              TO_REG(e->sound.so1_output[VIN], NR50_VIN_SO1) |
              TO_REG(e->sound.so1_volume, NR50_SO1_VOLUME);
-    case HW_NR51_ADDR:
+    case IO_NR51_ADDR:
       return TO_REG(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
              TO_REG(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
              TO_REG(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
@@ -1178,13 +1178,13 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
              TO_REG(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
              TO_REG(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
              TO_REG(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
-    case HW_NR52_ADDR:
+    case IO_NR52_ADDR:
       return TO_REG(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
              TO_REG(e->sound.sound_on[SOUND4], NR52_SOUND4_ON) |
              TO_REG(e->sound.sound_on[SOUND3], NR52_SOUND3_ON) |
              TO_REG(e->sound.sound_on[SOUND2], NR52_SOUND2_ON) |
              TO_REG(e->sound.sound_on[SOUND1], NR52_SOUND1_ON);
-    case HW_LCDC_ADDR:
+    case IO_LCDC_ADDR:
       return TO_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
              TO_REG(e->lcd.lcdc.window_tile_map_select,
                     LCDC_WINDOW_TILE_MAP_SELECT) |
@@ -1194,38 +1194,38 @@ uint8_t read_hardware(struct Emulator* e, Address addr) {
              TO_REG(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
              TO_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
              TO_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
-    case HW_STAT_ADDR:
+    case IO_STAT_ADDR:
       return TO_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
              TO_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
              TO_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
              TO_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
              TO_REG(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
              TO_REG(e->lcd.stat.mode, STAT_MODE);
-    case HW_SCY_ADDR:
+    case IO_SCY_ADDR:
       return e->lcd.SCY;
-    case HW_SCX_ADDR:
+    case IO_SCX_ADDR:
       return e->lcd.SCX;
-    case HW_LY_ADDR:
+    case IO_LY_ADDR:
       return e->lcd.LY;
-    case HW_LYC_ADDR:
+    case IO_LYC_ADDR:
       return e->lcd.LYC;
-    case HW_BGP_ADDR:
+    case IO_BGP_ADDR:
       return TO_REG(e->lcd.bgp.color3, PALETTE_COLOR3) |
              TO_REG(e->lcd.bgp.color2, PALETTE_COLOR2) |
              TO_REG(e->lcd.bgp.color1, PALETTE_COLOR1) |
              TO_REG(e->lcd.bgp.color0, PALETTE_COLOR0);
-    case HW_OBP0_ADDR:
+    case IO_OBP0_ADDR:
       return TO_REG(e->oam.obp[0].color3, PALETTE_COLOR3) |
              TO_REG(e->oam.obp[0].color2, PALETTE_COLOR2) |
              TO_REG(e->oam.obp[0].color1, PALETTE_COLOR1);
-    case HW_OBP1_ADDR:
+    case IO_OBP1_ADDR:
       return TO_REG(e->oam.obp[1].color3, PALETTE_COLOR3) |
              TO_REG(e->oam.obp[1].color2, PALETTE_COLOR2) |
              TO_REG(e->oam.obp[1].color1, PALETTE_COLOR1);
-    case HW_IE_ADDR:
+    case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
-      LOG("read_hardware(0x%04x) ignored.\n", addr);
+      LOG("read_io(0x%04x) ignored.\n", addr);
       return 0;
   }
 }
@@ -1257,10 +1257,10 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
     case MEMORY_MAP_UNUSED:
       return 0;
 
-    case MEMORY_MAP_HARDWARE: {
-      uint8_t value = read_hardware(e, pair.addr);
+    case MEMORY_MAP_IO: {
+      uint8_t value = read_io(e, pair.addr);
 #if 0
-      LOG("read_hardware(0x%04x) = 0x%02x\n", pair.addr, value);
+      LOG("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
 #endif
       return value;
     }
@@ -1276,7 +1276,7 @@ uint16_t read_u16(struct Emulator* e, Address addr) {
 }
 
 void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  /* ignore writes if the display is on, and the hardware is using vram */
+  /* ignore writes if the display is on, and the io is using vram */
   if (!e->lcd.lcdc.display || e->lcd.stat.mode != LCD_MODE_USING_OAM_VRAM) {
     assert(addr <= ADDR_MASK_8K);
     e->vram.data[addr] = value;
@@ -1331,70 +1331,70 @@ void from_nrx4_reg(struct Channel* channel, uint8_t value) {
   channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
 }
 
-void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  LOG("write_hardware(0x%04x, %u)\n", addr, value);
+void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  LOG("write_io(0x%04x, %u)\n", addr, value);
   switch (addr) {
-    case HW_SB_ADDR: /* TODO */
+    case IO_SB_ADDR: /* TODO */
       break;
-    case HW_SC_ADDR:
+    case IO_SC_ADDR:
       e->serial.transfer_start = FROM_REG(value, SC_TRANSFER_START);
       e->serial.clock_speed = FROM_REG(value, SC_CLOCK_SPEED);
       e->serial.shift_clock = FROM_REG(value, SC_SHIFT_CLOCK);
       break;
-    case HW_NR10_ADDR: {
+    case IO_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
       channel->sweep_time = FROM_REG(value, NR10_SWEEP_TIME);
       channel->sweep_direction = FROM_REG(value, NR10_SWEEP_DIRECTION);
       channel->sweep_count = FROM_REG(value, NR10_SWEEP_COUNT);
       break;
     }
-    case HW_NR11_ADDR:
+    case IO_NR11_ADDR:
       from_nrx1_reg(&e->sound.channel[CHANNEL1], value);
       break;
-    case HW_NR12_ADDR:
+    case IO_NR12_ADDR:
       from_nrx2_reg(&e->sound.channel[CHANNEL1], value);
       break;
-    case HW_NR13_ADDR:
+    case IO_NR13_ADDR:
       from_nrx3_reg(&e->sound.channel[CHANNEL1], value);
       break;
-    case HW_NR14_ADDR:
+    case IO_NR14_ADDR:
       from_nrx4_reg(&e->sound.channel[CHANNEL1], value);
       break;
-    case HW_NR21_ADDR:
+    case IO_NR21_ADDR:
       from_nrx1_reg(&e->sound.channel[CHANNEL2], value);
       break;
-    case HW_NR22_ADDR:
+    case IO_NR22_ADDR:
       from_nrx2_reg(&e->sound.channel[CHANNEL2], value);
       break;
-    case HW_NR23_ADDR:
+    case IO_NR23_ADDR:
       from_nrx3_reg(&e->sound.channel[CHANNEL2], value);
       break;
-    case HW_NR24_ADDR:
+    case IO_NR24_ADDR:
       from_nrx4_reg(&e->sound.channel[CHANNEL2], value);
       break;
-    case HW_NR30_ADDR:
+    case IO_NR30_ADDR:
       e->sound.channel[CHANNEL3].on = FROM_REG(value, NR30_SOUND_ON);
       break;
-    case HW_NR31_ADDR:
+    case IO_NR31_ADDR:
       e->sound.channel[CHANNEL3].sound_length = value;
       break;
-    case HW_NR32_ADDR:
+    case IO_NR32_ADDR:
       e->sound.channel[CHANNEL3].output_level =
           FROM_REG(value, NR32_SELECT_OUTPUT_LEVEL);
       break;
-    case HW_NR33_ADDR:
+    case IO_NR33_ADDR:
       from_nrx3_reg(&e->sound.channel[CHANNEL3], value);
       break;
-    case HW_NR34_ADDR:
+    case IO_NR34_ADDR:
       from_nrx4_reg(&e->sound.channel[CHANNEL3], value);
       break;
-    case HW_NR41_ADDR:
+    case IO_NR41_ADDR:
       from_nrx1_reg(&e->sound.channel[CHANNEL4], value);
       break;
-    case HW_NR42_ADDR:
+    case IO_NR42_ADDR:
       from_nrx2_reg(&e->sound.channel[CHANNEL4], value);
       break;
-    case HW_NR43_ADDR: {
+    case IO_NR43_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL4];
       channel->shift_clock_frequency =
           FROM_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
@@ -1402,16 +1402,16 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       channel->divide_ratio = FROM_REG(value, NR43_DIVIDE_RATIO);
       break;
     }
-    case HW_NR44_ADDR:
+    case IO_NR44_ADDR:
       from_nrx4_reg(&e->sound.channel[CHANNEL4], value);
       break;
-    case HW_NR50_ADDR:
+    case IO_NR50_ADDR:
       e->sound.so2_output[VIN] = FROM_REG(value, NR50_VIN_SO2);
       e->sound.so2_volume = FROM_REG(value, NR50_SO2_VOLUME);
       e->sound.so1_output[VIN] = FROM_REG(value, NR50_VIN_SO1);
       e->sound.so1_volume = FROM_REG(value, NR50_SO1_VOLUME);
       break;
-    case HW_NR51_ADDR:
+    case IO_NR51_ADDR:
       e->sound.so2_output[SOUND4] = FROM_REG(value, NR51_SOUND4_SO2);
       e->sound.so2_output[SOUND3] = FROM_REG(value, NR51_SOUND3_SO2);
       e->sound.so2_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO2);
@@ -1421,13 +1421,13 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->sound.so1_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO1);
       e->sound.so1_output[SOUND1] = FROM_REG(value, NR51_SOUND1_SO1);
       break;
-    case HW_NR52_ADDR:
+    case IO_NR52_ADDR:
       e->sound.enabled = FROM_REG(value, NR52_ALL_SOUND_ENABLED);
       break;
-    case HW_IF_ADDR:
+    case IO_IF_ADDR:
       e->interrupts.IF = value;
       break;
-    case HW_LCDC_ADDR:
+    case IO_LCDC_ADDR:
       e->lcd.lcdc.display = FROM_REG(value, LCDC_DISPLAY);
       e->lcd.lcdc.window_tile_map_select =
           FROM_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
@@ -1439,44 +1439,44 @@ void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->lcd.lcdc.obj_display = FROM_REG(value, LCDC_OBJ_DISPLAY);
       e->lcd.lcdc.bg_display = FROM_REG(value, LCDC_BG_DISPLAY);
       break;
-    case HW_STAT_ADDR:
+    case IO_STAT_ADDR:
       e->lcd.stat.y_compare_intr = FROM_REG(value, STAT_YCOMPARE_INTR);
       e->lcd.stat.using_oam_intr = FROM_REG(value, STAT_USING_OAM_INTR);
       e->lcd.stat.vblank_intr = FROM_REG(value, STAT_VBLANK_INTR);
       e->lcd.stat.hblank_intr = FROM_REG(value, STAT_HBLANK_INTR);
       break;
-    case HW_SCY_ADDR:
+    case IO_SCY_ADDR:
       e->lcd.SCY = value;
       break;
-    case HW_SCX_ADDR:
+    case IO_SCX_ADDR:
       e->lcd.SCX = value;
       break;
-    case HW_LY_ADDR:
+    case IO_LY_ADDR:
       break;
-    case HW_LYC_ADDR:
+    case IO_LYC_ADDR:
       e->lcd.LYC = value;
       break;
-    case HW_BGP_ADDR:
+    case IO_BGP_ADDR:
       e->lcd.bgp.color3 = FROM_REG(value, PALETTE_COLOR3);
       e->lcd.bgp.color2 = FROM_REG(value, PALETTE_COLOR2);
       e->lcd.bgp.color1 = FROM_REG(value, PALETTE_COLOR1);
       e->lcd.bgp.color0 = FROM_REG(value, PALETTE_COLOR0);
       break;
-    case HW_OBP0_ADDR:
+    case IO_OBP0_ADDR:
       e->oam.obp[0].color3 = FROM_REG(value, PALETTE_COLOR3);
       e->oam.obp[0].color2 = FROM_REG(value, PALETTE_COLOR2);
       e->oam.obp[0].color1 = FROM_REG(value, PALETTE_COLOR1);
       break;
-    case HW_OBP1_ADDR:
+    case IO_OBP1_ADDR:
       e->oam.obp[1].color3 = FROM_REG(value, PALETTE_COLOR3);
       e->oam.obp[1].color2 = FROM_REG(value, PALETTE_COLOR2);
       e->oam.obp[1].color1 = FROM_REG(value, PALETTE_COLOR1);
       break;
-    case HW_IE_ADDR:
+    case IO_IE_ADDR:
       e->interrupts.IE = value;
       break;
     default:
-      LOG("write_hardware(0x%04x, %u) ignored.\n", addr, value);
+      LOG("write_io(0x%04x, %u) ignored.\n", addr, value);
       break;
   }
 }
@@ -1515,8 +1515,8 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
     case MEMORY_MAP_UNUSED:
       break;
 
-    case MEMORY_MAP_HARDWARE:
-      return write_hardware(e, pair.addr, value);
+    case MEMORY_MAP_IO:
+      return write_io(e, pair.addr, value);
 
     case MEMORY_MAP_HIGH_RAM:
 #if 0
