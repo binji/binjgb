@@ -876,7 +876,7 @@ void gb_write_work_ram_bank_switch(struct Emulator* e,
                                    MaskedAddress addr,
                                    uint8_t value) {
   assert(addr <= ADDR_MASK_4K);
-  e->rom_data.data[0x1000 + addr] = value;
+  e->ram.data[0x1000 + addr] = value;
 }
 
 uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
@@ -1259,7 +1259,7 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
 
     case MEMORY_MAP_HARDWARE: {
       uint8_t value = read_hardware(e, pair.addr);
-#if 1
+#if 0
       LOG("read_hardware(0x%04x) = 0x%02x\n", pair.addr, value);
 #endif
       return value;
@@ -1519,6 +1519,9 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       return write_hardware(e, pair.addr, value);
 
     case MEMORY_MAP_HIGH_RAM:
+#if 0
+      LOG("write_hram(0x%04x, 0x%02x)\n", addr, value);
+#endif
       e->hram[pair.addr] = value;
       break;
   }
@@ -2407,9 +2410,11 @@ void handle_interrupts(struct Emulator* e) {
   if (interrupts & INTERRUPT_VBLANK_MASK) {
     LOG(">> VBLANK interrupt\n");
     vector = 0x40;
+    e->interrupts.IF &= ~INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
     LOG(">> LCD_STAT interrupt\n");
     vector = 0x48;
+    e->interrupts.IF &= ~INTERRUPT_LCD_STAT_MASK;
   } else {
     return;
   }
