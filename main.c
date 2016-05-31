@@ -89,6 +89,12 @@ typedef uint16_t MaskedAddress;
 #define OBJ_COUNT 40
 #define OBJ_PALETTE_COUNT 2
 
+#define CHANNEL_COUNT 4
+#define CHANNEL1 0
+#define CHANNEL2 1
+#define CHANNEL3 2
+#define CHANNEL4 3
+
 #define SOUND_COUNT 5
 #define SOUND1 0
 #define SOUND2 1
@@ -128,6 +134,24 @@ typedef uint16_t MaskedAddress;
 #define HW_SB_ADDR 0xff01   /* Serial transfer data */
 #define HW_SC_ADDR 0xff02   /* Serial transfer control */
 #define HW_IF_ADDR 0xff0f   /* Interrupt request */
+#define HW_NR10_ADDR 0xff10 /* Channel 1 sweep */
+#define HW_NR11_ADDR 0xff11 /* Channel 1 sound length/wave pattern */
+#define HW_NR12_ADDR 0xff12 /* Channel 1 volume envelope */
+#define HW_NR13_ADDR 0xff13 /* Channel 1 frequency lo */
+#define HW_NR14_ADDR 0xff14 /* Channel 1 frequency hi */
+#define HW_NR21_ADDR 0xff16 /* Channel 2 sound length/wave pattern */
+#define HW_NR22_ADDR 0xff17 /* Channel 2 volume envelope */
+#define HW_NR23_ADDR 0xff18 /* Channel 2 frequency lo */
+#define HW_NR24_ADDR 0xff19 /* Channel 2 frequency hi */
+#define HW_NR30_ADDR 0xff1a /* Channel 3 sound on/off */
+#define HW_NR31_ADDR 0xff1b /* Channel 3 sound length */
+#define HW_NR32_ADDR 0xff1c /* Channel 3 select output level */
+#define HW_NR33_ADDR 0xff1d /* Channel 3 frequency lo */
+#define HW_NR34_ADDR 0xff1e /* Channel 3 frequency hi */
+#define HW_NR41_ADDR 0xff20 /* Channel 4 sound length */
+#define HW_NR42_ADDR 0xff21 /* Channel 4 volume envelope */
+#define HW_NR43_ADDR 0xff22 /* Channel 4 polynomial counter */
+#define HW_NR44_ADDR 0xff23 /* Channel 4 counter/consecutive; initial */
 #define HW_NR50_ADDR 0xff24 /* Sound volume */
 #define HW_NR51_ADDR 0xff25 /* Sound output select */
 #define HW_NR52_ADDR 0xff26 /* Sound enabled */
@@ -148,11 +172,11 @@ typedef uint16_t MaskedAddress;
 #define INTERRUPT_SERIAL_MASK 0x08
 #define INTERRUPT_JOYPAD_MASK 0x10
 
-#define GET_BITS(X, MACRO) MACRO(X, DECODE)
-#define SET_BITS(X, MACRO) MACRO(X, ENCODE)
+#define FROM_REG(X, MACRO) MACRO(X, DECODE)
+#define TO_REG(X, MACRO) MACRO(X, ENCODE)
 #define BITS_MASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
-#define ENCODE(X, HI, LO) (((X) << (LO)) & BITS_MASK(HI, LO))
-#define DECODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) >> (LO))
+#define ENCODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) << (LO))
+#define DECODE(X, HI, LO) (((X) >> (LO)) & BITS_MASK(HI, LO))
 #define BITS(X, OP, HI, LO) OP(X, HI, LO)
 #define BIT(X, OP, B) OP(X, B, B)
 
@@ -160,6 +184,30 @@ typedef uint16_t MaskedAddress;
 #define CPU_FLAG_N(X, OP) BIT(X, OP, 6)
 #define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
 #define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
+
+/* TODO better names for all sound stuff */
+#define NR10_SWEEP_TIME(X, OP) BITS(X, OP, 6, 4)
+#define NR10_SWEEP_DIRECTION(X, OP) BIT(X, OP, 3)
+#define NR10_SWEEP_COUNT(X, OP) BITS(X, OP, 2, 0)
+
+#define NRX1_WAVE_DUTY(X, OP) BITS(X, OP, 7, 6)
+#define NRX1_SOUND_LENGTH(X, OP) BITS(X, OP, 5, 0)
+
+#define NRX2_INITIAL_VOLUME(X, OP) BITS(X, OP, 7, 4)
+#define NRX2_ENVELOPE_DIRECTION(X, OP) BIT(X, OP, 3)
+#define NRX2_ENVELOPE_COUNT(X, OP) BITS(X, OP, 2, 0)
+
+#define NRX4_INITIAL(X, OP) BIT(X, OP, 7)
+#define NRX4_COUNTER_CONSECUTIVE(X, OP) BIT(X, OP, 6)
+#define NRX4_FREQUENCY_HI(X, OP) BITS(X, OP, 2, 0)
+
+#define NR30_SOUND_ON(X, OP) BIT(X, OP, 7)
+
+#define NR32_SELECT_OUTPUT_LEVEL(X, OP) BITS(X, OP, 6, 5)
+
+#define NR43_SHIFT_CLOCK_FREQUENCY(X, OP) BITS(X, OP, 7, 4)
+#define NR43_COUNTER_STEP(X, OP) BIT(X, OP, 3)
+#define NR43_DIVIDE_RATIO(X, OP) BITS(X, OP, 2, 0)
 
 #define OBJ_PRIORITY(X, OP) BIT(X, OP, 7)
 #define OBJ_YFLIP(X, OP) BIT(X, OP, 6)
@@ -340,6 +388,35 @@ enum BankMode {
   BANK_MODE_RAM = 1,
 };
 
+enum SweepDirection {
+  SWEEP_DIRECTION_ADDITION = 0,
+  SWEEP_DIRECTION_SUBTRACTION = 1,
+};
+
+enum EnvelopeDirection {
+  ENVELOPE_ATTENUATE = 0,
+  ENVELOPE_AMPLIFY = 1,
+};
+
+enum WaveDuty {
+  WAVE_DUTY_12_5 = 0,
+  WAVE_DUTY_25 = 1,
+  WAVE_DUTY_50 = 2,
+  WAVE_DUTY_75 = 3,
+};
+
+enum OutputLevel {
+  OUTPUT_LEVEL_MUTE = 0,
+  OUTPUT_LEVEL_100 = 1,
+  OUTPUT_LEVEL_50 = 2,
+  OUTPUT_LEVEL_25 = 3,
+};
+
+enum CounterStep {
+  COUNTER_STEP_15 = 0,
+  COUNTER_STEP_7 = 1,
+};
+
 enum LCDMode {
   LCD_MODE_HBLANK = 0,         /* LCD mode 0 */
   LCD_MODE_VBLANK = 1,         /* LCD mode 1 */
@@ -475,6 +552,25 @@ struct Serial {
   enum Bool shift_clock;
 };
 
+struct Channel {
+  uint8_t sweep_time;                        /* Channel 1 */
+  enum SweepDirection sweep_direction;       /* Channel 1 */
+  uint8_t sweep_count;                       /* Channel 1 */
+  enum WaveDuty wave_duty;                   /* Channel 1, 2 */
+  uint8_t sound_length;                      /* All channels */
+  uint8_t initial_volume;                    /* Channel 1, 2, 4 */
+  enum EnvelopeDirection envelope_direction; /* Channel 1, 2, 4 */
+  uint8_t envelope_count;                    /* Channel 1, 2, 4 */
+  uint16_t frequency;                        /* Channel 1, 2, 3 */
+  enum Bool consecutive;                     /* All channels */
+  enum Bool initial;                         /* All channels */
+  enum Bool on;                              /* Channel 3 */
+  enum OutputLevel output_level;             /* Channel 3 */
+  uint8_t shift_clock_frequency;             /* Channel 4 */
+  enum CounterStep counter_step;             /* Channel 4 */
+  uint8_t divide_ratio;                      /* Channel 4 */
+};
+
 struct Sound {
   uint8_t so2_volume;
   uint8_t so1_volume;
@@ -482,6 +578,7 @@ struct Sound {
   enum Bool so1_output[SOUND_COUNT];
   enum Bool enabled;
   enum Bool sound_on[SOUND_COUNT];
+  struct Channel channel[CHANNEL_COUNT];
 };
 
 struct LCDControl {
@@ -533,6 +630,7 @@ enum Bool s_trace = FALSE;
 
 void print_instruction(struct Emulator*, Address);
 void print_registers(struct Registers*);
+void write_hardware(struct Emulator*, Address, uint8_t);
 
 enum Result read_rom_data_from_file(const char* filename,
                                     struct RomData* out_rom_data) {
@@ -833,10 +931,10 @@ enum Result get_memory_map(struct RomInfo* rom_info,
 }
 
 uint8_t get_f_reg(struct Registers* reg) {
-  return SET_BITS(reg->flags.Z, CPU_FLAG_Z) |
-         SET_BITS(reg->flags.N, CPU_FLAG_N) |
-         SET_BITS(reg->flags.H, CPU_FLAG_H) |
-         SET_BITS(reg->flags.C, CPU_FLAG_C);
+  return TO_REG(reg->flags.Z, CPU_FLAG_Z) |
+         TO_REG(reg->flags.N, CPU_FLAG_N) |
+         TO_REG(reg->flags.H, CPU_FLAG_H) |
+         TO_REG(reg->flags.C, CPU_FLAG_C);
 }
 
 uint16_t get_af_reg(struct Registers* reg) {
@@ -845,10 +943,10 @@ uint16_t get_af_reg(struct Registers* reg) {
 
 void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->A = af >> 8;
-  reg->flags.Z = GET_BITS(af, CPU_FLAG_Z);
-  reg->flags.N = GET_BITS(af, CPU_FLAG_N);
-  reg->flags.H = GET_BITS(af, CPU_FLAG_H);
-  reg->flags.C = GET_BITS(af, CPU_FLAG_C);
+  reg->flags.Z = FROM_REG(af, CPU_FLAG_Z);
+  reg->flags.N = FROM_REG(af, CPU_FLAG_N);
+  reg->flags.H = FROM_REG(af, CPU_FLAG_H);
+  reg->flags.C = FROM_REG(af, CPU_FLAG_C);
 }
 
 enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
@@ -866,29 +964,32 @@ enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   e->reg.SP = 0xfffe;
   e->reg.PC = 0x0100;
   e->interrupts.IME = TRUE;
-  e->lcd.lcdc.display = TRUE;
-  e->lcd.lcdc.bg_tile_data_select = TRUE;
-  e->lcd.lcdc.bg_display = TRUE;
-  e->lcd.bgp.color3 = COLOR_BLACK;
-  e->lcd.bgp.color2 = COLOR_BLACK;
-  e->lcd.bgp.color1 = COLOR_BLACK;
-  e->lcd.bgp.color0 = COLOR_WHITE;
-  e->oam.obp[1].color3 = COLOR_BLACK;
-  e->oam.obp[1].color2 = COLOR_BLACK;
-  e->oam.obp[1].color1 = COLOR_BLACK;
-  e->oam.obp[1].color0 = COLOR_BLACK;
-  e->oam.obp[0].color3 = COLOR_BLACK;
-  e->oam.obp[0].color2 = COLOR_BLACK;
-  e->oam.obp[0].color1 = COLOR_BLACK;
-  e->oam.obp[0].color0 = COLOR_BLACK;
-  e->sound.so2_volume = 7;
-  e->sound.so1_volume = 7;
-  e->sound.so2_output[SOUND4] = TRUE;
-  e->sound.so2_output[SOUND3] = TRUE;
-  e->sound.so2_output[SOUND2] = TRUE;
-  e->sound.so2_output[SOUND1] = TRUE;
-  e->sound.so1_output[SOUND2] = TRUE;
-  e->sound.so1_output[SOUND1] = TRUE;
+  write_hardware(e, HW_NR10_ADDR, 0x80);
+  write_hardware(e, HW_NR11_ADDR, 0xbf);
+  write_hardware(e, HW_NR12_ADDR, 0xf3);
+  write_hardware(e, HW_NR14_ADDR, 0xbf);
+  write_hardware(e, HW_NR21_ADDR, 0x3f);
+  write_hardware(e, HW_NR22_ADDR, 0x00);
+  write_hardware(e, HW_NR24_ADDR, 0xbf);
+  write_hardware(e, HW_NR30_ADDR, 0x7f);
+  write_hardware(e, HW_NR31_ADDR, 0xff);
+  write_hardware(e, HW_NR32_ADDR, 0x9f);
+  write_hardware(e, HW_NR33_ADDR, 0xbf);
+  write_hardware(e, HW_NR41_ADDR, 0xff);
+  write_hardware(e, HW_NR42_ADDR, 0x00);
+  write_hardware(e, HW_NR43_ADDR, 0x00);
+  write_hardware(e, HW_NR44_ADDR, 0xbf);
+  write_hardware(e, HW_NR50_ADDR, 0x77);
+  write_hardware(e, HW_NR51_ADDR, 0xf3);
+  write_hardware(e, HW_NR52_ADDR, 0xf1);
+  write_hardware(e, HW_LCDC_ADDR, 0x91);
+  write_hardware(e, HW_SCY_ADDR, 0x00);
+  write_hardware(e, HW_SCX_ADDR, 0x00);
+  write_hardware(e, HW_LYC_ADDR, 0x00);
+  write_hardware(e, HW_BGP_ADDR, 0xfc);
+  write_hardware(e, HW_OBP0_ADDR, 0xff);
+  write_hardware(e, HW_OBP1_ADDR, 0xff);
+  write_hardware(e, HW_IE_ADDR, 0x0);
   return OK;
 error:
   return ERROR;
@@ -986,77 +1087,143 @@ uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
     case 1: return obj->x;
     case 2: return obj->tile;
     case 3:
-      return GET_BITS(obj->priority, OBJ_PRIORITY) |
-             GET_BITS(obj->yflip, OBJ_YFLIP) | GET_BITS(obj->xflip, OBJ_XFLIP) |
-             GET_BITS(obj->palette, OBJ_PALETTE);
+      return FROM_REG(obj->priority, OBJ_PRIORITY) |
+             FROM_REG(obj->yflip, OBJ_YFLIP) | FROM_REG(obj->xflip, OBJ_XFLIP) |
+             FROM_REG(obj->palette, OBJ_PALETTE);
   }
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
 
+uint8_t to_nrx1_reg(struct Channel* channel) {
+  return TO_REG(channel->wave_duty, NRX1_WAVE_DUTY);
+}
+
+uint8_t to_nrx2_reg(struct Channel* channel) {
+  return TO_REG(channel->initial_volume, NRX2_INITIAL_VOLUME) |
+         TO_REG(channel->envelope_direction, NRX2_ENVELOPE_DIRECTION) |
+         TO_REG(channel->envelope_count, NRX2_ENVELOPE_COUNT);
+}
+
+uint8_t to_nrx4_reg(struct Channel* channel) {
+  return TO_REG(channel->consecutive, NRX4_COUNTER_CONSECUTIVE);
+}
+
 uint8_t read_hardware(struct Emulator* e, Address addr) {
   switch (addr) {
-    case HW_SB_ADDR: return 0; /* TODO */
+    case HW_SB_ADDR:
+      return 0; /* TODO */
     case HW_SC_ADDR:
-      return SET_BITS(e->serial.transfer_start, SC_TRANSFER_START) |
-             SET_BITS(e->serial.clock_speed, SC_CLOCK_SPEED) |
-             SET_BITS(e->serial.shift_clock, SC_SHIFT_CLOCK);
-    case HW_IF_ADDR: return e->interrupts.IF;
+      return TO_REG(e->serial.transfer_start, SC_TRANSFER_START) |
+             TO_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
+             TO_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
+    case HW_IF_ADDR:
+      return e->interrupts.IF;
+    case HW_NR10_ADDR: {
+      struct Channel* channel = &e->sound.channel[CHANNEL1];
+      return TO_REG(channel->sweep_time, NR10_SWEEP_TIME) |
+             TO_REG(channel->sweep_direction, NR10_SWEEP_DIRECTION) |
+             TO_REG(channel->sweep_count, NR10_SWEEP_COUNT);
+    }
+    case HW_NR11_ADDR:
+      return to_nrx1_reg(&e->sound.channel[CHANNEL1]);
+    case HW_NR12_ADDR:
+      return to_nrx2_reg(&e->sound.channel[CHANNEL1]);
+    case HW_NR13_ADDR:
+      return 0; /* Write only */
+    case HW_NR14_ADDR:
+      return to_nrx4_reg(&e->sound.channel[CHANNEL1]);
+    case HW_NR21_ADDR:
+      return to_nrx1_reg(&e->sound.channel[CHANNEL2]);
+    case HW_NR22_ADDR:
+      return to_nrx2_reg(&e->sound.channel[CHANNEL2]);
+    case HW_NR23_ADDR:
+      return 0; /* Write only */
+    case HW_NR24_ADDR:
+      return to_nrx4_reg(&e->sound.channel[CHANNEL2]);
+    case HW_NR30_ADDR:
+      return TO_REG(e->sound.channel[CHANNEL3].on, NR30_SOUND_ON);
+    case HW_NR31_ADDR:
+      return e->sound.channel[CHANNEL3].sound_length;
+    case HW_NR32_ADDR:
+      return TO_REG(e->sound.channel[CHANNEL3].output_level,
+                    NR32_SELECT_OUTPUT_LEVEL);
+    case HW_NR33_ADDR:
+      return 0; /* Write only */
+    case HW_NR34_ADDR:
+      return to_nrx4_reg(&e->sound.channel[CHANNEL3]);
+    case HW_NR41_ADDR:
+      return TO_REG(e->sound.channel[CHANNEL4].sound_length, NRX1_SOUND_LENGTH);
+    case HW_NR42_ADDR:
+      return to_nrx2_reg(&e->sound.channel[CHANNEL4]);
+    case HW_NR43_ADDR: {
+      struct Channel* channel = &e->sound.channel[CHANNEL4];
+      return TO_REG(channel->shift_clock_frequency,
+                    NR43_SHIFT_CLOCK_FREQUENCY) |
+             TO_REG(channel->counter_step, NR43_COUNTER_STEP) |
+             TO_REG(channel->divide_ratio, NR43_DIVIDE_RATIO);
+    }
+    case HW_NR44_ADDR:
+      return to_nrx4_reg(&e->sound.channel[CHANNEL4]);
     case HW_NR50_ADDR:
-      return SET_BITS(e->sound.so2_output[VIN], NR50_VIN_SO2) |
-             SET_BITS(e->sound.so2_volume, NR50_SO2_VOLUME) |
-             SET_BITS(e->sound.so1_output[VIN], NR50_VIN_SO1) |
-             SET_BITS(e->sound.so1_volume, NR50_SO1_VOLUME);
+      return TO_REG(e->sound.so2_output[VIN], NR50_VIN_SO2) |
+             TO_REG(e->sound.so2_volume, NR50_SO2_VOLUME) |
+             TO_REG(e->sound.so1_output[VIN], NR50_VIN_SO1) |
+             TO_REG(e->sound.so1_volume, NR50_SO1_VOLUME);
     case HW_NR51_ADDR:
-      return SET_BITS(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
-             SET_BITS(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
-             SET_BITS(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
-             SET_BITS(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
-             SET_BITS(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
-             SET_BITS(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
-             SET_BITS(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
-             SET_BITS(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
+      return TO_REG(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
+             TO_REG(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
+             TO_REG(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
+             TO_REG(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
+             TO_REG(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
+             TO_REG(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
+             TO_REG(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
+             TO_REG(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
     case HW_NR52_ADDR:
-      return SET_BITS(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
-             SET_BITS(e->sound.sound_on[SOUND4], NR52_SOUND4_ON) |
-             SET_BITS(e->sound.sound_on[SOUND3], NR52_SOUND3_ON) |
-             SET_BITS(e->sound.sound_on[SOUND2], NR52_SOUND2_ON) |
-             SET_BITS(e->sound.sound_on[SOUND1], NR52_SOUND1_ON);
+      return TO_REG(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
+             TO_REG(e->sound.sound_on[SOUND4], NR52_SOUND4_ON) |
+             TO_REG(e->sound.sound_on[SOUND3], NR52_SOUND3_ON) |
+             TO_REG(e->sound.sound_on[SOUND2], NR52_SOUND2_ON) |
+             TO_REG(e->sound.sound_on[SOUND1], NR52_SOUND1_ON);
     case HW_LCDC_ADDR:
-      return SET_BITS(e->lcd.lcdc.display, LCDC_DISPLAY) |
-             SET_BITS(e->lcd.lcdc.window_tile_map_select,
-                      LCDC_WINDOW_TILE_MAP_SELECT) |
-             SET_BITS(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
-             SET_BITS(e->lcd.lcdc.bg_tile_data_select,
-                      LCDC_BG_TILE_DATA_SELECT) |
-             SET_BITS(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
-             SET_BITS(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
-             SET_BITS(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
-             SET_BITS(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
+      return TO_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
+             TO_REG(e->lcd.lcdc.window_tile_map_select,
+                    LCDC_WINDOW_TILE_MAP_SELECT) |
+             TO_REG(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
+             TO_REG(e->lcd.lcdc.bg_tile_data_select, LCDC_BG_TILE_DATA_SELECT) |
+             TO_REG(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
+             TO_REG(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
+             TO_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
+             TO_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
     case HW_STAT_ADDR:
-      return SET_BITS(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
-             SET_BITS(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
-             SET_BITS(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
-             SET_BITS(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
-             SET_BITS(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
-             SET_BITS(e->lcd.stat.mode, STAT_MODE);
-    case HW_SCY_ADDR: return e->lcd.SCY;
-    case HW_SCX_ADDR: return e->lcd.SCX;
-    case HW_LY_ADDR: return e->lcd.LY;
-    case HW_LYC_ADDR: return e->lcd.LYC;
+      return TO_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
+             TO_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
+             TO_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
+             TO_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
+             TO_REG(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
+             TO_REG(e->lcd.stat.mode, STAT_MODE);
+    case HW_SCY_ADDR:
+      return e->lcd.SCY;
+    case HW_SCX_ADDR:
+      return e->lcd.SCX;
+    case HW_LY_ADDR:
+      return e->lcd.LY;
+    case HW_LYC_ADDR:
+      return e->lcd.LYC;
     case HW_BGP_ADDR:
-      return SET_BITS(e->lcd.bgp.color3, PALETTE_COLOR3) |
-             SET_BITS(e->lcd.bgp.color2, PALETTE_COLOR2) |
-             SET_BITS(e->lcd.bgp.color1, PALETTE_COLOR1) |
-             SET_BITS(e->lcd.bgp.color0, PALETTE_COLOR0);
+      return TO_REG(e->lcd.bgp.color3, PALETTE_COLOR3) |
+             TO_REG(e->lcd.bgp.color2, PALETTE_COLOR2) |
+             TO_REG(e->lcd.bgp.color1, PALETTE_COLOR1) |
+             TO_REG(e->lcd.bgp.color0, PALETTE_COLOR0);
     case HW_OBP0_ADDR:
-      return SET_BITS(e->oam.obp[0].color3, PALETTE_COLOR3) |
-             SET_BITS(e->oam.obp[0].color2, PALETTE_COLOR2) |
-             SET_BITS(e->oam.obp[0].color1, PALETTE_COLOR1);
+      return TO_REG(e->oam.obp[0].color3, PALETTE_COLOR3) |
+             TO_REG(e->oam.obp[0].color2, PALETTE_COLOR2) |
+             TO_REG(e->oam.obp[0].color1, PALETTE_COLOR1);
     case HW_OBP1_ADDR:
-      return SET_BITS(e->oam.obp[1].color3, PALETTE_COLOR3) |
-             SET_BITS(e->oam.obp[1].color2, PALETTE_COLOR2) |
-             SET_BITS(e->oam.obp[1].color1, PALETTE_COLOR1);
-    case HW_IE_ADDR: return e->interrupts.IE;
+      return TO_REG(e->oam.obp[1].color3, PALETTE_COLOR3) |
+             TO_REG(e->oam.obp[1].color2, PALETTE_COLOR2) |
+             TO_REG(e->oam.obp[1].color1, PALETTE_COLOR1);
+    case HW_IE_ADDR:
+      return e->interrupts.IE;
     default:
       LOG("read_hardware(0x%04x) ignored.\n", addr);
       return 0;
@@ -1128,83 +1295,181 @@ void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
 
     case 3:
-      obj->priority = SET_BITS(value, OBJ_PRIORITY);
-      obj->yflip = SET_BITS(value, OBJ_YFLIP);
-      obj->xflip = SET_BITS(value, OBJ_XFLIP);
-      obj->palette = SET_BITS(value, OBJ_PALETTE);
+      obj->priority = TO_REG(value, OBJ_PRIORITY);
+      obj->yflip = TO_REG(value, OBJ_YFLIP);
+      obj->xflip = TO_REG(value, OBJ_XFLIP);
+      obj->palette = TO_REG(value, OBJ_PALETTE);
       break;
   }
 }
 
+void from_nrx1_reg(struct Channel* channel, uint8_t value) {
+  channel->wave_duty = FROM_REG(value, NRX1_WAVE_DUTY);
+  channel->sound_length = FROM_REG(value, NRX1_SOUND_LENGTH);
+}
+
+void from_nrx2_reg(struct Channel* channel, uint8_t value) {
+  channel->initial_volume = FROM_REG(value, NRX2_INITIAL_VOLUME);
+  channel->envelope_direction = FROM_REG(value, NRX2_ENVELOPE_DIRECTION);
+  channel->envelope_count = FROM_REG(value, NRX2_ENVELOPE_COUNT);
+}
+
+void from_nrx3_reg(struct Channel* channel, uint8_t value) {
+  channel->frequency &= ~0xff;
+  channel->frequency |= value;
+}
+
+void from_nrx4_reg(struct Channel* channel, uint8_t value) {
+  channel->initial = FROM_REG(value, NRX4_INITIAL);
+  channel->consecutive = FROM_REG(value, NRX4_COUNTER_CONSECUTIVE);
+  channel->frequency &= 0xff;
+  channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
+}
 
 void write_hardware(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   LOG("write_hardware(0x%04x, %u)\n", addr, value);
   switch (addr) {
-    case HW_SB_ADDR: /* TODO */ break;
+    case HW_SB_ADDR: /* TODO */
+      break;
     case HW_SC_ADDR:
-      e->serial.transfer_start = GET_BITS(value, SC_TRANSFER_START);
-      e->serial.clock_speed = GET_BITS(value, SC_CLOCK_SPEED);
-      e->serial.shift_clock = GET_BITS(value, SC_SHIFT_CLOCK);
+      e->serial.transfer_start = FROM_REG(value, SC_TRANSFER_START);
+      e->serial.clock_speed = FROM_REG(value, SC_CLOCK_SPEED);
+      e->serial.shift_clock = FROM_REG(value, SC_SHIFT_CLOCK);
+      break;
+    case HW_NR10_ADDR: {
+      struct Channel* channel = &e->sound.channel[CHANNEL1];
+      channel->sweep_time = FROM_REG(value, NR10_SWEEP_TIME);
+      channel->sweep_direction = FROM_REG(value, NR10_SWEEP_DIRECTION);
+      channel->sweep_count = FROM_REG(value, NR10_SWEEP_COUNT);
+      break;
+    }
+    case HW_NR11_ADDR:
+      from_nrx1_reg(&e->sound.channel[CHANNEL1], value);
+      break;
+    case HW_NR12_ADDR:
+      from_nrx2_reg(&e->sound.channel[CHANNEL1], value);
+      break;
+    case HW_NR13_ADDR:
+      from_nrx3_reg(&e->sound.channel[CHANNEL1], value);
+      break;
+    case HW_NR14_ADDR:
+      from_nrx4_reg(&e->sound.channel[CHANNEL1], value);
+      break;
+    case HW_NR21_ADDR:
+      from_nrx1_reg(&e->sound.channel[CHANNEL2], value);
+      break;
+    case HW_NR22_ADDR:
+      from_nrx2_reg(&e->sound.channel[CHANNEL2], value);
+      break;
+    case HW_NR23_ADDR:
+      from_nrx3_reg(&e->sound.channel[CHANNEL2], value);
+      break;
+    case HW_NR24_ADDR:
+      from_nrx4_reg(&e->sound.channel[CHANNEL2], value);
+      break;
+    case HW_NR30_ADDR:
+      e->sound.channel[CHANNEL3].on = FROM_REG(value, NR30_SOUND_ON);
+      break;
+    case HW_NR31_ADDR:
+      e->sound.channel[CHANNEL3].sound_length = value;
+      break;
+    case HW_NR32_ADDR:
+      e->sound.channel[CHANNEL3].output_level =
+          FROM_REG(value, NR32_SELECT_OUTPUT_LEVEL);
+      break;
+    case HW_NR33_ADDR:
+      from_nrx3_reg(&e->sound.channel[CHANNEL3], value);
+      break;
+    case HW_NR34_ADDR:
+      from_nrx4_reg(&e->sound.channel[CHANNEL3], value);
+      break;
+    case HW_NR41_ADDR:
+      from_nrx1_reg(&e->sound.channel[CHANNEL4], value);
+      break;
+    case HW_NR42_ADDR:
+      from_nrx2_reg(&e->sound.channel[CHANNEL4], value);
+      break;
+    case HW_NR43_ADDR: {
+      struct Channel* channel = &e->sound.channel[CHANNEL4];
+      channel->shift_clock_frequency =
+          FROM_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
+      channel->counter_step = FROM_REG(value, NR43_COUNTER_STEP);
+      channel->divide_ratio = FROM_REG(value, NR43_DIVIDE_RATIO);
+      break;
+    }
+    case HW_NR44_ADDR:
+      from_nrx4_reg(&e->sound.channel[CHANNEL4], value);
       break;
     case HW_NR50_ADDR:
-      e->sound.so2_output[VIN] = GET_BITS(value, NR50_VIN_SO2);
-      e->sound.so2_volume = GET_BITS(value, NR50_SO2_VOLUME);
-      e->sound.so1_output[VIN] = GET_BITS(value, NR50_VIN_SO1);
-      e->sound.so1_volume = GET_BITS(value, NR50_SO1_VOLUME);
+      e->sound.so2_output[VIN] = FROM_REG(value, NR50_VIN_SO2);
+      e->sound.so2_volume = FROM_REG(value, NR50_SO2_VOLUME);
+      e->sound.so1_output[VIN] = FROM_REG(value, NR50_VIN_SO1);
+      e->sound.so1_volume = FROM_REG(value, NR50_SO1_VOLUME);
       break;
     case HW_NR51_ADDR:
-      e->sound.so2_output[SOUND4] = GET_BITS(value, NR51_SOUND4_SO2);
-      e->sound.so2_output[SOUND3] = GET_BITS(value, NR51_SOUND3_SO2);
-      e->sound.so2_output[SOUND2] = GET_BITS(value, NR51_SOUND2_SO2);
-      e->sound.so2_output[SOUND1] = GET_BITS(value, NR51_SOUND1_SO2);
-      e->sound.so1_output[SOUND4] = GET_BITS(value, NR51_SOUND4_SO1);
-      e->sound.so1_output[SOUND3] = GET_BITS(value, NR51_SOUND3_SO1);
-      e->sound.so1_output[SOUND2] = GET_BITS(value, NR51_SOUND2_SO1);
-      e->sound.so1_output[SOUND1] = GET_BITS(value, NR51_SOUND1_SO1);
+      e->sound.so2_output[SOUND4] = FROM_REG(value, NR51_SOUND4_SO2);
+      e->sound.so2_output[SOUND3] = FROM_REG(value, NR51_SOUND3_SO2);
+      e->sound.so2_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO2);
+      e->sound.so2_output[SOUND1] = FROM_REG(value, NR51_SOUND1_SO2);
+      e->sound.so1_output[SOUND4] = FROM_REG(value, NR51_SOUND4_SO1);
+      e->sound.so1_output[SOUND3] = FROM_REG(value, NR51_SOUND3_SO1);
+      e->sound.so1_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO1);
+      e->sound.so1_output[SOUND1] = FROM_REG(value, NR51_SOUND1_SO1);
       break;
     case HW_NR52_ADDR:
-      e->sound.enabled = GET_BITS(value, NR52_ALL_SOUND_ENABLED);
+      e->sound.enabled = FROM_REG(value, NR52_ALL_SOUND_ENABLED);
       break;
-    case HW_IF_ADDR: e->interrupts.IF = value; break;
+    case HW_IF_ADDR:
+      e->interrupts.IF = value;
+      break;
     case HW_LCDC_ADDR:
-      e->lcd.lcdc.display = GET_BITS(value, LCDC_DISPLAY);
+      e->lcd.lcdc.display = FROM_REG(value, LCDC_DISPLAY);
       e->lcd.lcdc.window_tile_map_select =
-          GET_BITS(value, LCDC_WINDOW_TILE_MAP_SELECT);
-      e->lcd.lcdc.window_display = GET_BITS(value, LCDC_WINDOW_DISPLAY);
+          FROM_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
+      e->lcd.lcdc.window_display = FROM_REG(value, LCDC_WINDOW_DISPLAY);
       e->lcd.lcdc.bg_tile_data_select =
-          GET_BITS(value, LCDC_BG_TILE_DATA_SELECT);
-      e->lcd.lcdc.bg_tile_map_select = GET_BITS(value, LCDC_BG_TILE_MAP_SELECT);
-      e->lcd.lcdc.obj_size = GET_BITS(value, LCDC_OBJ_SIZE);
-      e->lcd.lcdc.obj_display = GET_BITS(value, LCDC_OBJ_DISPLAY);
-      e->lcd.lcdc.bg_display = GET_BITS(value, LCDC_BG_DISPLAY);
+          FROM_REG(value, LCDC_BG_TILE_DATA_SELECT);
+      e->lcd.lcdc.bg_tile_map_select = FROM_REG(value, LCDC_BG_TILE_MAP_SELECT);
+      e->lcd.lcdc.obj_size = FROM_REG(value, LCDC_OBJ_SIZE);
+      e->lcd.lcdc.obj_display = FROM_REG(value, LCDC_OBJ_DISPLAY);
+      e->lcd.lcdc.bg_display = FROM_REG(value, LCDC_BG_DISPLAY);
       break;
     case HW_STAT_ADDR:
-      e->lcd.stat.y_compare_intr = GET_BITS(value, STAT_YCOMPARE_INTR);
-      e->lcd.stat.using_oam_intr = GET_BITS(value, STAT_USING_OAM_INTR);
-      e->lcd.stat.vblank_intr = GET_BITS(value, STAT_VBLANK_INTR);
-      e->lcd.stat.hblank_intr = GET_BITS(value, STAT_HBLANK_INTR);
+      e->lcd.stat.y_compare_intr = FROM_REG(value, STAT_YCOMPARE_INTR);
+      e->lcd.stat.using_oam_intr = FROM_REG(value, STAT_USING_OAM_INTR);
+      e->lcd.stat.vblank_intr = FROM_REG(value, STAT_VBLANK_INTR);
+      e->lcd.stat.hblank_intr = FROM_REG(value, STAT_HBLANK_INTR);
       break;
-    case HW_SCY_ADDR: e->lcd.SCY = value; break;
-    case HW_SCX_ADDR: e->lcd.SCX = value; break;
-    case HW_LY_ADDR: break;
-    case HW_LYC_ADDR: e->lcd.LYC = value; break;
+    case HW_SCY_ADDR:
+      e->lcd.SCY = value;
+      break;
+    case HW_SCX_ADDR:
+      e->lcd.SCX = value;
+      break;
+    case HW_LY_ADDR:
+      break;
+    case HW_LYC_ADDR:
+      e->lcd.LYC = value;
+      break;
     case HW_BGP_ADDR:
-      e->lcd.bgp.color3 = GET_BITS(value, PALETTE_COLOR3);
-      e->lcd.bgp.color2 = GET_BITS(value, PALETTE_COLOR2);
-      e->lcd.bgp.color1 = GET_BITS(value, PALETTE_COLOR1);
-      e->lcd.bgp.color0 = GET_BITS(value, PALETTE_COLOR0);
+      e->lcd.bgp.color3 = FROM_REG(value, PALETTE_COLOR3);
+      e->lcd.bgp.color2 = FROM_REG(value, PALETTE_COLOR2);
+      e->lcd.bgp.color1 = FROM_REG(value, PALETTE_COLOR1);
+      e->lcd.bgp.color0 = FROM_REG(value, PALETTE_COLOR0);
       break;
     case HW_OBP0_ADDR:
-      e->oam.obp[0].color3 = GET_BITS(value, PALETTE_COLOR3);
-      e->oam.obp[0].color2 = GET_BITS(value, PALETTE_COLOR2);
-      e->oam.obp[0].color1 = GET_BITS(value, PALETTE_COLOR1);
+      e->oam.obp[0].color3 = FROM_REG(value, PALETTE_COLOR3);
+      e->oam.obp[0].color2 = FROM_REG(value, PALETTE_COLOR2);
+      e->oam.obp[0].color1 = FROM_REG(value, PALETTE_COLOR1);
       break;
     case HW_OBP1_ADDR:
-      e->oam.obp[1].color3 = GET_BITS(value, PALETTE_COLOR3);
-      e->oam.obp[1].color2 = GET_BITS(value, PALETTE_COLOR2);
-      e->oam.obp[1].color1 = GET_BITS(value, PALETTE_COLOR1);
+      e->oam.obp[1].color3 = FROM_REG(value, PALETTE_COLOR3);
+      e->oam.obp[1].color2 = FROM_REG(value, PALETTE_COLOR2);
+      e->oam.obp[1].color1 = FROM_REG(value, PALETTE_COLOR1);
       break;
-    case HW_IE_ADDR: e->interrupts.IE = value; break;
+    case HW_IE_ADDR:
+      e->interrupts.IE = value;
+      break;
     default:
       LOG("write_hardware(0x%04x, %u) ignored.\n", addr, value);
       break;
