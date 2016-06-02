@@ -103,6 +103,11 @@ typedef uint16_t MaskedAddress;
 #define VIN 4
 
 #define GB_CYCLES_PER_SECOND 4194304
+#define DIV_CYCLES 256
+#define TIMA_4096_CYCLES 1024
+#define TIMA_262144_CYCLES 16
+#define TIMA_65536_CYCLES 64
+#define TIMA_16384_CYCLES 256
 #define FRAME_CYCLES 70224
 #define LINE_CYCLES 456
 #define HBLANK_CYCLES 204         /* LCD STAT mode 0 */
@@ -196,6 +201,9 @@ typedef uint16_t MaskedAddress;
 #define CPU_FLAG_N(X, OP) BIT(X, OP, 6)
 #define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
 #define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
+
+#define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
+#define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
 /* TODO better names for all sound stuff */
 #define NR10_SWEEP_TIME(X, OP) BITS(X, OP, 6, 4)
@@ -415,6 +423,13 @@ enum BankMode {
   BANK_MODE_RAM = 1,
 };
 
+enum TimerClock {
+  TIMER_CLOCK_4096_HZ = 0,
+  TIMER_CLOCK_262144_HZ = 1,
+  TIMER_CLOCK_65536_HZ = 2,
+  TIMER_CLOCK_16384_HZ = 3,
+};
+
 enum SweepDirection {
   SWEEP_DIRECTION_ADDITION = 0,
   SWEEP_DIRECTION_SUBTRACTION = 1,
@@ -573,6 +588,16 @@ struct Interrupts {
   uint8_t IF;    /* Interrupt Request */
 };
 
+struct Timer {
+  uint8_t DIV;  /* Incremented at 16384 Hz */
+  uint8_t TIMA; /* Incremented at rate defined by input_clock_select */
+  uint8_t TMA;  /* When TIMA overflows, it is set to this value */
+  enum TimerClock input_clock_select; /* Select the rate of TIMA */
+  uint32_t div_cycles;
+  uint32_t tima_cycles;
+  enum Bool on;
+};
+
 struct Serial {
   enum Bool transfer_start;
   enum Bool clock_speed;
@@ -656,6 +681,7 @@ struct Emulator {
   struct Interrupts interrupts;
   struct OAM oam;
   struct Serial serial;
+  struct Timer timer;
   struct Sound sound;
   struct LCD lcd;
   struct DMA dma;
@@ -1152,6 +1178,15 @@ uint8_t read_io(struct Emulator* e, Address addr) {
       return TO_REG(e->serial.transfer_start, SC_TRANSFER_START) |
              TO_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
              TO_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
+    case IO_DIV_ADDR:
+      return e->timer.DIV;
+    case IO_TIMA_ADDR:
+      return e->timer.TIMA;
+    case IO_TMA_ADDR:
+      return e->timer.TMA;
+    case IO_TAC_ADDR:
+      return TO_REG(e->timer.on, TAC_TIMER_ON) |
+             TO_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
     case IO_IF_ADDR:
       return e->interrupts.IF;
     case IO_NR10_ADDR: {
@@ -1395,6 +1430,19 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->serial.transfer_start = FROM_REG(value, SC_TRANSFER_START);
       e->serial.clock_speed = FROM_REG(value, SC_CLOCK_SPEED);
       e->serial.shift_clock = FROM_REG(value, SC_SHIFT_CLOCK);
+      break;
+    case IO_DIV_ADDR:
+      e->timer.DIV = 0;
+      break;
+    case IO_TIMA_ADDR:
+      e->timer.TIMA = value; /* TODO is this correct? */
+      break;
+    case IO_TMA_ADDR:
+      e->timer.TMA = value;
+      break;
+    case IO_TAC_ADDR:
+      e->timer.input_clock_select = FROM_REG(value, TAC_INPUT_CLOCK_SELECT);
+      e->timer.on = FROM_REG(value, TAC_TIMER_ON);
       break;
     case IO_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
@@ -2485,6 +2533,41 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
+void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
+  e->timer.div_cycles += cycles;
+  if (e->timer.div_cycles >= DIV_CYCLES) {
+    e->timer.div_cycles -= DIV_CYCLES;
+    e->timer.DIV++;
+  }
+
+  if (e->timer.on) {
+    e->timer.tima_cycles += cycles;
+    uint32_t tima_max_cycles;
+    switch (e->timer.input_clock_select) {
+      case TIMER_CLOCK_4096_HZ:
+        tima_max_cycles = TIMA_4096_CYCLES;
+        break;
+      case TIMER_CLOCK_262144_HZ:
+        tima_max_cycles = TIMA_262144_CYCLES;
+        break;
+      case TIMER_CLOCK_65536_HZ:
+        tima_max_cycles = TIMA_65536_CYCLES;
+        break;
+      case TIMER_CLOCK_16384_HZ:
+        tima_max_cycles = TIMA_16384_CYCLES;
+        break;
+    }
+    if (e->timer.tima_cycles >= tima_max_cycles) {
+      e->timer.tima_cycles -= tima_max_cycles;
+      e->timer.TIMA++;
+      if (e->timer.TIMA == 0) {
+        e->timer.TIMA = e->timer.TMA;
+        e->interrupts.IF |= INTERRUPT_TIMER_MASK;
+      }
+    }
+  }
+}
+
 void handle_interrupts(struct Emulator* e) {
   if (e->interrupts.IME == 0) {
     return;
@@ -2504,6 +2587,10 @@ void handle_interrupts(struct Emulator* e) {
     LOG(">> LCD_STAT interrupt\n");
     vector = 0x48;
     e->interrupts.IF &= ~INTERRUPT_LCD_STAT_MASK;
+  } else if (interrupts & INTERRUPT_TIMER_MASK) {
+    LOG(">> TIMER interrupt\n");
+    vector = 0x50;
+    e->interrupts.IF &= ~INTERRUPT_TIMER_MASK;
   } else {
     return;
   }
@@ -2527,6 +2614,7 @@ int main(int argc, char** argv) {
     uint8_t cycles = execute_instruction(e);
     update_dma_cycles(e, cycles);
     update_lcd_cycles(e, cycles);
+    update_timer_cycles(e, cycles);
     handle_interrupts(e);
   }
   return 0;
