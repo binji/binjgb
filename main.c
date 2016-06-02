@@ -2202,18 +2202,18 @@ uint8_t s_cb_opcode_cycles[] = {
 #define POP_RR(RR) REG(RR) = READ16(REG(SP)); REG(SP) += 2
 #define PUSH_AF() REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
 #define POP_AF() set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
-#define AND_FLAGS(X) CLEAR_F(); SET_Z(X); SET_N(1)
-#define AND_R(R) REG(A) &= REG(R); AND_FLAGS(REG(A))
-#define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS(REG(A))
-#define AND_N() REG(A) &= READ_N; AND_FLAGS(REG(A))
-#define XOR_FLAGS(X) CLEAR_F(); SET_Z(REG(A))
-#define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS(REG(A))
-#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); XOR_FLAGS(REG(A))
-#define XOR_N() REG(A) ^= READ_N; XOR_FLAGS(REG(A))
-#define OR_FLAGS(X) XOR_FLAGS(X)
-#define OR_R(R) REG(A) |= REG(R); OR_FLAGS(REG(A))
-#define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS(REG(A))
-#define OR_N() REG(A) |= READ_N; OR_FLAGS(REG(A))
+#define AND_FLAGS() CLEAR_F(); SET_Z(REG(A)); SET_N(1)
+#define AND_R(R) REG(A) &= REG(R); AND_FLAGS()
+#define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS()
+#define AND_N() REG(A) &= READ_N; AND_FLAGS()
+#define XOR_FLAGS() CLEAR_F(); SET_Z(REG(A))
+#define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS()
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); XOR_FLAGS()
+#define XOR_N() REG(A) ^= READ_N; XOR_FLAGS()
+#define OR_FLAGS() XOR_FLAGS()
+#define OR_R(R) REG(A) |= REG(R); OR_FLAGS()
+#define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS()
+#define OR_N() REG(A) |= READ_N; OR_FLAGS()
 #define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
@@ -2227,6 +2227,10 @@ uint8_t s_cb_opcode_cycles[] = {
 #define CP_N() t = READ_N; CP_FLAGS(REG(A), t)
 #define CP_MR(MR) t = READ8(REG(MR)); CP_FLAGS(REG(A), t)
 #define CPL() REG(A) = ~REG(A); SET_N(1); FLAG(H) = 1
+#define SWAP_FLAGS(X) CLEAR_F(); SET_Z(X);
+#define SWAP t = (t << 4) | (t >> 4)
+#define SWAP_R(R) t = REG(R); SWAP; REG(R) = t; SWAP_FLAGS(REG(R))
+#define SWAP_MR(MR) t = READ8(REG(MR)); SWAP; WRITE8(REG(MR), t); SWAP_FLAGS(t)
 
 /* Returns the number of cycles executed */
 uint8_t execute_instruction(struct Emulator* e) {
@@ -2238,8 +2242,59 @@ uint8_t execute_instruction(struct Emulator* e) {
   if (opcode == 0xcb) {
     uint8_t opcode = read_u8(e, e->reg.PC + 1);
     cycles = s_cb_opcode_cycles[opcode];
-    // TODO
-    NI;
+    switch (opcode >> 3) {
+      case 0: /* RLC */
+      case 1: /* RRC */
+      case 2: /* RL */
+      case 3: /* RR */
+      case 4: /* SLA */
+      case 5: /* SRA */
+        NI;   /* TODO */
+        break;
+      case 6: /* SWAP */
+      case 7: /* SWAP */
+        switch (opcode & 7) {
+          case 0: SWAP_R(B); break;
+          case 1: SWAP_R(C); break;
+          case 2: SWAP_R(D); break;
+          case 3: SWAP_R(E); break;
+          case 4: SWAP_R(H); break;
+          case 5: SWAP_R(L); break;
+          case 6: SWAP_MR(HL); break;
+          case 7: SWAP_R(A); break;
+        }
+        break;
+      case 8: /* BIT 0 */
+      case 9: /* BIT 1 */
+      case 10: /* BIT 2 */
+      case 11: /* BIT 3 */
+      case 12: /* BIT 4 */
+      case 13: /* BIT 5 */
+      case 14: /* BIT 6 */
+      case 15: /* BIT 7 */
+        NI;    /* TODO */
+        break;
+      case 16: /* RES 0 */
+      case 17: /* RES 1 */
+      case 18: /* RES 2 */
+      case 19: /* RES 3 */
+      case 20: /* RES 4 */
+      case 21: /* RES 5 */
+      case 22: /* RES 6 */
+      case 23: /* RES 7 */
+        NI;    /* TODO */
+        break;
+      case 24: /* SET 0 */
+      case 25: /* SET 1 */
+      case 26: /* SET 2 */
+      case 27: /* SET 3 */
+      case 28: /* SET 4 */
+      case 29: /* SET 5 */
+      case 30: /* SET 6 */
+      case 31: /* SET 7 */
+        NI;    /* TODO */
+        break;
+    }
   } else {
     cycles = s_opcode_cycles[opcode];
     switch (opcode) {
