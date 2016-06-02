@@ -133,14 +133,13 @@ typedef uint16_t MaskedAddress;
 #define IO_UNUSED_END_ADDR 0xfeff
 #define IO_IO_START_ADDR 0xff00
 #define IO_IO_END_ADDR 0xff7f
-#define IO_JOYP_ADDR 0xff00
 #define IO_HIGH_RAM_START_ADDR 0xff80
 #define IO_HIGH_RAM_END_ADDR 0xfffe
 
 #define OAM_TRANSFER_SIZE (IO_OAM_END_ADDR - IO_OAM_START_ADDR + 1)
 
 #define FOREACH_IO_REG(V)                                    \
-  V(P1, 0x00)   /* Joypad */                                 \
+  V(JOYP, 0x00) /* Joypad */                                 \
   V(SB, 0x01)   /* Serial transfer data */                   \
   V(SC, 0x02)   /* Serial transfer control */                \
   V(DIV, 0x04)  /* Divider */                                \
@@ -201,6 +200,16 @@ typedef uint16_t MaskedAddress;
 #define CPU_FLAG_N(X, OP) BIT(X, OP, 6)
 #define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
 #define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
+
+#define JOYP_JOYPAD_SELECT(X, OP) BITS(X, OP, 5, 4)
+#define JOYP_DPAD_DOWN(X, OP) BIT(X, OP, 3)
+#define JOYP_DPAD_UP(X, OP) BIT(X, OP, 2)
+#define JOYP_DPAD_LEFT(X, OP) BIT(X, OP, 1)
+#define JOYP_DPAD_RIGHT(X, OP) BIT(X, OP, 0)
+#define JOYP_BUTTON_START(X, OP) BIT(X, OP, 3)
+#define JOYP_BUTTON_SELECT(X, OP) BIT(X, OP, 2)
+#define JOYP_BUTTON_B(X, OP) BIT(X, OP, 1)
+#define JOYP_BUTTON_A(X, OP) BIT(X, OP, 0)
 
 #define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
 #define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
@@ -423,6 +432,13 @@ enum BankMode {
   BANK_MODE_RAM = 1,
 };
 
+enum JoypadSelect {
+  JOYPAD_SELECT_BOTH = 0,
+  JOYPAD_SELECT_BUTTONS = 1,
+  JOYPAD_SELECT_DPAD = 2,
+  JOYPAD_SELECT_NONE = 3,
+};
+
 enum TimerClock {
   TIMER_CLOCK_4096_HZ = 0,
   TIMER_CLOCK_262144_HZ = 1,
@@ -582,6 +598,12 @@ struct OAM {
   struct Palette obp[OBJ_PALETTE_COUNT];
 };
 
+struct Joypad {
+  enum Bool down, up, left, right;
+  enum Bool start, select, B, A;
+  enum JoypadSelect joypad_select;
+};
+
 struct Interrupts {
   enum Bool IME; /* Interrupt Master Enable */
   uint8_t IE;    /* Interrupt Enable */
@@ -680,6 +702,7 @@ struct Emulator {
   struct WorkRam ram;
   struct Interrupts interrupts;
   struct OAM oam;
+  struct Joypad joypad;
   struct Serial serial;
   struct Timer timer;
   struct Sound sound;
@@ -1172,6 +1195,28 @@ uint8_t to_nrx4_reg(struct Channel* channel) {
 
 uint8_t read_io(struct Emulator* e, Address addr) {
   switch (addr) {
+    case IO_JOYP_ADDR: {
+      uint8_t result = 0;
+      /* TODO is this the correct behavior when both select bits are low? */
+      if (e->joypad.joypad_select == JOYPAD_SELECT_BUTTONS ||
+          e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
+        result |= TO_REG(e->joypad.start, JOYP_BUTTON_START) |
+                  TO_REG(e->joypad.select, JOYP_BUTTON_SELECT) |
+                  TO_REG(e->joypad.B, JOYP_BUTTON_B) |
+                  TO_REG(e->joypad.A, JOYP_BUTTON_A);
+      }
+
+      if (e->joypad.joypad_select == JOYPAD_SELECT_DPAD ||
+          e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
+        result |= TO_REG(e->joypad.down, JOYP_DPAD_DOWN) |
+                  TO_REG(e->joypad.up, JOYP_DPAD_UP) |
+                  TO_REG(e->joypad.left, JOYP_DPAD_LEFT) |
+                  TO_REG(e->joypad.right, JOYP_DPAD_RIGHT);
+      }
+
+      /* The bits are low when the buttons are pressed. */
+      return TO_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) | ~result;
+    }
     case IO_SB_ADDR:
       return 0; /* TODO */
     case IO_SC_ADDR:
@@ -1424,6 +1469,9 @@ void from_nrx4_reg(struct Channel* channel, uint8_t value) {
 void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   LOG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
   switch (addr) {
+    case IO_JOYP_ADDR:
+      e->joypad.joypad_select = FROM_REG(value, JOYP_JOYPAD_SELECT);
+      break;
     case IO_SB_ADDR: /* TODO */
       break;
     case IO_SC_ADDR:
