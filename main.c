@@ -2156,11 +2156,12 @@ uint8_t s_cb_opcode_cycles[] = {
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
 #define CYCLES(X) cycles += (X)
+
 #define COND_NZ (!FLAG(Z))
 #define COND_Z FLAG(Z)
 #define COND_NC (!FLAG(C))
 #define COND_C FLAG(C)
-#define CLEAR_F() FLAG(Z) = 0; FLAG(N) = 0; FLAG(H) = 0; FLAG(C) = 0
+#define CLEAR_F FLAG(Z) = 0; FLAG(N) = 0; FLAG(H) = 0; FLAG(C) = 0
 #define SET_Z(X) FLAG(Z) = (X) == 0
 #define TEST_CARRY(X, OP, Y, CMP, TO) (((int16_t)(X) OP (int16_t)(Y)) CMP TO)
 #define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
@@ -2168,12 +2169,47 @@ uint8_t s_cb_opcode_cycles[] = {
 #define SET_H_ADD(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, +, Y & 0x3f, >, 0x3f)
 #define SET_H_SUB(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, -, Y & 0x3f, <, 0)
 #define SET_N(X) FLAG(N) = (X)
+
 #define READ8(X) read_u8(e, X)
 #define READ16(X) read_u16(e, X)
 #define WRITE8(X, V) write_u8(e, X, V)
 #define WRITE16(X, V) write_u16(e, X, V)
 #define READ_N READ8(REG(PC) + 1)
 #define READ_NN READ16(REG(PC) + 1)
+
+#define AND_FLAGS CLEAR_F; SET_Z(REG(A)); SET_N(1)
+#define AND_R(R) REG(A) &= REG(R); AND_FLAGS
+#define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS
+#define AND_N REG(A) &= READ_N; AND_FLAGS
+
+#define CALL(X) REG(SP) -= 2; WRITE16(REG(SP), new_pc); new_pc = X
+#define CALL_NN CALL(READ_NN)
+#define CALL_F_NN(COND) if (COND) { CALL_NN; CYCLES(12); }
+
+#define CP_FLAGS(X, Y) SET_Z(X - Y); SET_N(1); SET_H_SUB(X, Y); SET_C_SUB(X, Y);
+#define CP_R(R) CP_FLAGS(REG(A), REG(R))
+#define CP_N t = READ_N; CP_FLAGS(REG(A), t)
+#define CP_MR(MR) t = READ8(REG(MR)); CP_FLAGS(REG(A), t)
+
+#define CPL REG(A) = ~REG(A); SET_N(1); FLAG(H) = 1
+
+#define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
+#define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
+#define DEC_RR(RR) REG(RR)--
+#define DEC_MR(MR) t = READ8(REG(MR)) - 1; WRITE8(REG(MR), t); DEC_FLAGS(t)
+
+#define INC_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = (X & 0xf) == 0
+#define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
+#define INC_RR(RR) REG(RR)++
+#define INC_MR(MR) t = READ8(REG(MR)) + 1; WRITE8(REG(MR), t); INC_FLAGS(t)
+
+#define JP_F_NN(COND) if (COND) { JP_NN; CYCLES(4); }
+#define JP_RR(RR) new_pc = REG(RR)
+#define JP_NN new_pc = READ_NN
+
+#define JR_F_N(COND) if (COND) { JR_N; CYCLES(4); }
+#define JR_N new_pc += (int8_t)READ_N
+
 #define LD_R_R(RD, RS) REG(RD) = REG(RS)
 #define LD_R_N(R) REG(R) = READ_N
 #define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS)
@@ -2187,50 +2223,30 @@ uint8_t s_cb_opcode_cycles[] = {
 #define LD_MFF00_R_R(R1, R2) WRITE8(0xFF00 + REG(R1), REG(R2))
 #define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
-#define JR_F_N(COND) if (COND) { JR_N(); CYCLES(4); }
-#define JR_N(COND) new_pc += (int8_t)READ_N
-#define JP_F_NN(COND) if (COND) { JP_NN(); CYCLES(4); }
-#define JP_RR(RR) new_pc = REG(RR)
-#define JP_NN() new_pc = READ_NN
-#define CALL(X) REG(SP) -= 2; WRITE16(REG(SP), new_pc); new_pc = X
-#define CALL_NN() CALL(READ_NN)
-#define CALL_F_NN(COND) if (COND) { CALL_NN(); CYCLES(12); }
-#define RET() new_pc = READ16(REG(SP)); REG(SP) += 2
-#define RET_F(COND) if (COND) { RET(); CYCLES(12); }
-#define RETI() e->interrupts.IME = TRUE; RET()
+
+#define OR_FLAGS XOR_FLAGS
+#define OR_R(R) REG(A) |= REG(R); OR_FLAGS
+#define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS
+#define OR_N REG(A) |= READ_N; OR_FLAGS
+
 #define PUSH_RR(RR) REG(SP) -= 2; WRITE16(REG(SP), REG(RR))
 #define POP_RR(RR) REG(RR) = READ16(REG(SP)); REG(SP) += 2
-#define PUSH_AF() REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
-#define POP_AF() set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
-#define AND_FLAGS() CLEAR_F(); SET_Z(REG(A)); SET_N(1)
-#define AND_R(R) REG(A) &= REG(R); AND_FLAGS()
-#define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS()
-#define AND_N() REG(A) &= READ_N; AND_FLAGS()
-#define XOR_FLAGS() CLEAR_F(); SET_Z(REG(A))
-#define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS()
-#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); XOR_FLAGS()
-#define XOR_N() REG(A) ^= READ_N; XOR_FLAGS()
-#define OR_FLAGS() XOR_FLAGS()
-#define OR_R(R) REG(A) |= REG(R); OR_FLAGS()
-#define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS()
-#define OR_N() REG(A) |= READ_N; OR_FLAGS()
-#define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
-#define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
-#define DEC_RR(RR) REG(RR)--
-#define DEC_MR(MR) t = READ8(REG(MR)) - 1; WRITE8(REG(MR), t); DEC_FLAGS(t)
-#define INC_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = (X & 0xf) == 0
-#define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
-#define INC_RR(RR) REG(RR)++
-#define INC_MR(MR) t = READ8(REG(MR)) + 1; WRITE8(REG(MR), t); INC_FLAGS(t)
-#define CP_FLAGS(X, Y) SET_Z(X - Y); SET_N(1); SET_H_SUB(X, Y); SET_C_SUB(X, Y);
-#define CP_R(R) CP_FLAGS(REG(A), REG(R))
-#define CP_N() t = READ_N; CP_FLAGS(REG(A), t)
-#define CP_MR(MR) t = READ8(REG(MR)); CP_FLAGS(REG(A), t)
-#define CPL() REG(A) = ~REG(A); SET_N(1); FLAG(H) = 1
-#define SWAP_FLAGS(X) CLEAR_F(); SET_Z(X);
+#define PUSH_AF REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
+#define POP_AF set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
+
+#define RET new_pc = READ16(REG(SP)); REG(SP) += 2
+#define RET_F(COND) if (COND) { RET; CYCLES(12); }
+#define RETI e->interrupts.IME = TRUE; RET
+
+#define SWAP_FLAGS(X) CLEAR_F; SET_Z(X);
 #define SWAP t = (t << 4) | (t >> 4)
 #define SWAP_R(R) t = REG(R); SWAP; REG(R) = t; SWAP_FLAGS(REG(R))
 #define SWAP_MR(MR) t = READ8(REG(MR)); SWAP; WRITE8(REG(MR), t); SWAP_FLAGS(t)
+
+#define XOR_FLAGS CLEAR_F; SET_Z(REG(A))
+#define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS
+#define XOR_MR(MR) REG(A) ^= READ8(REG(MR)); XOR_FLAGS
+#define XOR_N REG(A) ^= READ_N; XOR_FLAGS
 
 /* Returns the number of cycles executed */
 uint8_t execute_instruction(struct Emulator* e) {
@@ -2322,7 +2338,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x15: DEC_R(D); break;
       case 0x16: LD_R_N(D); break;
       case 0x17: NI; break;
-      case 0x18: JR_N(); break;
+      case 0x18: JR_N; break;
       case 0x19: NI; break;
       case 0x1a: LD_R_MR(A, DE); break;
       case 0x1b: DEC_RR(DE); break;
@@ -2345,7 +2361,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x2c: INC_R(L); break;
       case 0x2d: DEC_R(L); break;
       case 0x2e: LD_R_N(L); break;
-      case 0x2f: CPL(); break;
+      case 0x2f: CPL; break;
       case 0x30: JR_F_N(COND_NC); break;
       case 0x31: LD_RR_NN(SP); break;
       case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
@@ -2493,17 +2509,17 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xc0: RET_F(COND_NZ); break;
       case 0xc1: POP_RR(BC); break;
       case 0xc2: JP_F_NN(COND_NZ); break;
-      case 0xc3: JP_NN(); break;
+      case 0xc3: JP_NN; break;
       case 0xc4: CALL_F_NN(COND_NZ); break;
       case 0xc5: PUSH_RR(BC); break;
       case 0xc6: NI; break;
       case 0xc7: CALL(0x00); break;
       case 0xc8: RET_F(COND_Z); break;
-      case 0xc9: RET(); break;
+      case 0xc9: RET; break;
       case 0xca: JP_F_NN(COND_Z); break;
       case 0xcb: NI; break;
       case 0xcc: CALL_F_NN(COND_Z); break;
-      case 0xcd: CALL_NN(); break;
+      case 0xcd: CALL_NN; break;
       case 0xce: NI; break;
       case 0xcf: CALL(0x08); break;
       case 0xd0: RET_F(COND_NC); break;
@@ -2515,7 +2531,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xd6: NI; break;
       case 0xd7: CALL(0x10); break;
       case 0xd8: RET_F(COND_C); break;
-      case 0xd9: RETI(); break;
+      case 0xd9: RETI; break;
       case 0xda: JP_F_NN(COND_C); break;
       case 0xdb: NI; break;
       case 0xdc: CALL_F_NN(COND_C); break;
@@ -2528,7 +2544,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xe3: NI; break;
       case 0xe4: NI; break;
       case 0xe5: PUSH_RR(HL); break;
-      case 0xe6: AND_N(); break;
+      case 0xe6: AND_N; break;
       case 0xe7: CALL(0x20); break;
       case 0xe8: NI; break;
       case 0xe9: JP_RR(HL); break;
@@ -2536,15 +2552,15 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xeb: NI; break;
       case 0xec: NI; break;
       case 0xed: NI; break;
-      case 0xee: XOR_N(); break;
+      case 0xee: XOR_N; break;
       case 0xef: CALL(0x28); break;
       case 0xf0: LD_R_MFF00_N(A); break;
-      case 0xf1: POP_AF(); break;
+      case 0xf1: POP_AF; break;
       case 0xf2: LD_R_MFF00_R(A, C); break;
       case 0xf3: e->interrupts.IME = FALSE; break;
       case 0xf4: NI; break;
-      case 0xf5: PUSH_AF(); break;
-      case 0xf6: OR_N(); break;
+      case 0xf5: PUSH_AF; break;
+      case 0xf6: OR_N; break;
       case 0xf7: CALL(0x30); break;
       case 0xf8: NI; break;
       case 0xf9: LD_RR_RR(SP, HL); break;
@@ -2552,7 +2568,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xfb: e->interrupts.IME = TRUE; break;
       case 0xfc: NI; break;
       case 0xfd: NI; break;
-      case 0xfe: CP_N(); break;
+      case 0xfe: CP_N; break;
       case 0xff: CALL(0x38); break;
       default:
         UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
