@@ -634,6 +634,8 @@ struct LCD {
   uint8_t SCX;            /* Screen X */
   uint8_t LY;             /* Line Y */
   uint8_t LYC;            /* Line Y Compare */
+  uint8_t WY;             /* Window Y */
+  uint8_t WX;             /* Window X */
   struct Palette bgp;     /* BG Palette */
   uint32_t cycles;
 };
@@ -1258,6 +1260,10 @@ uint8_t read_io(struct Emulator* e, Address addr) {
       return TO_REG(e->oam.obp[1].color3, PALETTE_COLOR3) |
              TO_REG(e->oam.obp[1].color2, PALETTE_COLOR2) |
              TO_REG(e->oam.obp[1].color1, PALETTE_COLOR1);
+    case IO_WY_ADDR:
+      return e->lcd.WY;
+    case IO_WX_ADDR:
+      return e->lcd.WX; /* TODO actually represents window X minus 7 */
     case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
@@ -1525,6 +1531,12 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->oam.obp[1].color3 = FROM_REG(value, PALETTE_COLOR3);
       e->oam.obp[1].color2 = FROM_REG(value, PALETTE_COLOR2);
       e->oam.obp[1].color1 = FROM_REG(value, PALETTE_COLOR1);
+      break;
+    case IO_WY_ADDR:
+      e->lcd.WY = value;
+      break;
+    case IO_WX_ADDR:
+      e->lcd.WX = value;
       break;
     case IO_IE_ADDR:
       e->interrupts.IE = value;
