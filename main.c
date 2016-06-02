@@ -2162,12 +2162,21 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_NC (!FLAG(C))
 #define COND_C FLAG(C)
 #define CLEAR_F FLAG(Z) = 0; FLAG(N) = 0; FLAG(H) = 0; FLAG(C) = 0
+#define CLEAR_Z FLAG(Z) = 0
 #define SET_Z(X) FLAG(Z) = (X) == 0
-#define TEST_CARRY(X, OP, Y, CMP, TO) (((int16_t)(X) OP (int16_t)(Y)) CMP TO)
+#define TEST_CARRY(X, OP, Y, CMP, TO) (((int32_t)(X) OP (int32_t)(Y)) CMP TO)
 #define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
+#define SET_C_ADD16(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 65535)
 #define SET_C_SUB(X, Y) FLAG(C) = TEST_CARRY(X, -, Y, <, 0)
-#define SET_H_ADD(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, +, Y & 0x3f, >, 0x3f)
-#define SET_H_SUB(X, Y) FLAG(H) = TEST_CARRY(X & 0x3f, -, Y & 0x3f, <, 0)
+#define SET_C_SUB16(X, Y) FLAG(C) = TEST_CARRY(X, -, Y, <, 0)
+#define TEST_CARRY_ADD_MASK(X, Y, M) TEST_CARRY((X) & M, +, (Y) & M, >, M)
+#define TEST_CARRY_SUB_MASK(X, Y, M) TEST_CARRY((X) & M, -, (Y) & M, <, 0)
+#define SET_H_ADD(X, Y) FLAG(H) = TEST_CARRY_ADD_MASK(X, Y, 0x3f)
+#define SET_H_ADD16(X, Y) FLAG(H) = TEST_CARRY_ADD_MASK(X, Y, 0x3fff)
+#define SET_H_SUB(X, Y) FLAG(H) = TEST_CARRY_SUB_MASK(X, Y, 0x3f)
+#define SET_H_SUB16(X, Y) FLAG(H) = TEST_CARRY_SUB_MASK(X, Y, 0x3fff)
+#define SET_CH_ADD(X, Y) SET_C_ADD(X, Y); SET_H_ADD(X, Y)
+#define SET_CH_ADD16(X, Y) SET_C_ADD16(X, Y); SET_H_ADD16(X, Y)
 #define SET_N(X) FLAG(N) = (X)
 
 #define READ8(X) read_u8(e, X)
@@ -2176,6 +2185,15 @@ uint8_t s_cb_opcode_cycles[] = {
 #define WRITE16(X, V) write_u16(e, X, V)
 #define READ_N READ8(REG(PC) + 1)
 #define READ_NN READ16(REG(PC) + 1)
+
+#define ADD_FLAGS(X, Y) SET_Z(X); SET_N(0); SET_CH_ADD(X, Y)
+#define ADD_FLAGS16(X, Y) SET_N(0); SET_CH_ADD16(X, Y)
+#define ADD_SP_FLAGS16(Y) CLEAR_Z; ADD_FLAGS16(REG(SP), Y)
+#define ADD_R(R) ADD_FLAGS(REG(A), REG(R)); REG(A) += REG(R)
+#define ADD_MR(MR) u = READ8(REG(MR)); ADD_FLAGS(REG(A), u); REG(A) += u
+#define ADD_N u = READ_N; ADD_FLAGS(REG(A), u); REG(A) += u
+#define ADD_HL_RR(RR) ADD_FLAGS16(REG(HL), REG(RR)); REG(HL) += REG(RR)
+#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS16(s); REG(SP) += s
 
 #define AND_FLAGS CLEAR_F; SET_Z(REG(A)); SET_N(1)
 #define AND_R(R) REG(A) &= REG(R); AND_FLAGS
@@ -2188,20 +2206,20 @@ uint8_t s_cb_opcode_cycles[] = {
 
 #define CP_FLAGS(X, Y) SET_Z(X - Y); SET_N(1); SET_H_SUB(X, Y); SET_C_SUB(X, Y);
 #define CP_R(R) CP_FLAGS(REG(A), REG(R))
-#define CP_N t = READ_N; CP_FLAGS(REG(A), t)
-#define CP_MR(MR) t = READ8(REG(MR)); CP_FLAGS(REG(A), t)
+#define CP_N u = READ_N; CP_FLAGS(REG(A), u)
+#define CP_MR(MR) u = READ8(REG(MR)); CP_FLAGS(REG(A), u)
 
 #define CPL REG(A) = ~REG(A); SET_N(1); FLAG(H) = 1
 
 #define DEC_FLAGS(X) SET_Z(X); SET_N(1); FLAG(H) = (X & 0xf) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
-#define DEC_MR(MR) t = READ8(REG(MR)) - 1; WRITE8(REG(MR), t); DEC_FLAGS(t)
+#define DEC_MR(MR) u = READ8(REG(MR)) - 1; WRITE8(REG(MR), u); DEC_FLAGS(u)
 
 #define INC_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = (X & 0xf) == 0
 #define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
 #define INC_RR(RR) REG(RR)++
-#define INC_MR(MR) t = READ8(REG(MR)) + 1; WRITE8(REG(MR), t); INC_FLAGS(t)
+#define INC_MR(MR) u = READ8(REG(MR)) + 1; WRITE8(REG(MR), u); INC_FLAGS(u)
 
 #define JP_F_NN(COND) if (COND) { JP_NN; CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
@@ -2239,9 +2257,9 @@ uint8_t s_cb_opcode_cycles[] = {
 #define RETI e->interrupts.IME = TRUE; RET
 
 #define SWAP_FLAGS(X) CLEAR_F; SET_Z(X);
-#define SWAP t = (t << 4) | (t >> 4)
-#define SWAP_R(R) t = REG(R); SWAP; REG(R) = t; SWAP_FLAGS(REG(R))
-#define SWAP_MR(MR) t = READ8(REG(MR)); SWAP; WRITE8(REG(MR), t); SWAP_FLAGS(t)
+#define SWAP u = (u << 4) | (u >> 4)
+#define SWAP_R(R) u = REG(R); SWAP; REG(R) = u; SWAP_FLAGS(REG(R))
+#define SWAP_MR(MR) u = READ8(REG(MR)); SWAP; WRITE8(REG(MR), u); SWAP_FLAGS(u)
 
 #define XOR_FLAGS CLEAR_F; SET_Z(REG(A))
 #define XOR_R(R) REG(A) ^= REG(R); XOR_FLAGS
@@ -2251,7 +2269,8 @@ uint8_t s_cb_opcode_cycles[] = {
 /* Returns the number of cycles executed */
 uint8_t execute_instruction(struct Emulator* e) {
   uint8_t cycles = 0;
-  uint8_t t;
+  int8_t s;
+  uint8_t u;
   print_instruction(e, e->reg.PC);
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
@@ -2323,7 +2342,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x06: LD_R_N(B); break;
       case 0x07: NI; break;
       case 0x08: NI; break;
-      case 0x09: NI; break;
+      case 0x09: ADD_HL_RR(BC); break;
       case 0x0a: LD_R_MR(A, BC); break;
       case 0x0b: DEC_RR(BC); break;
       case 0x0c: INC_R(C); break;
@@ -2339,7 +2358,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x16: LD_R_N(D); break;
       case 0x17: NI; break;
       case 0x18: JR_N; break;
-      case 0x19: NI; break;
+      case 0x19: ADD_HL_RR(DE); break;
       case 0x1a: LD_R_MR(A, DE); break;
       case 0x1b: DEC_RR(DE); break;
       case 0x1c: INC_R(E); break;
@@ -2355,7 +2374,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x26: LD_R_N(H); break;
       case 0x27: NI; break;
       case 0x28: JR_F_N(COND_Z); break;
-      case 0x29: NI; break;
+      case 0x29: ADD_HL_RR(HL); break;
       case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
       case 0x2b: DEC_RR(HL); break;
       case 0x2c: INC_R(L); break;
@@ -2371,7 +2390,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x36: LD_MR_N(HL); break;
       case 0x37: NI; break;
       case 0x38: JR_F_N(COND_C); break;
-      case 0x39: NI; break;
+      case 0x39: ADD_HL_RR(SP); break;
       case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
       case 0x3b: DEC_RR(SP); break;
       case 0x3c: INC_R(A); break;
@@ -2442,14 +2461,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x7d: LD_R_R(A, L); break;
       case 0x7e: LD_R_MR(A, HL); break;
       case 0x7f: LD_R_R(A, A); break;
-      case 0x80: NI; break;
-      case 0x81: NI; break;
-      case 0x82: NI; break;
-      case 0x83: NI; break;
-      case 0x84: NI; break;
-      case 0x85: NI; break;
-      case 0x86: NI; break;
-      case 0x87: NI; break;
+      case 0x80: ADD_R(B); break;
+      case 0x81: ADD_R(C); break;
+      case 0x82: ADD_R(D); break;
+      case 0x83: ADD_R(E); break;
+      case 0x84: ADD_R(H); break;
+      case 0x85: ADD_R(L); break;
+      case 0x86: ADD_MR(HL); break;
+      case 0x87: ADD_R(A); break;
       case 0x88: NI; break;
       case 0x89: NI; break;
       case 0x8a: NI; break;
@@ -2512,7 +2531,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xc3: JP_NN; break;
       case 0xc4: CALL_F_NN(COND_NZ); break;
       case 0xc5: PUSH_RR(BC); break;
-      case 0xc6: NI; break;
+      case 0xc6: ADD_N; break;
       case 0xc7: CALL(0x00); break;
       case 0xc8: RET_F(COND_Z); break;
       case 0xc9: RET; break;
@@ -2546,7 +2565,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xe5: PUSH_RR(HL); break;
       case 0xe6: AND_N; break;
       case 0xe7: CALL(0x20); break;
-      case 0xe8: NI; break;
+      case 0xe8: ADD_SP_N; break;
       case 0xe9: JP_RR(HL); break;
       case 0xea: LD_MN_R(A); break;
       case 0xeb: NI; break;
