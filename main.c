@@ -2252,6 +2252,18 @@ uint8_t s_cb_opcode_cycles[] = {
 #define PUSH_AF REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
 #define POP_AF set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
 
+#define BIT_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = 1
+#define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(u & (1 << BIT))
+#define BIT_MR(BIT, MR) u = READ8(REG(MR)); BIT_FLAGS(u)
+
+#define SET(BIT) u |= (1<<BIT)
+#define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
+#define SET_MR(BIT, MR) u = READ8(REG(MR)); SET(BIT); WRITE8(REG(MR), u)
+
+#define RES(BIT) u &= ~(1<<(BIT))
+#define RES_R(BIT, R) u = REG(R); RES(BIT); REG(R) = u
+#define RES_MR(BIT, MR) u = READ8(REG(MR)); RES(BIT); WRITE8(REG(MR), u)
+
 #define RET new_pc = READ16(REG(SP)); REG(SP) += 2
 #define RET_F(COND) if (COND) { RET; CYCLES(12); }
 #define RETI e->interrupts.IME = TRUE; RET
@@ -2306,9 +2318,20 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 12: /* BIT 4 */
       case 13: /* BIT 5 */
       case 14: /* BIT 6 */
-      case 15: /* BIT 7 */
-        NI;    /* TODO */
+      case 15: /* BIT 7 */ {
+        uint8_t bit = (opcode >> 3) - 8;
+        switch (opcode & 7) {
+          case 0: BIT_R(bit, B); break;
+          case 1: BIT_R(bit, C); break;
+          case 2: BIT_R(bit, D); break;
+          case 3: BIT_R(bit, E); break;
+          case 4: BIT_R(bit, H); break;
+          case 5: BIT_R(bit, L); break;
+          case 6: BIT_MR(bit, HL); break;
+          case 7: BIT_R(bit, A); break;
+        }
         break;
+      }
       case 16: /* RES 0 */
       case 17: /* RES 1 */
       case 18: /* RES 2 */
@@ -2316,9 +2339,20 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 20: /* RES 4 */
       case 21: /* RES 5 */
       case 22: /* RES 6 */
-      case 23: /* RES 7 */
-        NI;    /* TODO */
+      case 23: /* RES 7 */ {
+        uint8_t bit = (opcode >> 3) - 16;
+        switch (opcode & 7) {
+          case 0: RES_R(bit, B); break;
+          case 1: RES_R(bit, C); break;
+          case 2: RES_R(bit, D); break;
+          case 3: RES_R(bit, E); break;
+          case 4: RES_R(bit, H); break;
+          case 5: RES_R(bit, L); break;
+          case 6: RES_MR(bit, HL); break;
+          case 7: RES_R(bit, A); break;
+        }
         break;
+      }
       case 24: /* SET 0 */
       case 25: /* SET 1 */
       case 26: /* SET 2 */
@@ -2326,9 +2360,20 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 28: /* SET 4 */
       case 29: /* SET 5 */
       case 30: /* SET 6 */
-      case 31: /* SET 7 */
-        NI;    /* TODO */
+      case 31: /* SET 7 */ {
+        uint8_t bit = (opcode >> 3) - 24;
+        switch (opcode & 7) {
+          case 0: SET_R(bit, B); break;
+          case 1: SET_R(bit, C); break;
+          case 2: SET_R(bit, D); break;
+          case 3: SET_R(bit, E); break;
+          case 4: SET_R(bit, H); break;
+          case 5: SET_R(bit, L); break;
+          case 6: SET_MR(bit, HL); break;
+          case 7: SET_R(bit, A); break;
+        }
         break;
+      }
     }
   } else {
     cycles = s_opcode_cycles[opcode];
