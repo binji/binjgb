@@ -36,14 +36,12 @@
     UNREACHABLE(__VA_ARGS__);             \
   } while (0)
 
-#define NOT_IMPLEMENTED(...)         \
-  do {                               \
-    s_trace = TRUE;                  \
-    printf("\n\n");                  \
-    print_instruction(e, e->reg.PC); \
-    print_registers(&e->reg);        \
-    printf("\n");                    \
-    UNREACHABLE(__VA_ARGS__);        \
+#define NOT_IMPLEMENTED(...)  \
+  do {                        \
+    s_trace = TRUE;           \
+    printf("\n\n");           \
+    print_emulator_info(e);   \
+    UNREACHABLE(__VA_ARGS__); \
   } while (0)
 
 typedef uint16_t Address;
@@ -685,6 +683,7 @@ struct LCD {
   uint8_t WX;             /* Window X */
   struct Palette bgp;     /* BG Palette */
   uint32_t cycles;
+  uint32_t frame;
 };
 
 struct DMA {
@@ -713,8 +712,7 @@ struct Emulator {
 
 enum Bool s_trace = FALSE;
 
-void print_instruction(struct Emulator*, Address);
-void print_registers(struct Registers*);
+void print_emulator_info(struct Emulator*);
 void write_io(struct Emulator*, Address, uint8_t);
 
 enum Result read_rom_data_from_file(const char* filename,
@@ -2056,10 +2054,6 @@ const char* s_cb_opcode_mnemonic[] = {
 };
 
 void print_instruction(struct Emulator* e, Address addr) {
-  if (!s_trace) {
-    return;
-  }
-
   uint8_t opcode = read_u8(e, addr);
   if (opcode == 0xcb) {
     uint8_t cb_opcode = read_u8(e, addr + 1);
@@ -2099,14 +2093,19 @@ void print_instruction(struct Emulator* e, Address addr) {
 }
 
 void print_registers(struct Registers* reg) {
-  if (!s_trace) {
-    return;
-  }
-
   printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
          reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
          reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
          reg->HL, reg->SP, reg->PC);
+}
+
+void print_emulator_info(struct Emulator* e) {
+  if (s_trace) {
+    print_registers(&e->reg);
+    printf(" | ");
+    print_instruction(e, e->reg.PC);
+    printf("\n");
+  }
 }
 
 uint8_t s_opcode_cycles[] = {
@@ -2283,7 +2282,6 @@ uint8_t execute_instruction(struct Emulator* e) {
   uint8_t cycles = 0;
   int8_t s;
   uint8_t u;
-  print_instruction(e, e->reg.PC);
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
   if (opcode == 0xcb) {
@@ -2640,7 +2638,6 @@ uint8_t execute_instruction(struct Emulator* e) {
     }
   }
   e->reg.PC = new_pc;
-  print_registers(&e->reg);
   return cycles;
 }
 
@@ -2703,6 +2700,7 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
         e->lcd.cycles -= LINE_CYCLES;
         e->lcd.LY++;
         if (e->lcd.LY == 154) {
+          e->lcd.frame++;
           e->lcd.LY = 0;
           e->lcd.stat.mode = LCD_MODE_USING_OAM;
           if (e->lcd.stat.using_oam_intr) {
@@ -2714,9 +2712,6 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   }
   if (line_edge && e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC) {
     e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-  }
-  if (s_trace) {
-    printf(" cycles: %u mode: %u\n", e->lcd.cycles, e->lcd.stat.mode);
   }
 }
 
@@ -2767,7 +2762,7 @@ void handle_interrupts(struct Emulator* e) {
 
   Address vector;
   if (interrupts & INTERRUPT_VBLANK_MASK) {
-    LOG(">> VBLANK interrupt\n");
+    LOG(">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
     vector = 0x40;
     e->interrupts.IF &= ~INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
@@ -2798,6 +2793,7 @@ int main(int argc, char** argv) {
   struct Emulator* e = &emulator;
   CHECK(SUCCESS(init_emulator(e, &rom_data)));
   while (1) {
+    print_emulator_info(e);
     uint8_t cycles = execute_instruction(e);
     update_dma_cycles(e, cycles);
     update_lcd_cycles(e, cycles);
