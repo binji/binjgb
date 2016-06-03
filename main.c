@@ -889,7 +889,7 @@ void rom_only_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 
 uint8_t gb_read_work_ram_bank_switch(struct Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_4K);
-  return e->rom_data.data[0x1000 + addr];
+  return e->ram.data[0x1000 + addr];
 }
 
 uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
