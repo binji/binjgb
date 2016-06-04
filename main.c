@@ -46,6 +46,12 @@
 
 typedef uint16_t Address;
 typedef uint16_t MaskedAddress;
+typedef uint32_t RGBA;
+
+#define RGBA_WHITE 0xffffffffu
+#define RGBA_LIGHT_GRAY 0xffaaaaaau
+#define RGBA_DARK_GRAY 0xff555555u
+#define RGBA_BLACK 0xff000000u
 
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
@@ -84,8 +90,22 @@ typedef uint16_t MaskedAddress;
 #define WORK_RAM_SIZE 32768
 #define HIGH_RAM_SIZE 127
 
+#define SCREEN_WIDTH 160
+#define SCREEN_HEIGHT 144
+#define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
+#define TILE_WIDTH 8
+#define TILE_HEIGHT 8
+#define MAP_COUNT 2
+#define TILE_MAP_WIDTH 32
+#define TILE_MAP_HEIGHT 32
+
+#define WINDOW_MAX_X 166
+#define WINDOW_MAX_Y 143
+
 #define OBJ_COUNT 40
 #define OBJ_PALETTE_COUNT 2
+
+#define PALETTE_COLOR_COUNT 4
 
 #define CHANNEL_COUNT 4
 #define CHANNEL1 0
@@ -473,6 +493,21 @@ enum CounterStep {
   COUNTER_STEP_7 = 1,
 };
 
+enum TileMapSelect {
+  TILE_MAP_9800_9BFF = 0,
+  TILE_MAP_9C00_9FFF = 1,
+};
+
+enum TileDataSelect {
+  TILE_DATA_8800_97FF = 0,
+  TILE_DATA_8000_8FFF = 1,
+};
+
+enum ObjSize {
+  OBJ_SIZE_8X8 = 0,
+  OBJ_SIZE_8X16 = 1,
+};
+
 enum LCDMode {
   LCD_MODE_HBLANK = 0,         /* LCD mode 0 */
   LCD_MODE_VBLANK = 1,         /* LCD mode 1 */
@@ -485,6 +520,12 @@ enum Color {
   COLOR_LIGHT_GRAY = 1,
   COLOR_DARK_GRAY = 2,
   COLOR_BLACK = 3,
+};
+static RGBA s_color_to_rgba[] = {
+  [COLOR_WHITE] = RGBA_WHITE,
+  [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
+  [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
+  [COLOR_BLACK] = RGBA_BLACK,
 };
 
 enum ObjPriority {
@@ -570,15 +611,17 @@ struct Registers {
   } flags;
 };
 
+typedef uint8_t Tile[TILE_WIDTH * TILE_HEIGHT];
+typedef uint8_t TileMap[TILE_MAP_WIDTH * TILE_MAP_HEIGHT];
+
 struct VideoRam {
+  Tile tile[TILE_COUNT];
+  TileMap map[MAP_COUNT];
   uint8_t data[VIDEO_RAM_SIZE];
 };
 
 struct Palette {
-  enum Color color3;
-  enum Color color2;
-  enum Color color1;
-  enum Color color0;
+  enum Color color[PALETTE_COLOR_COUNT];
 };
 
 struct Obj {
@@ -655,11 +698,11 @@ struct Sound {
 
 struct LCDControl {
   enum Bool display;
-  enum Bool window_tile_map_select;
+  enum TileMapSelect window_tile_map_select;
   enum Bool window_display;
-  enum Bool bg_tile_data_select;
-  enum Bool bg_tile_map_select;
-  enum Bool obj_size;
+  enum TileDataSelect bg_tile_data_select;
+  enum TileMapSelect bg_tile_map_select;
+  enum ObjSize obj_size;
   enum Bool obj_display;
   enum Bool bg_display;
 };
@@ -684,6 +727,8 @@ struct LCD {
   struct Palette bgp;     /* BG Palette */
   uint32_t cycles;
   uint32_t frame;
+  uint8_t win_y;    /* The window Y is only incremented when rendered. */
+  uint8_t frame_WY; /* WY is cached per frame. */
 };
 
 struct DMA {
@@ -691,6 +736,8 @@ struct DMA {
   Address addr;
   uint32_t cycles;
 };
+
+typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 
 struct Emulator {
   struct RomData rom_data;
@@ -708,6 +755,7 @@ struct Emulator {
   struct LCD lcd;
   struct DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
+  FrameBuffer frame_buffer;
 };
 
 enum Bool s_trace = FALSE;
@@ -1326,18 +1374,18 @@ uint8_t read_io(struct Emulator* e, Address addr) {
     case IO_DMA_ADDR:
       return 0; /* Write only. */
     case IO_BGP_ADDR:
-      return TO_REG(e->lcd.bgp.color3, PALETTE_COLOR3) |
-             TO_REG(e->lcd.bgp.color2, PALETTE_COLOR2) |
-             TO_REG(e->lcd.bgp.color1, PALETTE_COLOR1) |
-             TO_REG(e->lcd.bgp.color0, PALETTE_COLOR0);
+      return TO_REG(e->lcd.bgp.color[3], PALETTE_COLOR3) |
+             TO_REG(e->lcd.bgp.color[2], PALETTE_COLOR2) |
+             TO_REG(e->lcd.bgp.color[1], PALETTE_COLOR1) |
+             TO_REG(e->lcd.bgp.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return TO_REG(e->oam.obp[0].color3, PALETTE_COLOR3) |
-             TO_REG(e->oam.obp[0].color2, PALETTE_COLOR2) |
-             TO_REG(e->oam.obp[0].color1, PALETTE_COLOR1);
+      return TO_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
+             TO_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
+             TO_REG(e->oam.obp[0].color[1], PALETTE_COLOR1);
     case IO_OBP1_ADDR:
-      return TO_REG(e->oam.obp[1].color3, PALETTE_COLOR3) |
-             TO_REG(e->oam.obp[1].color2, PALETTE_COLOR2) |
-             TO_REG(e->oam.obp[1].color1, PALETTE_COLOR1);
+      return TO_REG(e->oam.obp[1].color[3], PALETTE_COLOR3) |
+             TO_REG(e->oam.obp[1].color[2], PALETTE_COLOR2) |
+             TO_REG(e->oam.obp[1].color[1], PALETTE_COLOR1);
     case IO_WY_ADDR:
       return e->lcd.WY;
     case IO_WX_ADDR:
@@ -1400,6 +1448,29 @@ uint16_t read_u16(struct Emulator* e, Address addr) {
   return read_u8(e, addr) | (read_u8(e, addr + 1) << 8);
 }
 
+void write_vram_tile_data(struct Emulator* e,
+                          uint32_t index,
+                          uint32_t plane,
+                          uint32_t y,
+                          uint8_t value) {
+#if 0
+  LOG("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y, value);
+#endif
+  assert(index < TILE_COUNT);
+  Tile* tile = &e->vram.tile[index];
+  uint32_t data_index = y * TILE_WIDTH;
+  assert(data_index < TILE_WIDTH * TILE_HEIGHT);
+  uint8_t* data = &(*tile)[data_index];
+  data[0] |= ((value >> 7) & 1) << plane;
+  data[1] |= ((value >> 6) & 1) << plane;
+  data[2] |= ((value >> 5) & 1) << plane;
+  data[3] |= ((value >> 4) & 1) << plane;
+  data[4] |= ((value >> 3) & 1) << plane;
+  data[5] |= ((value >> 2) & 1) << plane;
+  data[6] |= ((value >> 1) & 1) << plane;
+  data[7] |= ((value >> 0) & 1) << plane;
+}
+
 void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* Ignore writes if the display is on, and the hardware is using vram. */
   if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
@@ -1407,7 +1478,34 @@ void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 
   assert(addr <= ADDR_MASK_8K);
+  /* Store the raw data so it doesn't have to be re-packed when reading. */
   e->vram.data[addr] = value;
+
+  if (addr < 0x1800) {
+    /* 0x8000-0x97ff: Tile data */
+    uint32_t tile_index = addr >> 4;     /* 16 bytes per tile. */
+    uint32_t tile_y = (addr >> 1) & 0x7; /* 2 bytes per row. */
+    uint32_t plane = addr & 1;
+    write_vram_tile_data(e, tile_index, plane, tile_y, value);
+    if (tile_index >= 128 && tile_index < 256) {
+      /* Mirror tile data from 0x8800-0x8fff as if it were at 0x9800-0x9fff; it
+       * isn't actually, but when using TILE_DATA_8800_97FF, the tile indexes
+       * work as though it was. */
+      write_vram_tile_data(e, tile_index + 256, plane, tile_y, value);
+    }
+  } else {
+    /* 0x9800-0x9fff: Tile map data */
+    addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
+    uint32_t map_index = addr >> 10;
+    assert(map_index < MAP_COUNT);
+    TileMap* map = &e->vram.map[map_index];
+    uint32_t map_y = (addr >> 5) & 0x1f; /* 32 bytes per row. */
+    uint32_t map_x = addr & 0x1f;
+    uint32_t map_data_index = map_y * TILE_MAP_WIDTH + map_x;
+    assert(map_data_index < TILE_MAP_WIDTH * TILE_MAP_HEIGHT);
+    uint8_t* data = &(*map)[map_data_index];
+    *data = value;
+  }
 }
 
 void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -1611,20 +1709,20 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
-      e->lcd.bgp.color3 = FROM_REG(value, PALETTE_COLOR3);
-      e->lcd.bgp.color2 = FROM_REG(value, PALETTE_COLOR2);
-      e->lcd.bgp.color1 = FROM_REG(value, PALETTE_COLOR1);
-      e->lcd.bgp.color0 = FROM_REG(value, PALETTE_COLOR0);
+      e->lcd.bgp.color[3] = FROM_REG(value, PALETTE_COLOR3);
+      e->lcd.bgp.color[2] = FROM_REG(value, PALETTE_COLOR2);
+      e->lcd.bgp.color[1] = FROM_REG(value, PALETTE_COLOR1);
+      e->lcd.bgp.color[0] = FROM_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
-      e->oam.obp[0].color3 = FROM_REG(value, PALETTE_COLOR3);
-      e->oam.obp[0].color2 = FROM_REG(value, PALETTE_COLOR2);
-      e->oam.obp[0].color1 = FROM_REG(value, PALETTE_COLOR1);
+      e->oam.obp[0].color[3] = FROM_REG(value, PALETTE_COLOR3);
+      e->oam.obp[0].color[2] = FROM_REG(value, PALETTE_COLOR2);
+      e->oam.obp[0].color[1] = FROM_REG(value, PALETTE_COLOR1);
       break;
     case IO_OBP1_ADDR:
-      e->oam.obp[1].color3 = FROM_REG(value, PALETTE_COLOR3);
-      e->oam.obp[1].color2 = FROM_REG(value, PALETTE_COLOR2);
-      e->oam.obp[1].color1 = FROM_REG(value, PALETTE_COLOR1);
+      e->oam.obp[1].color[3] = FROM_REG(value, PALETTE_COLOR3);
+      e->oam.obp[1].color[2] = FROM_REG(value, PALETTE_COLOR2);
+      e->oam.obp[1].color[1] = FROM_REG(value, PALETTE_COLOR1);
       break;
     case IO_WY_ADDR:
       e->lcd.WY = value;
@@ -1695,6 +1793,81 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
 void write_u16(struct Emulator* e, Address addr, uint16_t value) {
   write_u8(e, addr, value);
   write_u8(e, addr + 1, value >> 8);
+}
+
+TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
+  switch (select) {
+    case TILE_MAP_9800_9BFF: return &e->vram.map[0];
+    case TILE_MAP_9C00_9FFF: return &e->vram.map[1];
+    default: return NULL;
+  }
+}
+
+Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
+  switch (select) {
+    case TILE_DATA_8000_8FFF: return &e->vram.tile[0];
+    case TILE_DATA_8800_97FF: return &e->vram.tile[256];
+    default: return NULL;
+  }
+}
+
+RGBA get_tile_map_color(TileMap* map,
+                        Tile* tiles,
+                        struct Palette* palette,
+                        uint8_t x,
+                        uint8_t y) {
+  uint8_t tile_index = (*map)[((y >> 3) * TILE_MAP_WIDTH) | (x >> 3)];
+  Tile* tile = &tiles[tile_index];
+  uint8_t palette_index = (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
+  enum Color color = palette->color[palette_index];
+  return s_color_to_rgba[color];
+}
+
+void render_line(struct Emulator* e) {
+  uint8_t y = e->lcd.LY;
+  assert(y < SCREEN_HEIGHT);
+  RGBA* data = &e->frame_buffer[y * SCREEN_WIDTH];
+
+  if (!e->lcd.lcdc.display) {
+    uint8_t x;
+    for (x = 0; x < SCREEN_WIDTH; ++x) {
+      data[x] = RGBA_WHITE;
+    }
+    return;
+  }
+
+  /* TODO: sprites */
+
+  if (e->lcd.lcdc.bg_display) {
+    TileMap* map = get_tile_map(e, e->lcd.lcdc.bg_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
+    struct Palette* palette = &e->lcd.bgp;
+    uint8_t bg_y = y + e->lcd.SCY;
+    uint8_t x = e->lcd.SCX;
+    int n;
+    for (n = 0; n < SCREEN_WIDTH; ++n, ++x) {
+      *data++ = get_tile_map_color(map, tiles, palette, x, bg_y);
+    }
+  }
+
+  if (e->lcd.lcdc.window_display && e->lcd.WX <= WINDOW_MAX_X &&
+      e->lcd.frame_WY <= WINDOW_MAX_Y && e->lcd.win_y >= e->lcd.frame_WY) {
+    TileMap* map = get_tile_map(e, e->lcd.lcdc.window_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
+    struct Palette* palette = &e->lcd.bgp;
+    uint8_t x = 0;
+    if (e->lcd.WX < 7) {
+      /* Start at the leftmost screen X, but skip N pixels of the window. */
+      x = 7 - e->lcd.WX;
+    } else {
+      /* Start N pixels right of the left of the screen. */
+      data += e->lcd.WX - 7;
+    }
+    for (; x < SCREEN_WIDTH; ++x) {
+      *data++ = get_tile_map_color(map, tiles, palette, x, e->lcd.win_y);
+    }
+    e->lcd.win_y++;
+  }
 }
 
 uint8_t s_opcode_bytes[] = {
@@ -2645,6 +2818,76 @@ uint8_t execute_instruction(struct Emulator* e) {
   return cycles;
 }
 
+enum Result write_frame_ppm(struct Emulator* e) {
+  char filename[100];
+  snprintf(filename, sizeof(filename), "frame%05u.ppm", e->lcd.frame);
+  FILE* f = fopen(filename, "wb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
+  uint8_t x, y;
+  RGBA* data = &e->frame_buffer[0];
+  for (y = 0; y < SCREEN_HEIGHT; ++y) {
+    for (x = 0; x < SCREEN_WIDTH; ++x) {
+      RGBA pixel = *data++;
+      uint8_t b = (pixel >> 16) & 0xff;
+      uint8_t g = (pixel >> 8) & 0xff;
+      uint8_t r = (pixel >> 0) & 0xff;
+      CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
+    }
+    CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
+  }
+  fclose(f);
+  return OK;
+error:
+  if (f) {
+    fclose(f);
+  }
+  return ERROR;
+}
+
+enum Result write_tile_data_ppm(struct Emulator* e) {
+  char filename[100];
+  snprintf(filename, sizeof(filename), "tiledata%05u.ppm", e->lcd.frame);
+  FILE* f = fopen(filename, "wb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  CHECK_MSG(fputs("P3\n192 128\n255\n", f) >= 0, "fputs failed.\n");
+  uint32_t x, y;
+  for (y = 0; y < 16 * 8; ++y) {
+    for (x = 0; x < 24 * 8; ++x) {
+      uint8_t tile_x = x >> 3;
+      uint8_t tile_y = y >> 3;
+      Tile* tile = &e->vram.tile[tile_y * 8 + tile_x];
+      uint8_t palette_index = (*tile)[(y & 7) * 8 + (x & 7)];
+      enum Color color = e->lcd.bgp.color[palette_index];
+      RGBA pixel = s_color_to_rgba[color];
+      uint8_t b = (pixel >> 16) & 0xff;
+      uint8_t g = (pixel >> 8) & 0xff;
+      uint8_t r = (pixel >> 0) & 0xff;
+      CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
+    }
+    CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
+  }
+  fclose(f);
+  return OK;
+error:
+  if (f) {
+    fclose(f);
+  }
+  return ERROR;
+}
+
+void new_frame(struct Emulator* e) {
+#if 0
+  write_frame_ppm(e);
+#endif
+#if 0
+  write_tile_data_ppm(e);
+#endif
+  e->lcd.win_y = 0;
+  e->lcd.frame_WY = e->lcd.WY;
+  e->lcd.frame++;
+}
+
 void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   if (!e->dma.active) {
     return;
@@ -2666,6 +2909,7 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   switch (e->lcd.stat.mode) {
     case LCD_MODE_USING_OAM:
       if (e->lcd.cycles >= USING_OAM_CYCLES) {
+        render_line(e);
         e->lcd.cycles -= USING_OAM_CYCLES;
         e->lcd.stat.mode = LCD_MODE_USING_OAM_VRAM;
       }
@@ -2704,7 +2948,7 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
         e->lcd.cycles -= LINE_CYCLES;
         e->lcd.LY++;
         if (e->lcd.LY == 154) {
-          e->lcd.frame++;
+          new_frame(e);
           e->lcd.LY = 0;
           e->lcd.stat.mode = LCD_MODE_USING_OAM;
           if (e->lcd.stat.using_oam_intr) {
