@@ -125,16 +125,16 @@ typedef uint16_t MaskedAddress;
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 
-#define IO_OAM_START_ADDR 0xfe00
-#define IO_OAM_END_ADDR 0xfe9f
-#define IO_UNUSED_START_ADDR 0xfea0
-#define IO_UNUSED_END_ADDR 0xfeff
-#define IO_IO_START_ADDR 0xff00
-#define IO_IO_END_ADDR 0xff7f
-#define IO_HIGH_RAM_START_ADDR 0xff80
-#define IO_HIGH_RAM_END_ADDR 0xfffe
+#define OAM_START_ADDR 0xfe00
+#define OAM_END_ADDR 0xfe9f
+#define UNUSED_START_ADDR 0xfea0
+#define UNUSED_END_ADDR 0xfeff
+#define IO_START_ADDR 0xff00
+#define IO_END_ADDR 0xff7f
+#define HIGH_RAM_START_ADDR 0xff80
+#define HIGH_RAM_END_ADDR 0xfffe
 
-#define OAM_TRANSFER_SIZE (IO_OAM_END_ADDR - IO_OAM_START_ADDR + 1)
+#define OAM_TRANSFER_SIZE (OAM_END_ADDR - OAM_START_ADDR + 1)
 
 #define FOREACH_IO_REG(V)                                    \
   V(JOYP, 0x00) /* Joypad */                                 \
@@ -1121,26 +1121,26 @@ struct MemoryTypeAddressPair map_address(Address addr) {
       break;
 
     case 0xF:
-      if (addr < IO_OAM_START_ADDR) {
+      if (addr < OAM_START_ADDR) {
         /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
         result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
         result.addr = addr & ADDR_MASK_4K;
-      } else if (addr <= IO_OAM_END_ADDR) {
+      } else if (addr <= OAM_END_ADDR) {
         /* 0xfe00 - 0xfe9f */
         result.type = MEMORY_MAP_OAM;
-        result.addr = addr - IO_OAM_START_ADDR;
-      } else if (addr <= IO_UNUSED_END_ADDR) {
+        result.addr = addr - OAM_START_ADDR;
+      } else if (addr <= UNUSED_END_ADDR) {
         /* 0xfea0 - 0xfeff */
         result.type = MEMORY_MAP_UNUSED;
         result.addr = addr;
-      } else if (addr <= IO_IO_END_ADDR) {
+      } else if (addr <= IO_END_ADDR) {
         /* 0xff00 - 0xff7f */
         result.type = MEMORY_MAP_IO;
         result.addr = addr;
-      } else if (addr <= IO_HIGH_RAM_END_ADDR) {
+      } else if (addr <= HIGH_RAM_END_ADDR) {
         /* 0xff80 - 0xfffe */
         result.type = MEMORY_MAP_HIGH_RAM;
-        result.addr = addr - IO_HIGH_RAM_START_ADDR;
+        result.addr = addr - HIGH_RAM_START_ADDR;
       } else {
         /* 0xffff: IE register */
         result.type = MEMORY_MAP_IO;
@@ -2167,15 +2167,14 @@ uint8_t s_cb_opcode_cycles[] = {
 #define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
 #define SET_C_ADD16(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 65535)
 #define SET_C_SUB(X, Y) FLAG(C) = TEST_CARRY(X, -, Y, <, 0)
-#define SET_C_SUB16(X, Y) FLAG(C) = TEST_CARRY(X, -, Y, <, 0)
 #define TEST_CARRY_ADD_MASK(X, Y, M) TEST_CARRY((X) & M, +, (Y) & M, >, M)
 #define TEST_CARRY_SUB_MASK(X, Y, M) TEST_CARRY((X) & M, -, (Y) & M, <, 0)
 #define SET_H_ADD(X, Y) FLAG(H) = TEST_CARRY_ADD_MASK(X, Y, 0xf)
 #define SET_H_ADD16(X, Y) FLAG(H) = TEST_CARRY_ADD_MASK(X, Y, 0xfff)
 #define SET_H_SUB(X, Y) FLAG(H) = TEST_CARRY_SUB_MASK(X, Y, 0xf)
-#define SET_H_SUB16(X, Y) FLAG(H) = TEST_CARRY_SUB_MASK(X, Y, 0xfff)
 #define SET_CH_ADD(X, Y) SET_C_ADD(X, Y); SET_H_ADD(X, Y)
 #define SET_CH_ADD16(X, Y) SET_C_ADD16(X, Y); SET_H_ADD16(X, Y)
+#define SET_CH_SUB(X, Y) SET_C_SUB(X, Y); SET_H_SUB(X, Y)
 #define SET_N(X) FLAG(N) = (X)
 
 #define READ8(X) read_u8(e, X)
@@ -2266,6 +2265,11 @@ uint8_t s_cb_opcode_cycles[] = {
 #define RET new_pc = READ16(REG(SP)); REG(SP) += 2
 #define RET_F(COND) if (COND) { RET; CYCLES(12); }
 #define RETI e->interrupts.IME = TRUE; RET
+
+#define SUB_FLAGS(X, Y) SET_Z(X); SET_N(1); SET_CH_SUB(X, Y)
+#define SUB_R(R) SUB_FLAGS(REG(A), REG(R)); REG(A) -= REG(R)
+#define SUB_MR(MR) u = READ8(REG(MR)); SUB_FLAGS(REG(A), u); REG(A) -= u
+#define SUB_N u = READ_N; SUB_FLAGS(REG(A), u); REG(A) -= u
 
 #define SWAP_FLAGS(X) CLEAR_F; SET_Z(X);
 #define SWAP u = (u << 4) | (u >> 4)
@@ -2520,14 +2524,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x8d: NI; break;
       case 0x8e: NI; break;
       case 0x8f: NI; break;
-      case 0x90: NI; break;
-      case 0x91: NI; break;
-      case 0x92: NI; break;
-      case 0x93: NI; break;
-      case 0x94: NI; break;
-      case 0x95: NI; break;
-      case 0x96: NI; break;
-      case 0x97: NI; break;
+      case 0x90: SUB_R(B); break;
+      case 0x91: SUB_R(C); break;
+      case 0x92: SUB_R(D); break;
+      case 0x93: SUB_R(E); break;
+      case 0x94: SUB_R(H); break;
+      case 0x95: SUB_R(L); break;
+      case 0x96: SUB_MR(HL); break;
+      case 0x97: SUB_R(A); break;
       case 0x98: NI; break;
       case 0x99: NI; break;
       case 0x9a: NI; break;
@@ -2590,7 +2594,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xd3: NI; break;
       case 0xd4: CALL_F_NN(COND_NC); break;
       case 0xd5: PUSH_RR(DE); break;
-      case 0xd6: NI; break;
+      case 0xd6: SUB_N; break;
       case 0xd7: CALL(0x10); break;
       case 0xd8: RET_F(COND_C); break;
       case 0xd9: RETI; break;
@@ -2651,7 +2655,7 @@ void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
     e->dma.active = FALSE;
     Address i;
     for (i = 0; i < OAM_TRANSFER_SIZE; ++i) {
-      write_u8(e, IO_OAM_START_ADDR + i, read_u8(e, e->dma.addr + i));
+      write_u8(e, OAM_START_ADDR + i, read_u8(e, e->dma.addr + i));
     }
   }
 }
