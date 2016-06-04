@@ -2333,7 +2333,8 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_Z FLAG(Z)
 #define COND_NC (!FLAG(C))
 #define COND_C FLAG(C)
-#define CLEAR_F FLAG(Z) = 0; FLAG(N) = 0; FLAG(H) = 0; FLAG(C) = 0
+#define CLEAR_F FLAG(Z) = FLAG(N) = FLAG(H) = FLAG(C) = 0
+#define CLEAR_HN FLAG(H) = FLAG(N) = 0
 #define CLEAR_Z FLAG(Z) = 0
 #define SET_Z(X) FLAG(Z) = (X) == 0
 #define TEST_CARRY(X, OP, Y, CMP, TO) (((int32_t)(X) OP (int32_t)(Y)) CMP TO)
@@ -2370,6 +2371,10 @@ uint8_t s_cb_opcode_cycles[] = {
 #define AND_R(R) REG(A) &= REG(R); AND_FLAGS
 #define AND_MR(MR) REG(A) &= READ8(REG(MR)); AND_FLAGS
 #define AND_N REG(A) &= READ_N; AND_FLAGS
+
+#define BIT_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = 1
+#define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(u & (1 << BIT))
+#define BIT_MR(BIT, MR) u = READ8(REG(MR)); BIT_FLAGS(u)
 
 #define CALL(X) REG(SP) -= 2; WRITE16(REG(SP), new_pc); new_pc = X
 #define CALL_NN CALL(READ_NN)
@@ -2418,18 +2423,11 @@ uint8_t s_cb_opcode_cycles[] = {
 #define OR_MR(MR) REG(A) |= READ8(REG(MR)); OR_FLAGS
 #define OR_N REG(A) |= READ_N; OR_FLAGS
 
-#define PUSH_RR(RR) REG(SP) -= 2; WRITE16(REG(SP), REG(RR))
 #define POP_RR(RR) REG(RR) = READ16(REG(SP)); REG(SP) += 2
-#define PUSH_AF REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
 #define POP_AF set_af_reg(&e->reg, READ16(REG(SP))); REG(SP) += 2
 
-#define BIT_FLAGS(X) SET_Z(X); SET_N(0); FLAG(H) = 1
-#define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(u & (1 << BIT))
-#define BIT_MR(BIT, MR) u = READ8(REG(MR)); BIT_FLAGS(u)
-
-#define SET(BIT) u |= (1<<BIT)
-#define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
-#define SET_MR(BIT, MR) u = READ8(REG(MR)); SET(BIT); WRITE8(REG(MR), u)
+#define PUSH_RR(RR) REG(SP) -= 2; WRITE16(REG(SP), REG(RR))
+#define PUSH_AF REG(SP) -= 2; WRITE16(REG(SP), get_af_reg(&e->reg))
 
 #define RES(BIT) u &= ~(1<<(BIT))
 #define RES_R(BIT, R) u = REG(R); RES(BIT); REG(R) = u
@@ -2438,6 +2436,34 @@ uint8_t s_cb_opcode_cycles[] = {
 #define RET new_pc = READ16(REG(SP)); REG(SP) += 2
 #define RET_F(COND) if (COND) { RET; CYCLES(12); }
 #define RETI e->interrupts.IME = TRUE; RET
+
+#define RL c = (u >> 7) & 1; u = (u << 1) | FLAG(C); FLAG(C) = c
+#define RL_FLAGS(X) SET_Z(X); CLEAR_HN
+#define RLA u = REG(A); RL; REG(A) = u; CLEAR_HN
+#define RL_R(R) u = REG(R); RL; REG(R) = u; RL_FLAGS(u)
+#define RL_MR(MR) u = READ8(REG(MR)); RL; WRITE8(REG(MR), u); RL_FLAGS(u)
+
+#define RLC c = (u >> 7) & 1; u = (u << 1) | c; FLAG(C) = c
+#define RLC_FLAGS(X) SET_Z(X); CLEAR_HN
+#define RLCA u = REG(A); RLC; REG(A) = u; CLEAR_HN
+#define RLC_R(R) u = REG(R); RLC; REG(R) = u; RLC_FLAGS(u)
+#define RLC_MR(MR) u = READ8(REG(MR)); RLC; WRITE8(REG(MR), u); RLC_FLAGS(u)
+
+#define RR c = u & 1; u = (FLAG(C) << 7) | (u >> 1); FLAG(C) = c
+#define RR_FLAGS(X) SET_Z(X); CLEAR_HN
+#define RRA u = REG(A); RR; REG(A) = u; CLEAR_HN
+#define RR_R(R) u = REG(R); RR; REG(R) = u; RR_FLAGS(u)
+#define RR_MR(MR) u = READ8(REG(MR)); RR; WRITE8(REG(MR), u); RR_FLAGS(u)
+
+#define RRC c = u & 1; u = (c << 7) | (u >> 1); FLAG(C) = c
+#define RRC_FLAGS(X) SET_Z(X); CLEAR_HN
+#define RRCA u = REG(A); RRC; REG(A) = u; CLEAR_HN
+#define RRC_R(R) u = REG(R); RRC; REG(R) = u; RRC_FLAGS(u)
+#define RRC_MR(MR) u = READ8(REG(MR)); RRC; WRITE8(REG(MR), u); RRC_FLAGS(u)
+
+#define SET(BIT) u |= (1<<BIT)
+#define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
+#define SET_MR(BIT, MR) u = READ8(REG(MR)); SET(BIT); WRITE8(REG(MR), u)
 
 #define SUB_FLAGS(X, Y) SET_Z(X); SET_N(1); SET_CH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(REG(A), REG(R)); REG(A) -= REG(R)
@@ -2459,96 +2485,269 @@ uint8_t execute_instruction(struct Emulator* e) {
   uint8_t cycles = 0;
   int8_t s;
   uint8_t u;
+  uint8_t c;
   uint8_t opcode = read_u8(e, e->reg.PC);
   Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
   if (opcode == 0xcb) {
     uint8_t opcode = read_u8(e, e->reg.PC + 1);
     cycles = s_cb_opcode_cycles[opcode];
-    switch (opcode >> 3) {
-      case 0: /* RLC */
-      case 1: /* RRC */
-      case 2: /* RL */
-      case 3: /* RR */
-      case 4: /* SLA */
-      case 5: /* SRA */
-        NI;   /* TODO */
-        break;
-      case 6: /* SWAP */
-      case 7: /* SWAP */
-        switch (opcode & 7) {
-          case 0: SWAP_R(B); break;
-          case 1: SWAP_R(C); break;
-          case 2: SWAP_R(D); break;
-          case 3: SWAP_R(E); break;
-          case 4: SWAP_R(H); break;
-          case 5: SWAP_R(L); break;
-          case 6: SWAP_MR(HL); break;
-          case 7: SWAP_R(A); break;
-        }
-        break;
-      case 8: /* BIT 0 */
-      case 9: /* BIT 1 */
-      case 10: /* BIT 2 */
-      case 11: /* BIT 3 */
-      case 12: /* BIT 4 */
-      case 13: /* BIT 5 */
-      case 14: /* BIT 6 */
-      case 15: /* BIT 7 */ {
-        uint8_t bit = (opcode >> 3) - 8;
-        switch (opcode & 7) {
-          case 0: BIT_R(bit, B); break;
-          case 1: BIT_R(bit, C); break;
-          case 2: BIT_R(bit, D); break;
-          case 3: BIT_R(bit, E); break;
-          case 4: BIT_R(bit, H); break;
-          case 5: BIT_R(bit, L); break;
-          case 6: BIT_MR(bit, HL); break;
-          case 7: BIT_R(bit, A); break;
-        }
-        break;
-      }
-      case 16: /* RES 0 */
-      case 17: /* RES 1 */
-      case 18: /* RES 2 */
-      case 19: /* RES 3 */
-      case 20: /* RES 4 */
-      case 21: /* RES 5 */
-      case 22: /* RES 6 */
-      case 23: /* RES 7 */ {
-        uint8_t bit = (opcode >> 3) - 16;
-        switch (opcode & 7) {
-          case 0: RES_R(bit, B); break;
-          case 1: RES_R(bit, C); break;
-          case 2: RES_R(bit, D); break;
-          case 3: RES_R(bit, E); break;
-          case 4: RES_R(bit, H); break;
-          case 5: RES_R(bit, L); break;
-          case 6: RES_MR(bit, HL); break;
-          case 7: RES_R(bit, A); break;
-        }
-        break;
-      }
-      case 24: /* SET 0 */
-      case 25: /* SET 1 */
-      case 26: /* SET 2 */
-      case 27: /* SET 3 */
-      case 28: /* SET 4 */
-      case 29: /* SET 5 */
-      case 30: /* SET 6 */
-      case 31: /* SET 7 */ {
-        uint8_t bit = (opcode >> 3) - 24;
-        switch (opcode & 7) {
-          case 0: SET_R(bit, B); break;
-          case 1: SET_R(bit, C); break;
-          case 2: SET_R(bit, D); break;
-          case 3: SET_R(bit, E); break;
-          case 4: SET_R(bit, H); break;
-          case 5: SET_R(bit, L); break;
-          case 6: SET_MR(bit, HL); break;
-          case 7: SET_R(bit, A); break;
-        }
-        break;
-      }
+    switch (opcode) {
+      case 0x00: RLC_R(B); break;
+      case 0x01: RLC_R(C); break;
+      case 0x02: RLC_R(D); break;
+      case 0x03: RLC_R(E); break;
+      case 0x04: RLC_R(H); break;
+      case 0x05: RLC_R(L); break;
+      case 0x06: RLC_MR(HL); break;
+      case 0x07: RLC_R(A); break;
+      case 0x08: RRC_R(B); break;
+      case 0x09: RRC_R(C); break;
+      case 0x0a: RRC_R(D); break;
+      case 0x0b: RRC_R(E); break;
+      case 0x0c: RRC_R(H); break;
+      case 0x0d: RRC_R(L); break;
+      case 0x0e: RRC_MR(HL); break;
+      case 0x0f: RRC_R(A); break;
+      case 0x10: RL_R(B); break;
+      case 0x11: RL_R(C); break;
+      case 0x12: RL_R(D); break;
+      case 0x13: RL_R(E); break;
+      case 0x14: RL_R(H); break;
+      case 0x15: RL_R(L); break;
+      case 0x16: RL_MR(HL); break;
+      case 0x17: RL_R(A); break;
+      case 0x18: RR_R(B); break;
+      case 0x19: RR_R(C); break;
+      case 0x1a: RR_R(D); break;
+      case 0x1b: RR_R(E); break;
+      case 0x1c: RR_R(H); break;
+      case 0x1d: RR_R(L); break;
+      case 0x1e: RR_MR(HL); break;
+      case 0x1f: RR_R(A); break;
+      case 0x20: NI; break;
+      case 0x21: NI; break;
+      case 0x22: NI; break;
+      case 0x23: NI; break;
+      case 0x24: NI; break;
+      case 0x25: NI; break;
+      case 0x26: NI; break;
+      case 0x27: NI; break;
+      case 0x28: NI; break;
+      case 0x29: NI; break;
+      case 0x2a: NI; break;
+      case 0x2b: NI; break;
+      case 0x2c: NI; break;
+      case 0x2d: NI; break;
+      case 0x2e: NI; break;
+      case 0x2f: NI; break;
+      case 0x30: SWAP_R(B); break;
+      case 0x31: SWAP_R(C); break;
+      case 0x32: SWAP_R(D); break;
+      case 0x33: SWAP_R(E); break;
+      case 0x34: SWAP_R(H); break;
+      case 0x35: SWAP_R(L); break;
+      case 0x36: SWAP_MR(B); break;
+      case 0x37: SWAP_R(A); break;
+      case 0x38: SWAP_R(B); break;
+      case 0x39: SWAP_R(C); break;
+      case 0x3a: SWAP_R(D); break;
+      case 0x3b: SWAP_R(E); break;
+      case 0x3c: SWAP_R(H); break;
+      case 0x3d: SWAP_R(L); break;
+      case 0x3e: SWAP_MR(B); break;
+      case 0x3f: SWAP_R(A); break;
+      case 0x40: BIT_R(0, B); break;
+      case 0x41: BIT_R(0, C); break;
+      case 0x42: BIT_R(0, D); break;
+      case 0x43: BIT_R(0, E); break;
+      case 0x44: BIT_R(0, H); break;
+      case 0x45: BIT_R(0, L); break;
+      case 0x46: BIT_MR(0, HL); break;
+      case 0x47: BIT_R(0, A); break;
+      case 0x48: BIT_R(1, B); break;
+      case 0x49: BIT_R(1, C); break;
+      case 0x4a: BIT_R(1, D); break;
+      case 0x4b: BIT_R(1, E); break;
+      case 0x4c: BIT_R(1, H); break;
+      case 0x4d: BIT_R(1, L); break;
+      case 0x4e: BIT_MR(1, HL); break;
+      case 0x4f: BIT_R(1, A); break;
+      case 0x50: BIT_R(2, B); break;
+      case 0x51: BIT_R(2, C); break;
+      case 0x52: BIT_R(2, D); break;
+      case 0x53: BIT_R(2, E); break;
+      case 0x54: BIT_R(2, H); break;
+      case 0x55: BIT_R(2, L); break;
+      case 0x56: BIT_MR(2, HL); break;
+      case 0x57: BIT_R(2, A); break;
+      case 0x58: BIT_R(3, B); break;
+      case 0x59: BIT_R(3, C); break;
+      case 0x5a: BIT_R(3, D); break;
+      case 0x5b: BIT_R(3, E); break;
+      case 0x5c: BIT_R(3, H); break;
+      case 0x5d: BIT_R(3, L); break;
+      case 0x5e: BIT_MR(3, HL); break;
+      case 0x5f: BIT_R(3, A); break;
+      case 0x60: BIT_R(4, B); break;
+      case 0x61: BIT_R(4, C); break;
+      case 0x62: BIT_R(4, D); break;
+      case 0x63: BIT_R(4, E); break;
+      case 0x64: BIT_R(4, H); break;
+      case 0x65: BIT_R(4, L); break;
+      case 0x66: BIT_MR(4, HL); break;
+      case 0x67: BIT_R(4, A); break;
+      case 0x68: BIT_R(5, B); break;
+      case 0x69: BIT_R(5, C); break;
+      case 0x6a: BIT_R(5, D); break;
+      case 0x6b: BIT_R(5, E); break;
+      case 0x6c: BIT_R(5, H); break;
+      case 0x6d: BIT_R(5, L); break;
+      case 0x6e: BIT_MR(5, HL); break;
+      case 0x6f: BIT_R(5, A); break;
+      case 0x70: BIT_R(6, B); break;
+      case 0x71: BIT_R(6, C); break;
+      case 0x72: BIT_R(6, D); break;
+      case 0x73: BIT_R(6, E); break;
+      case 0x74: BIT_R(6, H); break;
+      case 0x75: BIT_R(6, L); break;
+      case 0x76: BIT_MR(6, HL); break;
+      case 0x77: BIT_R(6, A); break;
+      case 0x78: BIT_R(7, B); break;
+      case 0x79: BIT_R(7, C); break;
+      case 0x7a: BIT_R(7, D); break;
+      case 0x7b: BIT_R(7, E); break;
+      case 0x7c: BIT_R(7, H); break;
+      case 0x7d: BIT_R(7, L); break;
+      case 0x7e: BIT_MR(7, HL); break;
+      case 0x7f: BIT_R(7, A); break;
+      case 0x80: RES_R(0, B); break;
+      case 0x81: RES_R(0, C); break;
+      case 0x82: RES_R(0, D); break;
+      case 0x83: RES_R(0, E); break;
+      case 0x84: RES_R(0, H); break;
+      case 0x85: RES_R(0, L); break;
+      case 0x86: RES_MR(0, HL); break;
+      case 0x87: RES_R(0, A); break;
+      case 0x88: RES_R(1, B); break;
+      case 0x89: RES_R(1, C); break;
+      case 0x8a: RES_R(1, D); break;
+      case 0x8b: RES_R(1, E); break;
+      case 0x8c: RES_R(1, H); break;
+      case 0x8d: RES_R(1, L); break;
+      case 0x8e: RES_MR(1, HL); break;
+      case 0x8f: RES_R(1, A); break;
+      case 0x90: RES_R(2, B); break;
+      case 0x91: RES_R(2, C); break;
+      case 0x92: RES_R(2, D); break;
+      case 0x93: RES_R(2, E); break;
+      case 0x94: RES_R(2, H); break;
+      case 0x95: RES_R(2, L); break;
+      case 0x96: RES_MR(2, HL); break;
+      case 0x97: RES_R(2, A); break;
+      case 0x98: RES_R(3, B); break;
+      case 0x99: RES_R(3, C); break;
+      case 0x9a: RES_R(3, D); break;
+      case 0x9b: RES_R(3, E); break;
+      case 0x9c: RES_R(3, H); break;
+      case 0x9d: RES_R(3, L); break;
+      case 0x9e: RES_MR(3, HL); break;
+      case 0x9f: RES_R(3, A); break;
+      case 0xa0: RES_R(4, B); break;
+      case 0xa1: RES_R(4, C); break;
+      case 0xa2: RES_R(4, D); break;
+      case 0xa3: RES_R(4, E); break;
+      case 0xa4: RES_R(4, H); break;
+      case 0xa5: RES_R(4, L); break;
+      case 0xa6: RES_MR(4, HL); break;
+      case 0xa7: RES_R(4, A); break;
+      case 0xa8: RES_R(5, B); break;
+      case 0xa9: RES_R(5, C); break;
+      case 0xaa: RES_R(5, D); break;
+      case 0xab: RES_R(5, E); break;
+      case 0xac: RES_R(5, H); break;
+      case 0xad: RES_R(5, L); break;
+      case 0xae: RES_MR(5, HL); break;
+      case 0xaf: RES_R(5, A); break;
+      case 0xb0: RES_R(6, B); break;
+      case 0xb1: RES_R(6, C); break;
+      case 0xb2: RES_R(6, D); break;
+      case 0xb3: RES_R(6, E); break;
+      case 0xb4: RES_R(6, H); break;
+      case 0xb5: RES_R(6, L); break;
+      case 0xb6: RES_MR(6, HL); break;
+      case 0xb7: RES_R(6, A); break;
+      case 0xb8: RES_R(7, B); break;
+      case 0xb9: RES_R(7, C); break;
+      case 0xba: RES_R(7, D); break;
+      case 0xbb: RES_R(7, E); break;
+      case 0xbc: RES_R(7, H); break;
+      case 0xbd: RES_R(7, L); break;
+      case 0xbe: RES_MR(7, HL); break;
+      case 0xbf: RES_R(7, A); break;
+      case 0xc0: SET_R(0, B); break;
+      case 0xc1: SET_R(0, C); break;
+      case 0xc2: SET_R(0, D); break;
+      case 0xc3: SET_R(0, E); break;
+      case 0xc4: SET_R(0, H); break;
+      case 0xc5: SET_R(0, L); break;
+      case 0xc6: SET_MR(0, HL); break;
+      case 0xc7: SET_R(0, A); break;
+      case 0xc8: SET_R(1, B); break;
+      case 0xc9: SET_R(1, C); break;
+      case 0xca: SET_R(1, D); break;
+      case 0xcb: SET_R(1, E); break;
+      case 0xcc: SET_R(1, H); break;
+      case 0xcd: SET_R(1, L); break;
+      case 0xce: SET_MR(1, HL); break;
+      case 0xcf: SET_R(1, A); break;
+      case 0xd0: SET_R(2, B); break;
+      case 0xd1: SET_R(2, C); break;
+      case 0xd2: SET_R(2, D); break;
+      case 0xd3: SET_R(2, E); break;
+      case 0xd4: SET_R(2, H); break;
+      case 0xd5: SET_R(2, L); break;
+      case 0xd6: SET_MR(2, HL); break;
+      case 0xd7: SET_R(2, A); break;
+      case 0xd8: SET_R(3, B); break;
+      case 0xd9: SET_R(3, C); break;
+      case 0xda: SET_R(3, D); break;
+      case 0xdb: SET_R(3, E); break;
+      case 0xdc: SET_R(3, H); break;
+      case 0xdd: SET_R(3, L); break;
+      case 0xde: SET_MR(3, HL); break;
+      case 0xdf: SET_R(3, A); break;
+      case 0xe0: SET_R(4, B); break;
+      case 0xe1: SET_R(4, C); break;
+      case 0xe2: SET_R(4, D); break;
+      case 0xe3: SET_R(4, E); break;
+      case 0xe4: SET_R(4, H); break;
+      case 0xe5: SET_R(4, L); break;
+      case 0xe6: SET_MR(4, HL); break;
+      case 0xe7: SET_R(4, A); break;
+      case 0xe8: SET_R(5, B); break;
+      case 0xe9: SET_R(5, C); break;
+      case 0xea: SET_R(5, D); break;
+      case 0xeb: SET_R(5, E); break;
+      case 0xec: SET_R(5, H); break;
+      case 0xed: SET_R(5, L); break;
+      case 0xee: SET_MR(5, HL); break;
+      case 0xef: SET_R(5, A); break;
+      case 0xf0: SET_R(6, B); break;
+      case 0xf1: SET_R(6, C); break;
+      case 0xf2: SET_R(6, D); break;
+      case 0xf3: SET_R(6, E); break;
+      case 0xf4: SET_R(6, H); break;
+      case 0xf5: SET_R(6, L); break;
+      case 0xf6: SET_MR(6, HL); break;
+      case 0xf7: SET_R(6, A); break;
+      case 0xf8: SET_R(7, B); break;
+      case 0xf9: SET_R(7, C); break;
+      case 0xfa: SET_R(7, D); break;
+      case 0xfb: SET_R(7, E); break;
+      case 0xfc: SET_R(7, H); break;
+      case 0xfd: SET_R(7, L); break;
+      case 0xfe: SET_MR(7, HL); break;
+      case 0xff: SET_R(7, A); break;
     }
   } else {
     cycles = s_opcode_cycles[opcode];
@@ -2560,7 +2759,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x04: INC_R(B); break;
       case 0x05: DEC_R(B); break;
       case 0x06: LD_R_N(B); break;
-      case 0x07: NI; break;
+      case 0x07: RRCA; break;
       case 0x08: NI; break;
       case 0x09: ADD_HL_RR(BC); break;
       case 0x0a: LD_R_MR(A, BC); break;
@@ -2568,7 +2767,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x0c: INC_R(C); break;
       case 0x0d: DEC_R(C); break;
       case 0x0e: LD_R_N(C); break;
-      case 0x0f: NI; break;
+      case 0x0f: RRA; break;
       case 0x10: NI; break;
       case 0x11: LD_RR_NN(DE); break;
       case 0x12: LD_MR_R(DE, A); break;
@@ -2576,7 +2775,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x14: INC_R(D); break;
       case 0x15: DEC_R(D); break;
       case 0x16: LD_R_N(D); break;
-      case 0x17: NI; break;
+      case 0x17: RLA; break;
       case 0x18: JR_N; break;
       case 0x19: ADD_HL_RR(DE); break;
       case 0x1a: LD_R_MR(A, DE); break;
@@ -2584,7 +2783,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x1c: INC_R(E); break;
       case 0x1d: DEC_R(E); break;
       case 0x1e: LD_R_N(E); break;
-      case 0x1f: NI; break;
+      case 0x1f: RLCA; break;
       case 0x20: JR_F_N(COND_NZ); break;
       case 0x21: LD_RR_NN(HL); break;
       case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
