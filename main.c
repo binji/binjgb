@@ -2465,6 +2465,16 @@ uint8_t s_cb_opcode_cycles[] = {
 #define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
 #define SET_MR(BIT, MR) u = READ8(REG(MR)); SET(BIT); WRITE8(REG(MR), u)
 
+#define SLA FLAG(C) = (u >> 7) & 1; u <<= 1
+#define SLA_FLAGS(X) SET_Z(X); CLEAR_HN
+#define SLA_R(R) u = REG(R); SLA; REG(R) = u; SLA_FLAGS(u)
+#define SLA_MR(MR) u = READ8(REG(MR)); SLA; WRITE8(REG(MR), u); SLA_FLAGS(u)
+
+#define SRA FLAG(C) = u & 1; u = (int8_t)u >> 1
+#define SRA_FLAGS(X) SET_Z(X); CLEAR_HN
+#define SRA_R(R) u = REG(R); SRA; REG(R) = u; SRA_FLAGS(u)
+#define SRA_MR(MR) u = READ8(REG(MR)); SRA; WRITE8(REG(MR), u); SRA_FLAGS(u)
+
 #define SUB_FLAGS(X, Y) SET_Z(X); SET_N(1); SET_CH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(REG(A), REG(R)); REG(A) -= REG(R)
 #define SUB_MR(MR) u = READ8(REG(MR)); SUB_FLAGS(REG(A), u); REG(A) -= u
@@ -2524,22 +2534,22 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x1d: RR_R(L); break;
       case 0x1e: RR_MR(HL); break;
       case 0x1f: RR_R(A); break;
-      case 0x20: NI; break;
-      case 0x21: NI; break;
-      case 0x22: NI; break;
-      case 0x23: NI; break;
-      case 0x24: NI; break;
-      case 0x25: NI; break;
-      case 0x26: NI; break;
-      case 0x27: NI; break;
-      case 0x28: NI; break;
-      case 0x29: NI; break;
-      case 0x2a: NI; break;
-      case 0x2b: NI; break;
-      case 0x2c: NI; break;
-      case 0x2d: NI; break;
-      case 0x2e: NI; break;
-      case 0x2f: NI; break;
+      case 0x20: SLA_R(B); break;
+      case 0x21: SLA_R(C); break;
+      case 0x22: SLA_R(D); break;
+      case 0x23: SLA_R(E); break;
+      case 0x24: SLA_R(H); break;
+      case 0x25: SLA_R(L); break;
+      case 0x26: SLA_MR(HL); break;
+      case 0x27: SLA_R(A); break;
+      case 0x28: SRA_R(B); break;
+      case 0x29: SRA_R(C); break;
+      case 0x2a: SRA_R(D); break;
+      case 0x2b: SRA_R(E); break;
+      case 0x2c: SRA_R(H); break;
+      case 0x2d: SRA_R(L); break;
+      case 0x2e: SRA_MR(HL); break;
+      case 0x2f: SRA_R(A); break;
       case 0x30: SWAP_R(B); break;
       case 0x31: SWAP_R(C); break;
       case 0x32: SWAP_R(D); break;
