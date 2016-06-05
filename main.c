@@ -2336,7 +2336,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define CLEAR_F FLAG(Z) = FLAG(N) = FLAG(H) = FLAG(C) = 0
 #define CLEAR_HN FLAG(H) = FLAG(N) = 0
 #define CLEAR_Z FLAG(Z) = 0
-#define SET_Z(X) FLAG(Z) = (X) == 0
+#define SET_Z(X) FLAG(Z) = (uint8_t)(X) == 0
 #define TEST_CARRY(X, OP, Y, CMP, TO) (((int32_t)(X) OP (int32_t)(Y)) CMP TO)
 #define SET_C_ADD(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 255)
 #define SET_C_ADD16(X, Y) FLAG(C) = TEST_CARRY(X, +, Y, >, 65535)
@@ -2360,7 +2360,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define READMR(MR) READ8(REG(MR))
 #define WRITEMR(MR, V) WRITE8(REG(MR), V)
 
-#define ADD_FLAGS(X, Y) SET_Z(X); SET_N(0); SET_CH_ADD(X, Y)
+#define ADD_FLAGS(X, Y) SET_Z((X) + (Y)); SET_N(0); SET_CH_ADD(X, Y)
 #define ADD_FLAGS16(X, Y) SET_N(0); SET_CH_ADD16(X, Y)
 #define ADD_SP_FLAGS16(Y) CLEAR_Z; ADD_FLAGS16(REG(SP), Y)
 #define ADD_R(R) ADD_FLAGS(REG(A), REG(R)); REG(A) += REG(R)
@@ -2374,7 +2374,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define ADC_MR(MR) u = READMR(MR) + FLAG(C); ADC_FLAGS(REG(A), u); REG(A) += u
 #define ADC_N u = READ_N + FLAG(C); ADC_FLAGS(REG(A), u); REG(A) += u
 
-#define AND_FLAGS CLEAR_F; SET_Z(REG(A)); SET_N(1)
+#define AND_FLAGS CLEAR_F; SET_Z(REG(A)); FLAG(H) = 1
 #define AND_R(R) REG(A) &= REG(R); AND_FLAGS
 #define AND_MR(MR) REG(A) &= READMR(MR); AND_FLAGS
 #define AND_N REG(A) &= READ_N; AND_FLAGS
@@ -2482,15 +2482,15 @@ uint8_t s_cb_opcode_cycles[] = {
 #define SRA_R(R) u = REG(R); SRA; REG(R) = u; SRA_FLAGS(u)
 #define SRA_MR(MR) u = READMR(MR); SRA; WRITEMR(MR, u); SRA_FLAGS(u)
 
-#define SUB_FLAGS(X, Y) SET_Z(X); SET_N(1); SET_CH_SUB(X, Y)
+#define SUB_FLAGS(X, Y) SET_Z(X - Y); SET_N(1); SET_CH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(REG(A), REG(R)); REG(A) -= REG(R)
 #define SUB_MR(MR) u = READMR(MR); SUB_FLAGS(REG(A), u); REG(A) -= u
 #define SUB_N u = READ_N; SUB_FLAGS(REG(A), u); REG(A) -= u
 
 #define SBC_FLAGS(X, Y) SUB_FLAGS(X, Y)
-#define SBC_R(R) u = REG(R) + FLAG(C); SUB_FLAGS(REG(A), u); REG(A) -= u
-#define SBC_MR(MR) u = READMR(MR) + FLAG(C); SUB_FLAGS(REG(A), u); REG(A) -= u
-#define SBC_N u = READ_N + FLAG(C); SUB_FLAGS(REG(A), u); REG(A) -= u
+#define SBC_R(R) u = REG(R) + FLAG(C); SBC_FLAGS(REG(A), u); REG(A) -= u
+#define SBC_MR(MR) u = READMR(MR) + FLAG(C); SBC_FLAGS(REG(A), u); REG(A) -= u
+#define SBC_N u = READ_N + FLAG(C); SBC_FLAGS(REG(A), u); REG(A) -= u
 
 #define SWAP_FLAGS(X) CLEAR_F; SET_Z(X);
 #define SWAP u = (u << 4) | (u >> 4)
@@ -2568,7 +2568,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x33: SWAP_R(E); break;
       case 0x34: SWAP_R(H); break;
       case 0x35: SWAP_R(L); break;
-      case 0x36: SWAP_MR(B); break;
+      case 0x36: SWAP_MR(HL); break;
       case 0x37: SWAP_R(A); break;
       case 0x38: SWAP_R(B); break;
       case 0x39: SWAP_R(C); break;
@@ -2576,7 +2576,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x3b: SWAP_R(E); break;
       case 0x3c: SWAP_R(H); break;
       case 0x3d: SWAP_R(L); break;
-      case 0x3e: SWAP_MR(B); break;
+      case 0x3e: SWAP_MR(HL); break;
       case 0x3f: SWAP_R(A); break;
       case 0x40: BIT_R(0, B); break;
       case 0x41: BIT_R(0, C); break;
@@ -2781,7 +2781,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x04: INC_R(B); break;
       case 0x05: DEC_R(B); break;
       case 0x06: LD_R_N(B); break;
-      case 0x07: RRCA; break;
+      case 0x07: RLCA; break;
       case 0x08: NI; break;
       case 0x09: ADD_HL_RR(BC); break;
       case 0x0a: LD_R_MR(A, BC); break;
@@ -2789,7 +2789,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x0c: INC_R(C); break;
       case 0x0d: DEC_R(C); break;
       case 0x0e: LD_R_N(C); break;
-      case 0x0f: RRA; break;
+      case 0x0f: RRCA; break;
       case 0x10: NI; break;
       case 0x11: LD_RR_NN(DE); break;
       case 0x12: LD_MR_R(DE, A); break;
@@ -2805,7 +2805,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x1c: INC_R(E); break;
       case 0x1d: DEC_R(E); break;
       case 0x1e: LD_R_N(E); break;
-      case 0x1f: RLCA; break;
+      case 0x1f: RRA; break;
       case 0x20: JR_F_N(COND_NZ); break;
       case 0x21: LD_RR_NN(HL); break;
       case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
@@ -2853,7 +2853,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x4c: LD_R_R(C, H); break;
       case 0x4d: LD_R_R(C, L); break;
       case 0x4e: LD_R_MR(C, HL); break;
-      case 0x4f: LD_R_R(D, A); break;
+      case 0x4f: LD_R_R(C, A); break;
       case 0x50: LD_R_R(D, B); break;
       case 0x51: LD_R_R(D, C); break;
       case 0x52: LD_R_R(D, D); break;
@@ -3099,7 +3099,9 @@ error:
 
 void new_frame(struct Emulator* e) {
 #if 0
-  write_frame_ppm(e);
+  if (e->lcd.frame % 16 == 0) {
+    write_frame_ppm(e);
+  }
 #endif
 #if 0
   write_tile_data_ppm(e);
