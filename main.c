@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#include <SDL/SDL.h>
+#include <SDL/SDL_main.h>
+
 #define SUCCESS(x) ((x) == OK)
 #define FAIL(x) ((x) != OK)
 
@@ -12,6 +15,7 @@
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
+#define DEBUG(...)
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define CHECK_MSG(x, ...)                       \
   if (!(x)) {                                   \
@@ -90,6 +94,9 @@ typedef uint32_t RGBA;
 #define WORK_RAM_SIZE 32768
 #define HIGH_RAM_SIZE 127
 
+#define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
+#define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
+#define RENDER_SCALE 4
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
 #define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
@@ -729,6 +736,7 @@ struct LCD {
   uint32_t frame;
   uint8_t win_y;    /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
+  enum Bool new_frame_edge;
 };
 
 struct DMA {
@@ -954,9 +962,7 @@ uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
 }
 
 void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-#if 0
-  LOG("mbc1_write_rom: 0x%04x <= 0x%02x\n", addr, value);
-#endif
+  DEBUG("mbc1_write_rom: 0x%04x <= 0x%02x\n", addr, value);
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ram_enabled =
@@ -1437,9 +1443,7 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
 
     case MEMORY_MAP_IO: {
       uint8_t value = read_io(e, pair.addr);
-#if 0
-      LOG("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
-#endif
+      DEBUG("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
       return value;
     }
 
@@ -1458,9 +1462,7 @@ void write_vram_tile_data(struct Emulator* e,
                           uint32_t plane,
                           uint32_t y,
                           uint8_t value) {
-#if 0
-  LOG("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y, value);
-#endif
+  DEBUG("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y, value);
   assert(index < TILE_COUNT);
   Tile* tile = &e->vram.tile[index];
   uint32_t data_index = y * TILE_WIDTH;
@@ -1566,9 +1568,7 @@ void from_nrx4_reg(struct Channel* channel, uint8_t value) {
 }
 
 void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-#if 0
-  LOG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
-#endif
+  DEBUG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
       e->joypad.joypad_select = FROM_REG(value, JOYP_JOYPAD_SELECT);
@@ -1787,9 +1787,7 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       return write_io(e, pair.addr, value);
 
     case MEMORY_MAP_HIGH_RAM:
-#if 0
-      LOG("write_hram(0x%04x, 0x%02x)\n", addr, value);
-#endif
+      DEBUG("write_hram(0x%04x, 0x%02x)\n", addr, value);
       e->hram[pair.addr] = value;
       break;
   }
@@ -3150,20 +3148,10 @@ error:
 }
 
 void new_frame(struct Emulator* e) {
-#if 1
-  if (e->lcd.frame == 2000) {
-    write_frame_ppm(e);
-#if 0
-    exit(0);
-#endif
-  }
-#endif
-#if 0
-  write_tile_data_ppm(e);
-#endif
   e->lcd.win_y = 0;
   e->lcd.frame_WY = e->lcd.WY;
   e->lcd.frame++;
+  e->lcd.new_frame_edge = TRUE;
 }
 
 void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
@@ -3183,6 +3171,7 @@ void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
 
 void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   enum Bool line_edge = FALSE;
+  e->lcd.new_frame_edge = FALSE;
   e->lcd.cycles += cycles;
   switch (e->lcd.stat.mode) {
     case LCD_MODE_USING_OAM:
@@ -3288,15 +3277,15 @@ void handle_interrupts(struct Emulator* e) {
 
   Address vector;
   if (interrupts & INTERRUPT_VBLANK_MASK) {
-    LOG(">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
+    DEBUG(">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
     vector = 0x40;
     e->interrupts.IF &= ~INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
-    LOG(">> LCD_STAT interrupt\n");
+    DEBUG(">> LCD_STAT interrupt\n");
     vector = 0x48;
     e->interrupts.IF &= ~INTERRUPT_LCD_STAT_MASK;
   } else if (interrupts & INTERRUPT_TIMER_MASK) {
-    LOG(">> TIMER interrupt\n");
+    DEBUG(">> TIMER interrupt\n");
     vector = 0x50;
     e->interrupts.IF &= ~INTERRUPT_TIMER_MASK;
   } else {
@@ -3311,22 +3300,73 @@ void handle_interrupts(struct Emulator* e) {
 
 int main(int argc, char** argv) {
   --argc; ++argv;
-  CHECK_MSG(argc == 1, "no rom file given.\n");
+  int result = 1;
+
   struct RomData rom_data;
-  CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   struct Emulator emulator;
   ZERO_MEMORY(emulator);
   struct Emulator* e = &emulator;
+  CHECK_MSG(argc == 1, "no rom file given.\n");
+  CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   CHECK(SUCCESS(init_emulator(e, &rom_data)));
-  while (1) {
+
+  CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
+  SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
+  CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
+
+  enum Bool running = TRUE;
+  while (running) {
     print_emulator_info(e);
     uint8_t cycles = execute_instruction(e);
     update_dma_cycles(e, cycles);
     update_lcd_cycles(e, cycles);
     update_timer_cycles(e, cycles);
     handle_interrupts(e);
+
+    if (e->lcd.new_frame_edge) {
+      SDL_Event event;
+      while (SDL_PollEvent(&event)) {
+        switch (event.type) {
+          case SDL_QUIT:
+            running = FALSE;
+            break;
+          default:
+            break;
+        }
+      }
+
+      if (SDL_LockSurface(surface) == 0) {
+        uint32_t* pixels = surface->pixels;
+        int sx, sy;
+        for (sy = 0; sy < SCREEN_HEIGHT; sy++) {
+          for (sx = 0; sx < SCREEN_WIDTH; sx++) {
+            int i, j;
+            RGBA pixel = e->frame_buffer[sy * SCREEN_WIDTH + sx];
+            uint8_t r = (pixel >> 16) & 0xff;
+            uint8_t g = (pixel >> 8) & 0xff;
+            uint8_t b = (pixel >> 0) & 0xff;
+            uint32_t mapped = SDL_MapRGB(surface->format, r, g, b);
+            for (j = 0; j < RENDER_SCALE; j++) {
+              for (i = 0; i < RENDER_SCALE; i++) {
+                int rx = sx * RENDER_SCALE + i;
+                int ry = sy * RENDER_SCALE + j;
+                pixels[ry * RENDER_WIDTH + rx] = mapped;
+              }
+            }
+          }
+        }
+        SDL_UnlockSurface(surface);
+      }
+      SDL_Flip(surface);
+    }
+
   }
-  return 0;
+
+  result = 0;
 error:
-  return 1;
+  if (surface) {
+    SDL_FreeSurface(surface);
+  }
+  SDL_Quit();
+  return result;
 }
