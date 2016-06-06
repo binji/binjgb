@@ -2330,6 +2330,7 @@ uint8_t s_cb_opcode_cycles[] = {
 };
 
 #define NI NOT_IMPLEMENTED("opcode not implemented!\n")
+#define INVALID NI
 
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
@@ -3023,7 +3024,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xc8: RET_F(COND_Z); break;
       case 0xc9: RET; break;
       case 0xca: JP_F_NN(COND_Z); break;
-      case 0xcb: NI; break;
+      case 0xcb: INVALID; break;
       case 0xcc: CALL_F_NN(COND_Z); break;
       case 0xcd: CALL_NN; break;
       case 0xce: ADC_N; break;
@@ -3031,7 +3032,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xd0: RET_F(COND_NC); break;
       case 0xd1: POP_RR(DE); break;
       case 0xd2: JP_F_NN(COND_NC); break;
-      case 0xd3: NI; break;
+      case 0xd3: INVALID; break;
       case 0xd4: CALL_F_NN(COND_NC); break;
       case 0xd5: PUSH_RR(DE); break;
       case 0xd6: SUB_N; break;
@@ -3039,32 +3040,32 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xd8: RET_F(COND_C); break;
       case 0xd9: RETI; break;
       case 0xda: JP_F_NN(COND_C); break;
-      case 0xdb: NI; break;
+      case 0xdb: INVALID; break;
       case 0xdc: CALL_F_NN(COND_C); break;
-      case 0xdd: NI; break;
+      case 0xdd: INVALID; break;
       case 0xde: SBC_N; break;
       case 0xdf: CALL(0x18); break;
       case 0xe0: LD_MFF00_N_R(A); break;
       case 0xe1: POP_RR(HL); break;
       case 0xe2: LD_MFF00_R_R(C, A); break;
-      case 0xe3: NI; break;
-      case 0xe4: NI; break;
+      case 0xe3: INVALID; break;
+      case 0xe4: INVALID; break;
       case 0xe5: PUSH_RR(HL); break;
       case 0xe6: AND_N; break;
       case 0xe7: CALL(0x20); break;
       case 0xe8: ADD_SP_N; break;
       case 0xe9: JP_RR(HL); break;
       case 0xea: LD_MN_R(A); break;
-      case 0xeb: NI; break;
-      case 0xec: NI; break;
-      case 0xed: NI; break;
+      case 0xeb: INVALID; break;
+      case 0xec: INVALID; break;
+      case 0xed: INVALID; break;
       case 0xee: XOR_N; break;
       case 0xef: CALL(0x28); break;
       case 0xf0: LD_R_MFF00_N(A); break;
       case 0xf1: POP_AF; break;
       case 0xf2: LD_R_MFF00_R(A, C); break;
       case 0xf3: e->interrupts.IME = FALSE; break;
-      case 0xf4: NI; break;
+      case 0xf4: INVALID; break;
       case 0xf5: PUSH_AF; break;
       case 0xf6: OR_N; break;
       case 0xf7: CALL(0x30); break;
@@ -3072,13 +3073,11 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xf9: LD_RR_RR(SP, HL); break;
       case 0xfa: LD_R_MN(A); break;
       case 0xfb: e->interrupts.IME = TRUE; break;
-      case 0xfc: NI; break;
-      case 0xfd: NI; break;
+      case 0xfc: INVALID; break;
+      case 0xfd: INVALID; break;
       case 0xfe: CP_N; break;
       case 0xff: CALL(0x38); break;
-      default:
-        UNREACHABLE("invalid opcode: 0x%02X\n", opcode);
-        break;
+      default: INVALID; break;
     }
   }
   e->reg.PC = new_pc;
