@@ -2157,10 +2157,10 @@ const char* s_cb_opcode_mnemonic[] = {
         [0x2D] = "SRA L",      [0x2E] = "SRA (HL)",   [0x2F] = "SRA A",
         [0x30] = "SWAP B",     [0x31] = "SWAP C",     [0x32] = "SWAP D",
         [0x33] = "SWAP E",     [0x34] = "SWAP H",     [0x35] = "SWAP L",
-        [0x36] = "SWAP (HL)",  [0x37] = "SWAP A",     [0x38] = "SWAP B",
-        [0x39] = "SWAP C",     [0x3A] = "SWAP D",     [0x3B] = "SWAP E",
-        [0x3C] = "SWAP H",     [0x3D] = "SWAP L",     [0x3E] = "SWAP (HL)",
-        [0x3F] = "SWAP A",     [0x40] = "BIT 0,B",    [0x41] = "BIT 0,C",
+        [0x36] = "SWAP (HL)",  [0x37] = "SWAP A",     [0x38] = "SRL B",
+        [0x39] = "SRL C",      [0x3A] = "SRL D",      [0x3B] = "SRL E",
+        [0x3C] = "SRL H",      [0x3D] = "SRL L",      [0x3E] = "SRL (HL)",
+        [0x3F] = "SRL A",      [0x40] = "BIT 0,B",    [0x41] = "BIT 0,C",
         [0x42] = "BIT 0,D",    [0x43] = "BIT 0,E",    [0x44] = "BIT 0,H",
         [0x45] = "BIT 0,L",    [0x46] = "BIT 0,(HL)", [0x47] = "BIT 0,A",
         [0x48] = "BIT 1,B",    [0x49] = "BIT 1,C",    [0x4A] = "BIT 1,D",
@@ -2398,13 +2398,15 @@ uint8_t s_cb_opcode_cycles[] = {
 #define AND_MR(MR) RA &= READMR(MR); AND_FLAGS
 #define AND_N RA &= READ_N; AND_FLAGS
 
-#define BIT_FLAGS(X) SET_Z(X); FN = 0; FH = 1
-#define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(u & (1 << BIT))
-#define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(u)
+#define BIT_FLAGS(BIT, X) SET_Z(X & (1 << BIT)); FN = 0; FH = 1
+#define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(BIT, u)
+#define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
 
 #define CALL(X) RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
 #define CALL_NN CALL(READ_NN)
 #define CALL_F_NN(COND) if (COND) { CALL_NN; CYCLES(12); }
+
+#define CCF FC ^= 1; CLEAR_HN
 
 #define CP_FLAGS(X, Y) SET_Z(X - Y); FN = 1; SET_CH_SUB(X, Y)
 #define CP_R(R) CP_FLAGS(RA, REG(R))
@@ -2465,27 +2467,29 @@ uint8_t s_cb_opcode_cycles[] = {
 
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
 #define RL_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RLA u = RA; RL; RA = u; CLEAR_HN
+#define RLA u = RA; RL; RA = u; CLEAR_HN; FZ = 0
 #define RL_R(R) u = REG(R); RL; REG(R) = u; RL_FLAGS(u)
 #define RL_MR(MR) u = READMR(MR); RL; WRITEMR(MR, u); RL_FLAGS(u)
 
 #define RLC c = (u >> 7) & 1; u = (u << 1) | c; FC = c
 #define RLC_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RLCA u = RA; RLC; RA = u; CLEAR_HN
+#define RLCA u = RA; RLC; RA = u; CLEAR_HN; FZ = 0
 #define RLC_R(R) u = REG(R); RLC; REG(R) = u; RLC_FLAGS(u)
 #define RLC_MR(MR) u = READMR(MR); RLC; WRITEMR(MR, u); RLC_FLAGS(u)
 
 #define RR c = u & 1; u = (FC << 7) | (u >> 1); FC = c
 #define RR_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RRA u = RA; RR; RA = u; CLEAR_HN
+#define RRA u = RA; RR; RA = u; CLEAR_HN; FZ = 0
 #define RR_R(R) u = REG(R); RR; REG(R) = u; RR_FLAGS(u)
 #define RR_MR(MR) u = READMR(MR); RR; WRITEMR(MR, u); RR_FLAGS(u)
 
 #define RRC c = u & 1; u = (c << 7) | (u >> 1); FC = c
 #define RRC_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RRCA u = RA; RRC; RA = u; CLEAR_HN
+#define RRCA u = RA; RRC; RA = u; CLEAR_HN; FZ = 0
 #define RRC_R(R) u = REG(R); RRC; REG(R) = u; RRC_FLAGS(u)
 #define RRC_MR(MR) u = READMR(MR); RRC; WRITEMR(MR, u); RRC_FLAGS(u)
+
+#define SCF FC = 1; CLEAR_HN
 
 #define SET(BIT) u |= (1 << BIT)
 #define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
@@ -2500,6 +2504,11 @@ uint8_t s_cb_opcode_cycles[] = {
 #define SRA_FLAGS(X) SET_Z(X); CLEAR_HN
 #define SRA_R(R) u = REG(R); SRA; REG(R) = u; SRA_FLAGS(u)
 #define SRA_MR(MR) u = READMR(MR); SRA; WRITEMR(MR, u); SRA_FLAGS(u)
+
+#define SRL FC = u & 1; u >>= 1
+#define SRL_FLAGS(X) SET_Z(X); CLEAR_HN
+#define SRL_R(R) u = REG(R); SRL; REG(R) = u; SRL_FLAGS(u)
+#define SRL_MR(MR) u = READMR(MR); SRL; WRITEMR(MR, u); SRL_FLAGS(u)
 
 #define SUB_FLAGS(X, Y) SET_Z((X) - (Y)); FN = 1; SET_CH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(RA, REG(R)); RA -= REG(R)
@@ -2591,14 +2600,14 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x35: SWAP_R(L); break;
       case 0x36: SWAP_MR(HL); break;
       case 0x37: SWAP_R(A); break;
-      case 0x38: SWAP_R(B); break;
-      case 0x39: SWAP_R(C); break;
-      case 0x3a: SWAP_R(D); break;
-      case 0x3b: SWAP_R(E); break;
-      case 0x3c: SWAP_R(H); break;
-      case 0x3d: SWAP_R(L); break;
-      case 0x3e: SWAP_MR(HL); break;
-      case 0x3f: SWAP_R(A); break;
+      case 0x38: SRL_R(B); break;
+      case 0x39: SRL_R(C); break;
+      case 0x3a: SRL_R(D); break;
+      case 0x3b: SRL_R(E); break;
+      case 0x3c: SRL_R(H); break;
+      case 0x3d: SRL_R(L); break;
+      case 0x3e: SRL_MR(HL); break;
+      case 0x3f: SRL_R(A); break;
       case 0x40: BIT_R(0, B); break;
       case 0x41: BIT_R(0, C); break;
       case 0x42: BIT_R(0, D); break;
@@ -2850,7 +2859,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x34: INC_MR(HL); break;
       case 0x35: DEC_MR(HL); break;
       case 0x36: LD_MR_N(HL); break;
-      case 0x37: NI; break;
+      case 0x37: SCF; break;
       case 0x38: JR_F_N(COND_C); break;
       case 0x39: ADD_HL_RR(SP); break;
       case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
@@ -2858,7 +2867,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x3c: INC_R(A); break;
       case 0x3d: DEC_R(A); break;
       case 0x3e: LD_R_N(A); break;
-      case 0x3f: NI; break;
+      case 0x3f: CCF; break;
       case 0x40: LD_R_R(B, B); break;
       case 0x41: LD_R_R(B, C); break;
       case 0x42: LD_R_R(B, D); break;
@@ -3120,7 +3129,7 @@ error:
 
 void new_frame(struct Emulator* e) {
 #if 1
-  if (e->lcd.frame == 200) {
+  if (e->lcd.frame % 200 == 0) {
     write_frame_ppm(e);
   }
 #endif
