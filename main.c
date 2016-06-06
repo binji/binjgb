@@ -2415,6 +2415,21 @@ uint8_t s_cb_opcode_cycles[] = {
 
 #define CPL RA = ~RA; FN = FH = 1
 
+#define DAA                              \
+  do {                                   \
+    u = 0;                               \
+    if (FH || (!FN && (RA & 0xf) > 9)) { \
+      u = 6;                             \
+    }                                    \
+    if (FC || (!FN && RA > 0x99)) {      \
+      u |= 0x60;                         \
+      FC = 1;                            \
+    }                                    \
+    RA += FN ? -u : u;                   \
+    SET_Z(RA);                           \
+    FH = 0;                              \
+  } while (0)
+
 #define DEC_FLAGS(X) SET_Z(X); FN = 1; FH = MASK8(X) == 0xf
 #define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
 #define DEC_RR(RR) REG(RR)--
@@ -2843,7 +2858,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x24: INC_R(H); break;
       case 0x25: DEC_R(H); break;
       case 0x26: LD_R_N(H); break;
-      case 0x27: NI; break;
+      case 0x27: DAA; break;
       case 0x28: JR_F_N(COND_Z); break;
       case 0x29: ADD_HL_RR(HL); break;
       case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
@@ -3129,7 +3144,7 @@ error:
 
 void new_frame(struct Emulator* e) {
 #if 1
-  if (e->lcd.frame % 200 == 0) {
+  if (e->lcd.frame == 2000) {
     write_frame_ppm(e);
   }
 #endif
