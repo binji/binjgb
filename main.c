@@ -108,9 +108,13 @@ typedef uint32_t RGBA;
 
 #define WINDOW_MAX_X 166
 #define WINDOW_MAX_Y 143
+#define WINDOW_X_OFFSET 7
 
 #define OBJ_COUNT 40
+#define OBJ_PER_LINE_COUNT 10
 #define OBJ_PALETTE_COUNT 2
+#define OBJ_Y_OFFSET 16
+#define OBJ_X_OFFSET 8
 
 #define PALETTE_COLOR_COUNT 4
 
@@ -514,6 +518,10 @@ enum ObjSize {
   OBJ_SIZE_8X8 = 0,
   OBJ_SIZE_8X16 = 1,
 };
+static uint8_t s_obj_size_to_height[] = {
+  [OBJ_SIZE_8X8] = 8,
+  [OBJ_SIZE_8X16] = 16,
+};
 
 enum LCDMode {
   LCD_MODE_HBLANK = 0,         /* LCD mode 0 */
@@ -533,6 +541,12 @@ static RGBA s_color_to_rgba[] = {
   [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
   [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
   [COLOR_BLACK] = RGBA_BLACK,
+};
+static uint8_t s_color_to_obj_mask[] = {
+  [COLOR_WHITE] = 0xff,
+  [COLOR_LIGHT_GRAY] = 0,
+  [COLOR_DARK_GRAY] = 0,
+  [COLOR_BLACK] = 0,
 };
 
 enum ObjPriority {
@@ -1225,8 +1239,8 @@ uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   uint8_t obj_index = addr >> 2;
   struct Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
-    case 0: return obj->y;
-    case 1: return obj->x;
+    case 0: return obj->y + OBJ_Y_OFFSET;
+    case 1: return obj->x + OBJ_X_OFFSET;
     case 2: return obj->tile;
     case 3:
       return FROM_REG(obj->priority, OBJ_PRIORITY) |
@@ -1524,11 +1538,11 @@ void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   struct Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
     case 0:
-      obj->y = value;
+      obj->y = value - OBJ_Y_OFFSET;
       break;
 
     case 1:
-      obj->x = value;
+      obj->x = value - OBJ_X_OFFSET;
       break;
 
     case 2:
@@ -1814,42 +1828,68 @@ Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
   }
 }
 
-RGBA get_tile_map_color(TileMap* map,
-                        Tile* tiles,
-                        struct Palette* palette,
-                        uint8_t x,
-                        uint8_t y) {
+uint8_t get_tile_map_palette_index(TileMap* map,
+                                   Tile* tiles,
+                                   uint8_t x,
+                                   uint8_t y) {
   uint8_t tile_index = (*map)[((y >> 3) * TILE_MAP_WIDTH) | (x >> 3)];
   Tile* tile = &tiles[tile_index];
-  uint8_t palette_index = (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
-  enum Color color = palette->color[palette_index];
-  return s_color_to_rgba[color];
+  return (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
+}
+
+RGBA get_palette_index_rgba(uint8_t palette_index, struct Palette* palette) {
+  return s_color_to_rgba[palette->color[palette_index]];
+}
+
+int obj_cmp(const void* v1, const void* v2, void* arg) {
+  const struct Obj* o1 = v1;
+  const struct Obj* o2 = v2;
+  const uint8_t* obj_height = arg;
+  enum Bool o1_visible = o1->y < *obj_height;
+  enum Bool o2_visible = o2->y < *obj_height;
+  if (o1_visible != o2_visible) {
+    /* Put invisible sprites at the end. */
+    return o2_visible - o1_visible;
+  }
+  if (o1->x != o2->x) {
+    /* Prioritize sprites with a smaller X value. */
+    return o1->x - o2->x;
+  }
+  /* Otherwise use table order (i.e. pointer value). */
+  return o1 - o2;
 }
 
 void render_line(struct Emulator* e) {
-  uint8_t y = e->lcd.LY;
-  assert(y < SCREEN_HEIGHT);
-  RGBA* data = &e->frame_buffer[y * SCREEN_WIDTH];
+  uint8_t line_y = e->lcd.LY;
+  assert(line_y < SCREEN_HEIGHT);
+  RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
 
-  if (!e->lcd.lcdc.display) {
-    uint8_t x;
-    for (x = 0; x < SCREEN_WIDTH; ++x) {
-      data[x] = RGBA_WHITE;
+  uint8_t bg_obj_mask[SCREEN_WIDTH];
+
+  if (!e->lcd.lcdc.display || !e->lcd.lcdc.bg_display) {
+    uint8_t sx;
+    for (sx = 0; sx < SCREEN_WIDTH; ++sx) {
+      bg_obj_mask[sx] = s_color_to_obj_mask[COLOR_WHITE];
+      line_data[sx] = RGBA_WHITE;
     }
-    return;
-  }
 
-  /* TODO: sprites */
+    if (!e->lcd.lcdc.display) {
+      return;
+    }
+  }
 
   if (e->lcd.lcdc.bg_display) {
     TileMap* map = get_tile_map(e, e->lcd.lcdc.bg_tile_map_select);
     Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
     struct Palette* palette = &e->lcd.bgp;
-    uint8_t bg_y = y + e->lcd.SCY;
-    uint8_t x = e->lcd.SCX;
-    int n;
-    for (n = 0; n < SCREEN_WIDTH; ++n, ++x) {
-      *data++ = get_tile_map_color(map, tiles, palette, x, bg_y);
+    uint8_t bg_y = line_y + e->lcd.SCY;
+    uint8_t bg_x = e->lcd.SCX;
+    int sx;
+    for (sx = 0; sx < SCREEN_WIDTH; ++sx, ++bg_x) {
+      uint8_t palette_index =
+          get_tile_map_palette_index(map, tiles, bg_x, bg_y);
+      bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
+      line_data[sx] = get_palette_index_rgba(palette_index, palette);
     }
   }
 
@@ -1858,18 +1898,72 @@ void render_line(struct Emulator* e) {
     TileMap* map = get_tile_map(e, e->lcd.lcdc.window_tile_map_select);
     Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
     struct Palette* palette = &e->lcd.bgp;
-    uint8_t x = 0;
-    if (e->lcd.WX < 7) {
+    uint8_t win_x = 0;
+    int sx = 0;
+    if (e->lcd.WX < WINDOW_X_OFFSET) {
       /* Start at the leftmost screen X, but skip N pixels of the window. */
-      x = 7 - e->lcd.WX;
+      win_x = WINDOW_X_OFFSET - e->lcd.WX;
     } else {
       /* Start N pixels right of the left of the screen. */
-      data += e->lcd.WX - 7;
+      sx += e->lcd.WX - WINDOW_X_OFFSET;
     }
-    for (; x < SCREEN_WIDTH; ++x) {
-      *data++ = get_tile_map_color(map, tiles, palette, x, e->lcd.win_y);
+    for (; win_x < SCREEN_WIDTH; ++win_x) {
+      uint8_t palette_index =
+          get_tile_map_palette_index(map, tiles, win_x, e->lcd.win_y);
+      bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
+      line_data[sx] = get_palette_index_rgba(palette_index, palette);
     }
     e->lcd.win_y++;
+  }
+
+  if (e->lcd.lcdc.obj_display) {
+    int n;
+    struct Obj line_objs[OBJ_COUNT];
+    memcpy(line_objs, e->oam.objs, sizeof(line_objs));
+    uint8_t obj_height = s_obj_size_to_height[e->lcd.lcdc.obj_size];
+    for (n = 0; n < OBJ_COUNT; ++n) {
+      line_objs[n].y = line_y - line_objs[n].y;
+    }
+
+    qsort_r(line_objs, OBJ_COUNT, sizeof(struct Obj), obj_cmp, &obj_height);
+    /* Draw in reverse so sprites with higher priority are rendered on top. */
+    for (n = OBJ_PER_LINE_COUNT - 1; n >= 0; --n) {
+      struct Obj* o = &line_objs[n];
+      uint8_t oy = o->y;
+      if (oy >= obj_height) {
+        continue;
+      }
+
+      uint8_t* tile_data;
+      if (o->yflip) {
+        oy = obj_height - oy;
+      }
+      if (obj_height == 8) {
+        tile_data = &e->vram.tile[o->tile][oy * TILE_HEIGHT];
+      } else if (oy < 8) {
+        /* Top tile of 8x16 sprite. */
+        tile_data = &e->vram.tile[o->tile & 0xfe][oy * TILE_HEIGHT];
+      } else {
+        /* Bottom tile of 8x16 sprite. */
+        tile_data = &e->vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
+      }
+
+      struct Palette* palette = &e->oam.obp[o->palette];
+      int n;
+      int d = o->xflip ? -1: 1;
+      int ox = o->xflip ? 7 : 0;
+      for (n = 0; n < 8; ++n, ox += d) {
+        uint8_t sx = o->x + n;
+        if (sx >= SCREEN_WIDTH) {
+          continue;
+        }
+        if (o->priority == OBJ_PRIORITY_BEHIND_BG && bg_obj_mask[sx] == 0) {
+          continue;
+        }
+        uint8_t palette_index = tile_data[ox];
+        line_data[sx] = get_palette_index_rgba(palette_index, palette);
+      }
+    }
   }
 }
 
