@@ -3246,7 +3246,7 @@ void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
 
   if (e->timer.on) {
     e->timer.tima_cycles += cycles;
-    uint32_t tima_max_cycles;
+    uint32_t tima_max_cycles = 0;
     switch (e->timer.input_clock_select) {
       case TIMER_CLOCK_4096_HZ:
         tima_max_cycles = TIMA_4096_CYCLES;
