@@ -2350,7 +2350,6 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_C FC
 #define CLEAR_F FZ = FN = FH = FC = 0
 #define CLEAR_HN FH = FN = 0
-#define CLEAR_Z FZ = 0
 #define SET_Z(X) FZ = (uint8_t)(X) == 0
 #define SET_C_ADD(X, Y) FC = ((X) + (Y) > 0xff)
 #define SET_C_ADD16(X, Y) FC = ((X) + (Y) > 0xffff)
@@ -2381,12 +2380,12 @@ uint8_t s_cb_opcode_cycles[] = {
 
 #define ADD_FLAGS(X, Y) SET_Z((X) + (Y)); FN = 0; SET_CH_ADD(X, Y)
 #define ADD_FLAGS16(X, Y) FN = 0; SET_CH_ADD16(X, Y)
-#define ADD_SP_FLAGS16(Y) CLEAR_Z; ADD_FLAGS16(RSP, Y)
+#define ADD_SP_FLAGS(Y) FZ = FN = 0; SET_CH_ADD((uint8_t)RSP, (uint8_t)Y)
 #define ADD_R(R) ADD_FLAGS(RA, REG(R)); RA += REG(R)
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
 #define ADD_HL_RR(RR) ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
-#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS16(s); RSP += s
+#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s
 
 #define ADC_FLAGS(X, Y, C) SET_Z((X) + (Y) + (C)); FN = 0; SET_CH_ADC(X, Y, C)
 #define ADC_R(R) u = REG(R); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
@@ -2460,6 +2459,8 @@ uint8_t s_cb_opcode_cycles[] = {
 #define LD_MFF00_R_R(R1, R2) WRITE8(0xFF00 + REG(R1), REG(R2))
 #define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
+#define LD_MNN_SP WRITE16(READ_NN, RSP)
+#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s
 
 #define OR_FLAGS XOR_FLAGS
 #define OR_R(R) RA |= REG(R); OR_FLAGS
@@ -2827,7 +2828,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x05: DEC_R(B); break;
       case 0x06: LD_R_N(B); break;
       case 0x07: RLCA; break;
-      case 0x08: NI; break;
+      case 0x08: LD_MNN_SP; break;
       case 0x09: ADD_HL_RR(BC); break;
       case 0x0a: LD_R_MR(A, BC); break;
       case 0x0b: DEC_RR(BC); break;
@@ -3067,7 +3068,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0xf5: PUSH_AF; break;
       case 0xf6: OR_N; break;
       case 0xf7: CALL(0x30); break;
-      case 0xf8: NI; break;
+      case 0xf8: LD_HL_SP_N; break;
       case 0xf9: LD_RR_RR(SP, HL); break;
       case 0xfa: LD_R_MN(A); break;
       case 0xfb: e->interrupts.IME = TRUE; break;
