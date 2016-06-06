@@ -3421,11 +3421,25 @@ int main(int argc, char** argv) {
       SDL_Event event;
       while (SDL_PollEvent(&event)) {
         switch (event.type) {
-          case SDL_QUIT:
-            running = FALSE;
+          case SDL_KEYDOWN:
+          case SDL_KEYUP: {
+            enum Bool set = event.type == SDL_KEYDOWN;
+            switch (event.key.keysym.sym) {
+              case SDLK_UP: e->joypad.up = set; break;
+              case SDLK_DOWN: e->joypad.down = set; break;
+              case SDLK_LEFT: e->joypad.left = set; break;
+              case SDLK_RIGHT: e->joypad.right = set; break;
+              case SDLK_z: e->joypad.B = set; break;
+              case SDLK_x: e->joypad.A = set; break;
+              case SDLK_RETURN: e->joypad.start = set; break;
+              case SDLK_BACKSPACE: e->joypad.select = set; break;
+              case SDLK_ESCAPE: running = FALSE; break;
+              default: break;
+            }
             break;
-          default:
-            break;
+          }
+          case SDL_QUIT: running = FALSE; break;
+          default: break;
         }
       }
 
