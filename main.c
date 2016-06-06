@@ -2349,26 +2349,24 @@ uint8_t s_cb_opcode_cycles[] = {
 #define COND_Z FZ
 #define COND_NC (!FC)
 #define COND_C FC
-#define CLEAR_F FZ = FN = FH = FC = 0
-#define CLEAR_HN FH = FN = 0
-#define SET_Z(X) FZ = (uint8_t)(X) == 0
-#define SET_C_ADD(X, Y) FC = ((X) + (Y) > 0xff)
-#define SET_C_ADD16(X, Y) FC = ((X) + (Y) > 0xffff)
-#define SET_C_ADC(X, Y, C) FC = ((X) + (Y) + (C) > 0xff)
-#define SET_C_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
-#define SET_C_SBC(X, Y, C) FC = ((int)(X) - (int)(Y) - (int)(C) < 0)
+#define FZ_EQ0(X) FZ = (uint8_t)(X) == 0
+#define FC_ADD(X, Y) FC = ((X) + (Y) > 0xff)
+#define FC_ADD16(X, Y) FC = ((X) + (Y) > 0xffff)
+#define FC_ADC(X, Y, C) FC = ((X) + (Y) + (C) > 0xff)
+#define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
+#define FC_SBC(X, Y, C) FC = ((int)(X) - (int)(Y) - (int)(C) < 0)
 #define MASK8(X) ((X) & 0xf)
 #define MASK16(X) ((X) & 0xfff)
-#define SET_H_ADD(X, Y) FH = (MASK8(X) + MASK8(Y) > 0xf)
-#define SET_H_ADD16(X, Y) FH = (MASK16(X) + MASK16(Y) > 0xfff)
-#define SET_H_ADC(X, Y, C) FH = (MASK8(X) + MASK8(Y) + C > 0xf)
-#define SET_H_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
-#define SET_H_SBC(X, Y, C) FH = ((int)MASK8(X) - (int)MASK8(Y) - (int)C < 0)
-#define SET_CH_ADD(X, Y) SET_C_ADD(X, Y); SET_H_ADD(X, Y)
-#define SET_CH_ADD16(X, Y) SET_C_ADD16(X, Y); SET_H_ADD16(X, Y)
-#define SET_CH_ADC(X, Y, C) SET_C_ADC(X, Y, C); SET_H_ADC(X, Y, C)
-#define SET_CH_SUB(X, Y) SET_C_SUB(X, Y); SET_H_SUB(X, Y)
-#define SET_CH_SBC(X, Y, C) SET_C_SBC(X, Y, C); SET_H_SBC(X, Y, C)
+#define FH_ADD(X, Y) FH = (MASK8(X) + MASK8(Y) > 0xf)
+#define FH_ADD16(X, Y) FH = (MASK16(X) + MASK16(Y) > 0xfff)
+#define FH_ADC(X, Y, C) FH = (MASK8(X) + MASK8(Y) + C > 0xf)
+#define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
+#define FH_SBC(X, Y, C) FH = ((int)MASK8(X) - (int)MASK8(Y) - (int)C < 0)
+#define FCH_ADD(X, Y) FC_ADD(X, Y); FH_ADD(X, Y)
+#define FCH_ADD16(X, Y) FC_ADD16(X, Y); FH_ADD16(X, Y)
+#define FCH_ADC(X, Y, C) FC_ADC(X, Y, C); FH_ADC(X, Y, C)
+#define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
+#define FCH_SBC(X, Y, C) FC_SBC(X, Y, C); FH_SBC(X, Y, C)
 
 #define READ8(X) read_u8(e, X)
 #define READ16(X) read_u16(e, X)
@@ -2379,26 +2377,29 @@ uint8_t s_cb_opcode_cycles[] = {
 #define READMR(MR) READ8(REG(MR))
 #define WRITEMR(MR, V) WRITE8(REG(MR), V)
 
-#define ADD_FLAGS(X, Y) SET_Z((X) + (Y)); FN = 0; SET_CH_ADD(X, Y)
-#define ADD_FLAGS16(X, Y) FN = 0; SET_CH_ADD16(X, Y)
-#define ADD_SP_FLAGS(Y) FZ = FN = 0; SET_CH_ADD((uint8_t)RSP, (uint8_t)Y)
+#define BASIC_OP_R(R, OP) u = REG(R); OP; REG(R) = u
+#define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; WRITEMR(MR, u)
+
+#define ADD_FLAGS(X, Y) FZ_EQ0((X) + (Y)); FN = 0; FCH_ADD(X, Y)
+#define ADD_FLAGS16(X, Y) FN = 0; FCH_ADD16(X, Y)
+#define ADD_SP_FLAGS(Y) FZ = FN = 0; FCH_ADD((uint8_t)RSP, (uint8_t)Y)
 #define ADD_R(R) ADD_FLAGS(RA, REG(R)); RA += REG(R)
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
 #define ADD_HL_RR(RR) ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
 #define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s
 
-#define ADC_FLAGS(X, Y, C) SET_Z((X) + (Y) + (C)); FN = 0; SET_CH_ADC(X, Y, C)
+#define ADC_FLAGS(X, Y, C) FZ_EQ0((X) + (Y) + (C)); FN = 0; FCH_ADC(X, Y, C)
 #define ADC_R(R) u = REG(R); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
 #define ADC_MR(MR) u = READMR(MR); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
 #define ADC_N u = READ_N; c = FC; ADC_FLAGS(RA, u, c); RA += u + c
 
-#define AND_FLAGS CLEAR_F; SET_Z(RA); FH = 1
+#define AND_FLAGS FZ_EQ0(RA); FH = 1; FN = FC = 0
 #define AND_R(R) RA &= REG(R); AND_FLAGS
 #define AND_MR(MR) RA &= READMR(MR); AND_FLAGS
 #define AND_N RA &= READ_N; AND_FLAGS
 
-#define BIT_FLAGS(BIT, X) SET_Z(X & (1 << BIT)); FN = 0; FH = 1
+#define BIT_FLAGS(BIT, X) FZ_EQ0(X & (1 << BIT)); FN = 0; FH = 1
 #define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(BIT, u)
 #define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
 
@@ -2406,9 +2407,9 @@ uint8_t s_cb_opcode_cycles[] = {
 #define CALL_NN CALL(READ_NN)
 #define CALL_F_NN(COND) if (COND) { CALL_NN; CYCLES(12); }
 
-#define CCF FC ^= 1; CLEAR_HN
+#define CCF FC ^= 1; FN = FH = 0
 
-#define CP_FLAGS(X, Y) SET_Z(X - Y); FN = 1; SET_CH_SUB(X, Y)
+#define CP_FLAGS(X, Y) FZ_EQ0(X - Y); FN = 1; FCH_SUB(X, Y)
 #define CP_R(R) CP_FLAGS(RA, REG(R))
 #define CP_N u = READ_N; CP_FLAGS(RA, u)
 #define CP_MR(MR) u = READMR(MR); CP_FLAGS(RA, u)
@@ -2426,19 +2427,21 @@ uint8_t s_cb_opcode_cycles[] = {
       FC = 1;                            \
     }                                    \
     RA += FN ? -u : u;                   \
-    SET_Z(RA);                           \
+    FZ_EQ0(RA);                          \
     FH = 0;                              \
   } while (0)
 
-#define DEC_FLAGS(X) SET_Z(X); FN = 1; FH = MASK8(X) == 0xf
-#define DEC_R(R) REG(R)--; DEC_FLAGS(REG(R))
+#define DEC u--
+#define DEC_FLAGS FZ_EQ0(u); FN = 1; FH = MASK8(u) == 0xf
+#define DEC_R(R) BASIC_OP_R(R, DEC); DEC_FLAGS
 #define DEC_RR(RR) REG(RR)--
-#define DEC_MR(MR) u = READMR(MR) - 1; WRITEMR(MR, u); DEC_FLAGS(u)
+#define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 
-#define INC_FLAGS(X) SET_Z(X); FN = 0; FH = MASK8(X) == 0
-#define INC_R(R) REG(R)++; INC_FLAGS(REG(R))
+#define INC u++
+#define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
+#define INC_R(R) BASIC_OP_R(R, INC); INC_FLAGS
 #define INC_RR(RR) REG(RR)++
-#define INC_MR(MR) u = READMR(MR) + 1; WRITEMR(MR, u); INC_FLAGS(u)
+#define INC_MR(MR) BASIC_OP_MR(MR, INC); INC_FLAGS
 
 #define JP_F_NN(COND) if (COND) { JP_NN; CYCLES(4); }
 #define JP_RR(RR) new_pc = REG(RR)
@@ -2463,7 +2466,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define LD_MNN_SP WRITE16(READ_NN, RSP)
 #define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s
 
-#define OR_FLAGS XOR_FLAGS
+#define OR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define OR_R(R) RA |= REG(R); OR_FLAGS
 #define OR_MR(MR) RA |= READMR(MR); OR_FLAGS
 #define OR_N RA |= READ_N; OR_FLAGS
@@ -2475,74 +2478,74 @@ uint8_t s_cb_opcode_cycles[] = {
 #define PUSH_AF RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
 
 #define RES(BIT) u &= ~(1 << (BIT))
-#define RES_R(BIT, R) u = REG(R); RES(BIT); REG(R) = u
-#define RES_MR(BIT, MR) u = READMR(MR); RES(BIT); WRITEMR(MR, u)
+#define RES_R(BIT, R) BASIC_OP_R(R, RES(BIT))
+#define RES_MR(BIT, MR) BASIC_OP_MR(MR, RES(BIT))
 
 #define RET new_pc = READ16(RSP); RSP += 2
 #define RET_F(COND) if (COND) { RET; CYCLES(12); }
 #define RETI e->interrupts.IME = TRUE; RET
 
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
-#define RL_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RLA u = RA; RL; RA = u; CLEAR_HN; FZ = 0
-#define RL_R(R) u = REG(R); RL; REG(R) = u; RL_FLAGS(u)
-#define RL_MR(MR) u = READMR(MR); RL; WRITEMR(MR, u); RL_FLAGS(u)
+#define RL_FLAGS FZ_EQ0(u); FN = FH = 0
+#define RLA BASIC_OP_R(A, RL); FZ = FN = FH = 0
+#define RL_R(R) BASIC_OP_R(R, RL); RL_FLAGS
+#define RL_MR(MR) BASIC_OP_MR(MR, RL); RL_FLAGS
 
 #define RLC c = (u >> 7) & 1; u = (u << 1) | c; FC = c
-#define RLC_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RLCA u = RA; RLC; RA = u; CLEAR_HN; FZ = 0
-#define RLC_R(R) u = REG(R); RLC; REG(R) = u; RLC_FLAGS(u)
-#define RLC_MR(MR) u = READMR(MR); RLC; WRITEMR(MR, u); RLC_FLAGS(u)
+#define RLC_FLAGS FZ_EQ0(u); FN = FH = 0
+#define RLCA BASIC_OP_R(A, RLC); FZ = FN = FH = 0
+#define RLC_R(R) BASIC_OP_R(R, RLC); RLC_FLAGS
+#define RLC_MR(MR) BASIC_OP_MR(MR, RLC); RLC_FLAGS
 
 #define RR c = u & 1; u = (FC << 7) | (u >> 1); FC = c
-#define RR_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RRA u = RA; RR; RA = u; CLEAR_HN; FZ = 0
-#define RR_R(R) u = REG(R); RR; REG(R) = u; RR_FLAGS(u)
-#define RR_MR(MR) u = READMR(MR); RR; WRITEMR(MR, u); RR_FLAGS(u)
+#define RR_FLAGS FZ_EQ0(u); FN = FH = 0
+#define RRA BASIC_OP_R(A, RR); FZ = FN = FH = 0
+#define RR_R(R) BASIC_OP_R(R, RR); RR_FLAGS
+#define RR_MR(MR) BASIC_OP_MR(MR, RR); RR_FLAGS
 
 #define RRC c = u & 1; u = (c << 7) | (u >> 1); FC = c
-#define RRC_FLAGS(X) SET_Z(X); CLEAR_HN
-#define RRCA u = RA; RRC; RA = u; CLEAR_HN; FZ = 0
-#define RRC_R(R) u = REG(R); RRC; REG(R) = u; RRC_FLAGS(u)
-#define RRC_MR(MR) u = READMR(MR); RRC; WRITEMR(MR, u); RRC_FLAGS(u)
+#define RRC_FLAGS FZ_EQ0(u); FN = FH = 0
+#define RRCA BASIC_OP_R(A, RRC); FZ = FN = FH = 0
+#define RRC_R(R) BASIC_OP_R(R, RRC); RRC_FLAGS
+#define RRC_MR(MR) BASIC_OP_MR(MR, RRC); RRC_FLAGS
 
-#define SCF FC = 1; CLEAR_HN
+#define SCF FC = 1; FN = FH = 0
 
 #define SET(BIT) u |= (1 << BIT)
-#define SET_R(BIT, R) u = REG(R); SET(BIT); REG(R) = u
-#define SET_MR(BIT, MR) u = READMR(MR); SET(BIT); WRITEMR(MR, u)
+#define SET_R(BIT, R) BASIC_OP_R(R, SET(BIT))
+#define SET_MR(BIT, MR) BASIC_OP_MR(MR, SET(BIT))
 
 #define SLA FC = (u >> 7) & 1; u <<= 1
-#define SLA_FLAGS(X) SET_Z(X); CLEAR_HN
-#define SLA_R(R) u = REG(R); SLA; REG(R) = u; SLA_FLAGS(u)
-#define SLA_MR(MR) u = READMR(MR); SLA; WRITEMR(MR, u); SLA_FLAGS(u)
+#define SLA_FLAGS FZ_EQ0(u); FN = FH = 0
+#define SLA_R(R) BASIC_OP_R(R, SLA); SLA_FLAGS
+#define SLA_MR(MR) BASIC_OP_MR(MR, SLA); SLA_FLAGS
 
 #define SRA FC = u & 1; u = (int8_t)u >> 1
-#define SRA_FLAGS(X) SET_Z(X); CLEAR_HN
-#define SRA_R(R) u = REG(R); SRA; REG(R) = u; SRA_FLAGS(u)
-#define SRA_MR(MR) u = READMR(MR); SRA; WRITEMR(MR, u); SRA_FLAGS(u)
+#define SRA_FLAGS FZ_EQ0(u); FN = FH = 0
+#define SRA_R(R) BASIC_OP_R(R, SRA); SRA_FLAGS
+#define SRA_MR(MR) BASIC_OP_MR(MR, SRA); SRA_FLAGS
 
 #define SRL FC = u & 1; u >>= 1
-#define SRL_FLAGS(X) SET_Z(X); CLEAR_HN
-#define SRL_R(R) u = REG(R); SRL; REG(R) = u; SRL_FLAGS(u)
-#define SRL_MR(MR) u = READMR(MR); SRL; WRITEMR(MR, u); SRL_FLAGS(u)
+#define SRL_FLAGS FZ_EQ0(u); FN = FH = 0
+#define SRL_R(R) BASIC_OP_R(R, SRL); SRL_FLAGS
+#define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SRL_FLAGS
 
-#define SUB_FLAGS(X, Y) SET_Z((X) - (Y)); FN = 1; SET_CH_SUB(X, Y)
+#define SUB_FLAGS(X, Y) FZ_EQ0((X) - (Y)); FN = 1; FCH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(RA, REG(R)); RA -= REG(R)
 #define SUB_MR(MR) u = READMR(MR); SUB_FLAGS(RA, u); RA -= u
 #define SUB_N u = READ_N; SUB_FLAGS(RA, u); RA -= u
 
-#define SBC_FLAGS(X, Y, C) SET_Z((X) - (Y) - (C)); FN = 1; SET_CH_SBC(X, Y, C)
+#define SBC_FLAGS(X, Y, C) FZ_EQ0((X) - (Y) - (C)); FN = 1; FCH_SBC(X, Y, C)
 #define SBC_R(R) u = REG(R); c = FC; SBC_FLAGS(RA, u, c); RA -= u + c
 #define SBC_MR(MR) u = READMR(MR); c = FC; SBC_FLAGS(RA, u, c); RA -= u + c
 #define SBC_N u = READ_N; c = FC; SBC_FLAGS(RA, u, c); RA -= u + c
 
-#define SWAP_FLAGS(X) CLEAR_F; SET_Z(X);
 #define SWAP u = (u << 4) | (u >> 4)
-#define SWAP_R(R) u = REG(R); SWAP; REG(R) = u; SWAP_FLAGS(REG(R))
-#define SWAP_MR(MR) u = READMR(MR); SWAP; WRITEMR(MR, u); SWAP_FLAGS(u)
+#define SWAP_FLAGS FZ_EQ0(u); FN = FH = FC = 0
+#define SWAP_R(R) BASIC_OP_R(R, SWAP); SWAP_FLAGS
+#define SWAP_MR(MR) BASIC_OP_MR(MR, SWAP); SWAP_FLAGS
 
-#define XOR_FLAGS CLEAR_F; SET_Z(RA)
+#define XOR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define XOR_R(R) RA ^= REG(R); XOR_FLAGS
 #define XOR_MR(MR) RA ^= READMR(MR); XOR_FLAGS
 #define XOR_N RA ^= READ_N; XOR_FLAGS
@@ -3146,6 +3149,9 @@ void new_frame(struct Emulator* e) {
 #if 1
   if (e->lcd.frame == 2000) {
     write_frame_ppm(e);
+#if 0
+    exit(0);
+#endif
   }
 #endif
 #if 0
