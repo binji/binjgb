@@ -1466,14 +1466,12 @@ void write_vram_tile_data(struct Emulator* e,
   uint32_t data_index = y * TILE_WIDTH;
   assert(data_index < TILE_WIDTH * TILE_HEIGHT);
   uint8_t* data = &(*tile)[data_index];
-  data[0] |= ((value >> 7) & 1) << plane;
-  data[1] |= ((value >> 6) & 1) << plane;
-  data[2] |= ((value >> 5) & 1) << plane;
-  data[3] |= ((value >> 4) & 1) << plane;
-  data[4] |= ((value >> 3) & 1) << plane;
-  data[5] |= ((value >> 2) & 1) << plane;
-  data[6] |= ((value >> 1) & 1) << plane;
-  data[7] |= ((value >> 0) & 1) << plane;
+  uint8_t i;
+  uint8_t mask = 1 << plane;
+  uint8_t not_mask = ~mask;
+  for (i = 0; i < 8; ++i) {
+    data[i] = (data[i] & not_mask) | (((value >> (7 - i)) << plane) & mask);
+  }
 }
 
 void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
