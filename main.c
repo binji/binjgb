@@ -947,20 +947,24 @@ uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
   if (rom_addr < e->rom_data.size) {
     return e->rom_data.data[rom_addr];
   } else {
-    /* TODO(binji): log? */
+    LOG("mbc1_read_rom_bank_switch(0x%04x): bad address (bank = %u)!\n", addr,
+        e->memory_map.rom_bank);
     return 0;
   }
 }
 
 void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  switch (addr >> 14) {
+#if 0
+  LOG("mbc1_write_rom: 0x%04x <= 0x%02x\n", addr, value);
+#endif
+  switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ram_enabled =
           (value & MBC1_RAM_ENABLED_MASK) == MBC1_RAM_ENABLED_VALUE;
       break;
 
     case 1: /* 2000-3fff */
-      e->memory_map.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+      e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
       e->memory_map.rom_bank |= value & MBC1_ROM_BANK_LO_MASK;
       /* Banks 0, 0x20, 0x40, 0x60 map to 1, 0x21, 0x41, 0x61 respectively. */
       if (e->memory_map.rom_bank == 0) {
@@ -971,7 +975,7 @@ void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     case 2: /* 4000-5fff */
       value &= MBC1_BANK_HI_MASK;
       if (e->memory_map.bank_mode == BANK_MODE_ROM) {
-        e->memory_map.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+        e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
         e->memory_map.rom_bank |= value << MBC1_BANK_HI_SHIFT;
       } else {
         e->memory_map.ram_bank = value;
@@ -991,7 +995,7 @@ void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
           /* Use the high rom bank bits as the ram bank bits. */
           e->memory_map.ram_bank = e->memory_map.rom_bank >> MBC1_BANK_HI_SHIFT;
           assert(e->memory_map.ram_bank <= MBC1_BANK_HI_MASK);
-          e->memory_map.rom_bank &= MBC1_ROM_BANK_LO_MASK;
+          e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
         }
         e->memory_map.bank_mode = new_bank_mode;
       }
@@ -1564,7 +1568,9 @@ void from_nrx4_reg(struct Channel* channel, uint8_t value) {
 }
 
 void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+#if 0
   LOG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
+#endif
   switch (addr) {
     case IO_JOYP_ADDR:
       e->joypad.joypad_select = FROM_REG(value, JOYP_JOYPAD_SELECT);
