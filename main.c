@@ -412,18 +412,18 @@ typedef uint32_t RGBA;
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_STRING(name, code, ...) [code] = #name,
 
-const char* get_enum_string(const char** strings,
-                            size_t string_count,
-                            size_t value) {
+static const char* get_enum_string(const char** strings,
+                                   size_t string_count,
+                                   size_t value) {
   return value < string_count ? strings[value] : "unknown";
 }
 
 #define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                 \
   enum Name { foreach (DEFINE_ENUM) NAME##_COUNT };                  \
-  enum Result is_##name##_valid(enum Name value) {                   \
+  static enum Result is_##name##_valid(enum Name value) {            \
     return value < NAME##_COUNT;                                     \
   }                                                                  \
-  const char* get_##name##_string(enum Name value) {                 \
+  static const char* get_##name##_string(enum Name value) {          \
     static const char* s_strings[] = {foreach (DEFINE_STRING)};      \
     return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
   }
@@ -449,7 +449,7 @@ enum IOReg {
 #undef V
 };
 
-const char* get_io_reg_string(Address addr) {
+static const char* get_io_reg_string(Address addr) {
   assert(addr >= 0xff00);
   static const char* s_strings[] = {FOREACH_IO_REG(DEFINE_STRING)};
   uint8_t offset = addr - 0xff00;
@@ -458,7 +458,7 @@ const char* get_io_reg_string(Address addr) {
   return result != NULL ? result : "???";
 }
 
-uint32_t s_rom_bank_size[] = {
+static uint32_t s_rom_bank_size[] = {
 #define V(name, code, bank_size) [code] = bank_size,
     FOREACH_ROM_SIZE(V)
 #undef V
@@ -805,14 +805,14 @@ struct Emulator {
   FrameBuffer frame_buffer;
 };
 
-enum Bool s_trace = FALSE;
-uint32_t s_trace_counter = 0;
+static enum Bool s_trace = FALSE;
+static uint32_t s_trace_counter = 0;
 
-void print_emulator_info(struct Emulator*);
-void write_io(struct Emulator*, Address, uint8_t);
+static void print_emulator_info(struct Emulator*);
+static void write_io(struct Emulator*, Address, uint8_t);
 
-enum Result read_rom_data_from_file(const char* filename,
-                                    struct RomData* out_rom_data) {
+static enum Result read_rom_data_from_file(const char* filename,
+                                           struct RomData* out_rom_data) {
   FILE* f = fopen(filename, "rb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
@@ -835,7 +835,8 @@ error:
   return ERROR;
 }
 
-void get_rom_title(struct RomData* rom_data, struct StringSlice* out_title) {
+static void get_rom_title(struct RomData* rom_data,
+                          struct StringSlice* out_title) {
   const char* start = (char*)rom_data->data + TITLE_START_ADDR;
   const char* end = start + TITLE_END_ADDR;
   const char* p = start;
@@ -848,8 +849,8 @@ void get_rom_title(struct RomData* rom_data, struct StringSlice* out_title) {
   out_title->length = length;
 }
 
-void get_manufacturer_code(struct RomData* rom_data,
-                           struct StringSlice* out_manufacturer) {
+static void get_manufacturer_code(struct RomData* rom_data,
+                                  struct StringSlice* out_manufacturer) {
   const char* start = (char*)rom_data->data + MANUFACTURERS_CODE_START_ADDR;
   const char* end = start + MANUFACTURERS_CODE_END_ADDR;
   if (*(start - 1) != 0) {
@@ -870,9 +871,9 @@ void get_manufacturer_code(struct RomData* rom_data,
   out_manufacturer->length = length;
 }
 
-void get_new_licensee(struct RomData* rom_data,
-                      uint8_t old_licensee_code,
-                      struct StringSlice* out_licensee) {
+static void get_new_licensee(struct RomData* rom_data,
+                             uint8_t old_licensee_code,
+                             struct StringSlice* out_licensee) {
   if (old_licensee_code == NEW_LICENSEE_CODE) {
     out_licensee->start =
         (const char*)rom_data->data + NEW_LINCENSEE_CODE_START_ADDR;
@@ -884,7 +885,7 @@ void get_new_licensee(struct RomData* rom_data,
   }
 }
 
-enum Result validate_header_checksum(struct RomData* rom_data) {
+static enum Result validate_header_checksum(struct RomData* rom_data) {
   uint8_t expected_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
   uint8_t checksum = 0;
   size_t i = 0;
@@ -894,7 +895,7 @@ enum Result validate_header_checksum(struct RomData* rom_data) {
   return checksum == expected_checksum ? OK : ERROR;
 }
 
-enum Result validate_global_checksum(struct RomData* rom_data) {
+static enum Result validate_global_checksum(struct RomData* rom_data) {
   uint16_t expected_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
   uint16_t checksum = 0;
   size_t i = 0;
@@ -906,16 +907,16 @@ enum Result validate_global_checksum(struct RomData* rom_data) {
   return checksum == expected_checksum ? OK : ERROR;
 }
 
-uint32_t get_rom_bank_count(enum RomSize rom_size) {
+static uint32_t get_rom_bank_count(enum RomSize rom_size) {
   return is_rom_size_valid(rom_size) ? s_rom_bank_size[rom_size] : 0;
 }
 
-uint32_t get_rom_byte_size(enum RomSize rom_size) {
+static uint32_t get_rom_byte_size(enum RomSize rom_size) {
   return get_rom_bank_count(rom_size) * ROM_BANK_BYTE_SIZE;
 }
 
-enum Result get_rom_info(struct RomData* rom_data,
-                         struct RomInfo* out_rom_info) {
+static enum Result get_rom_info(struct RomData* rom_data,
+                                struct RomInfo* out_rom_info) {
   struct RomInfo rom_info;
   ZERO_MEMORY(rom_info);
 
@@ -949,7 +950,7 @@ error:
   return ERROR;
 }
 
-void print_rom_info(struct RomInfo* rom_info) {
+static void print_rom_info(struct RomInfo* rom_info) {
   printf("title: \"%.*s\"\n", (int)rom_info->title.length,
          rom_info->title.start);
   printf("manufacturer: \"%.*s\"\n", (int)rom_info->manufacturer.length,
@@ -972,23 +973,28 @@ void print_rom_info(struct RomInfo* rom_info) {
          get_result_string(rom_info->global_checksum_valid));
 }
 
-uint8_t rom_only_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
+static uint8_t rom_only_read_rom_bank_switch(struct Emulator* e,
+                                             MaskedAddress addr) {
   /* Always return ROM in range 0x4000-0x7fff. */
   assert(addr <= ADDR_MASK_16K);
   addr += 0x4000;
   return e->rom_data.data[addr];
 }
 
-void rom_only_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void rom_only_write_rom(struct Emulator* e,
+                               MaskedAddress addr,
+                               uint8_t value) {
   /* TODO(binji): log? */
 }
 
-uint8_t gb_read_work_ram_bank_switch(struct Emulator* e, MaskedAddress addr) {
+static uint8_t gb_read_work_ram_bank_switch(struct Emulator* e,
+                                            MaskedAddress addr) {
   assert(addr <= ADDR_MASK_4K);
   return e->ram.data[0x1000 + addr];
 }
 
-uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
+static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
+                                         MaskedAddress addr) {
   assert(addr <= ADDR_MASK_16K);
   uint32_t rom_addr = (e->memory_map.rom_bank << ROM_BANK_SHIFT) | addr;
   if (rom_addr < e->rom_data.size) {
@@ -1000,7 +1006,9 @@ uint8_t mbc1_read_rom_bank_switch(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void mbc1_write_rom(struct Emulator* e,
+                           MaskedAddress addr,
+                           uint8_t value) {
   DEBUG("mbc1_write_rom: 0x%04x <= 0x%02x\n", addr, value);
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
@@ -1053,45 +1061,45 @@ void mbc1_write_rom(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-void gb_write_work_ram_bank_switch(struct Emulator* e,
-                                   MaskedAddress addr,
-                                   uint8_t value) {
+static void gb_write_work_ram_bank_switch(struct Emulator* e,
+                                          MaskedAddress addr,
+                                          uint8_t value) {
   assert(addr <= ADDR_MASK_4K);
   e->ram.data[0x1000 + addr] = value;
 }
 
-uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
   return 0;
 }
 
-void dummy_write_external_ram(struct Emulator* e,
-                              MaskedAddress addr,
-                              uint8_t value) {}
+static void dummy_write_external_ram(struct Emulator* e,
+                                     MaskedAddress addr,
+                                     uint8_t value) {}
 
-struct MemoryMap s_rom_only_memory_map = {
-  .read_rom_bank_switch = rom_only_read_rom_bank_switch,
-  .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
-  .read_external_ram = dummy_read_external_ram,
-  .write_rom = rom_only_write_rom,
-  .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
-  .write_external_ram = dummy_write_external_ram,
+static struct MemoryMap s_rom_only_memory_map = {
+    .read_rom_bank_switch = rom_only_read_rom_bank_switch,
+    .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
+    .read_external_ram = dummy_read_external_ram,
+    .write_rom = rom_only_write_rom,
+    .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
+    .write_external_ram = dummy_write_external_ram,
 };
 
-struct MemoryMap s_mbc1_memory_map = {
-  .rom_bank = 1,
-  .ram_bank = 0,
-  .ram_enabled = FALSE,
-  .bank_mode = BANK_MODE_ROM,
-  .read_rom_bank_switch = mbc1_read_rom_bank_switch,
-  .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
-  .read_external_ram = dummy_read_external_ram,
-  .write_rom = mbc1_write_rom,
-  .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
-  .write_external_ram = dummy_write_external_ram,
+static struct MemoryMap s_mbc1_memory_map = {
+    .rom_bank = 1,
+    .ram_bank = 0,
+    .ram_enabled = FALSE,
+    .bank_mode = BANK_MODE_ROM,
+    .read_rom_bank_switch = mbc1_read_rom_bank_switch,
+    .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
+    .read_external_ram = dummy_read_external_ram,
+    .write_rom = mbc1_write_rom,
+    .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
+    .write_external_ram = dummy_write_external_ram,
 };
 
-enum Result get_memory_map(struct RomInfo* rom_info,
-                           struct MemoryMap* out_memory_map) {
+static enum Result get_memory_map(struct RomInfo* rom_info,
+                                  struct MemoryMap* out_memory_map) {
   switch (rom_info->cartridge_type) {
     case CARTRIDGE_TYPE_ROM_ONLY:
       *out_memory_map = s_rom_only_memory_map;
@@ -1111,18 +1119,18 @@ enum Result get_memory_map(struct RomInfo* rom_info,
   return ERROR;
 }
 
-uint8_t get_f_reg(struct Registers* reg) {
+static uint8_t get_f_reg(struct Registers* reg) {
   return TO_REG(reg->flags.Z, CPU_FLAG_Z) |
          TO_REG(reg->flags.N, CPU_FLAG_N) |
          TO_REG(reg->flags.H, CPU_FLAG_H) |
          TO_REG(reg->flags.C, CPU_FLAG_C);
 }
 
-uint16_t get_af_reg(struct Registers* reg) {
+static uint16_t get_af_reg(struct Registers* reg) {
   return (reg->A << 8) | get_f_reg(reg);
 }
 
-void set_af_reg(struct Registers* reg, uint16_t af) {
+static void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->A = af >> 8;
   reg->flags.Z = FROM_REG(af, CPU_FLAG_Z);
   reg->flags.N = FROM_REG(af, CPU_FLAG_N);
@@ -1130,7 +1138,7 @@ void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->flags.C = FROM_REG(af, CPU_FLAG_C);
 }
 
-enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
+static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
   CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
@@ -1176,7 +1184,7 @@ error:
   return ERROR;
 }
 
-struct MemoryTypeAddressPair map_address(Address addr) {
+static struct MemoryTypeAddressPair map_address(Address addr) {
   struct MemoryTypeAddressPair result;
   switch (addr >> 12) {
     case 0x0:
@@ -1257,8 +1265,7 @@ struct MemoryTypeAddressPair map_address(Address addr) {
   return result;
 }
 
-
-uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
     /* return garbage if read while the io is using vram */
     return 0xff;
@@ -1268,7 +1275,7 @@ uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   uint8_t obj_index = addr >> 2;
   struct Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
@@ -1283,21 +1290,21 @@ uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
 
-uint8_t to_nrx1_reg(struct Channel* channel) {
+static uint8_t to_nrx1_reg(struct Channel* channel) {
   return TO_REG(channel->wave_duty, NRX1_WAVE_DUTY);
 }
 
-uint8_t to_nrx2_reg(struct Channel* channel) {
+static uint8_t to_nrx2_reg(struct Channel* channel) {
   return TO_REG(channel->initial_volume, NRX2_INITIAL_VOLUME) |
          TO_REG(channel->envelope_direction, NRX2_ENVELOPE_DIRECTION) |
          TO_REG(channel->envelope_count, NRX2_ENVELOPE_COUNT);
 }
 
-uint8_t to_nrx4_reg(struct Channel* channel) {
+static uint8_t to_nrx4_reg(struct Channel* channel) {
   return TO_REG(channel->consecutive, NRX4_COUNTER_CONSECUTIVE);
 }
 
-uint8_t read_io(struct Emulator* e, Address addr) {
+static uint8_t read_io(struct Emulator* e, Address addr) {
   switch (addr) {
     case IO_JOYP_ADDR: {
       uint8_t result = 0;
@@ -1456,7 +1463,7 @@ uint8_t read_io(struct Emulator* e, Address addr) {
   }
 }
 
-uint8_t read_u8(struct Emulator* e, Address addr) {
+static uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
     LOG("read_u8(0x%04x) during DMA.\n", addr);
@@ -1493,15 +1500,15 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
   UNREACHABLE("invalid address: 0x%04x.\n", addr);
 }
 
-uint16_t read_u16(struct Emulator* e, Address addr) {
+static uint16_t read_u16(struct Emulator* e, Address addr) {
   return read_u8(e, addr) | (read_u8(e, addr + 1) << 8);
 }
 
-void write_vram_tile_data(struct Emulator* e,
-                          uint32_t index,
-                          uint32_t plane,
-                          uint32_t y,
-                          uint8_t value) {
+static void write_vram_tile_data(struct Emulator* e,
+                                 uint32_t index,
+                                 uint32_t plane,
+                                 uint32_t y,
+                                 uint8_t value) {
   DEBUG_VERBOSE("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
                 value);
   assert(index < TILE_COUNT);
@@ -1517,7 +1524,7 @@ void write_vram_tile_data(struct Emulator* e,
   }
 }
 
-void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* Ignore writes if the display is on, and the hardware is using vram. */
   if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
     return;
@@ -1554,7 +1561,7 @@ void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* Ignore writes if the display is on, and the hardware is using OAM. */
   if (e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
                               e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM)) {
@@ -1582,30 +1589,30 @@ void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-void from_nrx1_reg(struct Channel* channel, uint8_t value) {
+static void from_nrx1_reg(struct Channel* channel, uint8_t value) {
   channel->wave_duty = FROM_REG(value, NRX1_WAVE_DUTY);
   channel->sound_length = FROM_REG(value, NRX1_SOUND_LENGTH);
 }
 
-void from_nrx2_reg(struct Channel* channel, uint8_t value) {
+static void from_nrx2_reg(struct Channel* channel, uint8_t value) {
   channel->initial_volume = FROM_REG(value, NRX2_INITIAL_VOLUME);
   channel->envelope_direction = FROM_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope_count = FROM_REG(value, NRX2_ENVELOPE_COUNT);
 }
 
-void from_nrx3_reg(struct Channel* channel, uint8_t value) {
+static void from_nrx3_reg(struct Channel* channel, uint8_t value) {
   channel->frequency &= ~0xff;
   channel->frequency |= value;
 }
 
-void from_nrx4_reg(struct Channel* channel, uint8_t value) {
+static void from_nrx4_reg(struct Channel* channel, uint8_t value) {
   channel->initial = FROM_REG(value, NRX4_INITIAL);
   channel->consecutive = FROM_REG(value, NRX4_COUNTER_CONSECUTIVE);
   channel->frequency &= 0xff;
   channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
 }
 
-void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
@@ -1782,7 +1789,7 @@ void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-void write_u8(struct Emulator* e, Address addr, uint8_t value) {
+static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
     LOG("write_u8(0x%04x, 0x%02x) during DMA.\n", addr, value);
@@ -1826,12 +1833,12 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   }
 }
 
-void write_u16(struct Emulator* e, Address addr, uint16_t value) {
+static void write_u16(struct Emulator* e, Address addr, uint16_t value) {
   write_u8(e, addr, value);
   write_u8(e, addr + 1, value >> 8);
 }
 
-TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
+static TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
   switch (select) {
     case TILE_MAP_9800_9BFF: return &e->vram.map[0];
     case TILE_MAP_9C00_9FFF: return &e->vram.map[1];
@@ -1839,7 +1846,7 @@ TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
   }
 }
 
-Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
+static Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
   switch (select) {
     case TILE_DATA_8000_8FFF: return &e->vram.tile[0];
     case TILE_DATA_8800_97FF: return &e->vram.tile[256];
@@ -1847,20 +1854,21 @@ Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
   }
 }
 
-uint8_t get_tile_map_palette_index(TileMap* map,
-                                   Tile* tiles,
-                                   uint8_t x,
-                                   uint8_t y) {
+static uint8_t get_tile_map_palette_index(TileMap* map,
+                                          Tile* tiles,
+                                          uint8_t x,
+                                          uint8_t y) {
   uint8_t tile_index = (*map)[((y >> 3) * TILE_MAP_WIDTH) | (x >> 3)];
   Tile* tile = &tiles[tile_index];
   return (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
 }
 
-RGBA get_palette_index_rgba(uint8_t palette_index, struct Palette* palette) {
+static RGBA get_palette_index_rgba(uint8_t palette_index,
+                                   struct Palette* palette) {
   return s_color_to_rgba[palette->color[palette_index]];
 }
 
-int obj_cmp(const void* v1, const void* v2, void* arg) {
+static int obj_cmp(const void* v1, const void* v2, void* arg) {
   const struct Obj* o1 = v1;
   const struct Obj* o2 = v2;
   const uint8_t* obj_height = arg;
@@ -1878,7 +1886,7 @@ int obj_cmp(const void* v1, const void* v2, void* arg) {
   return o1 - o2;
 }
 
-void render_line(struct Emulator* e) {
+static void render_line(struct Emulator* e) {
   uint8_t line_y = e->lcd.LY;
   assert(line_y < SCREEN_HEIGHT);
   RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
@@ -1991,7 +1999,7 @@ void render_line(struct Emulator* e) {
   }
 }
 
-uint8_t s_opcode_bytes[] = {
+static uint8_t s_opcode_bytes[] = {
     /*       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
     /* 00 */ 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
     /* 10 */ 1, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
@@ -2011,7 +2019,7 @@ uint8_t s_opcode_bytes[] = {
     /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
 };
 
-const char* s_opcode_mnemonic[] = {
+static const char* s_opcode_mnemonic[] = {
         [0x00] = "NOP",
         [0x01] = "LD BC,%hu",
         [0x02] = "LD (BC),A",
@@ -2258,7 +2266,7 @@ const char* s_opcode_mnemonic[] = {
         [0xFF] = "RST 38H",
 };
 
-const char* s_cb_opcode_mnemonic[] = {
+static const char* s_cb_opcode_mnemonic[] = {
         [0x00] = "RLC B",      [0x01] = "RLC C",      [0x02] = "RLC D",
         [0x03] = "RLC E",      [0x04] = "RLC H",      [0x05] = "RLC L",
         [0x06] = "RLC (HL)",   [0x07] = "RLC A",      [0x08] = "RRC B",
@@ -2347,7 +2355,7 @@ const char* s_cb_opcode_mnemonic[] = {
         [0xFF] = "SET 7,A",
 };
 
-void print_instruction(struct Emulator* e, Address addr) {
+static void print_instruction(struct Emulator* e, Address addr) {
   uint8_t opcode = read_u8(e, addr);
   if (opcode == 0xcb) {
     uint8_t cb_opcode = read_u8(e, addr + 1);
@@ -2386,14 +2394,14 @@ void print_instruction(struct Emulator* e, Address addr) {
   }
 }
 
-void print_registers(struct Registers* reg) {
+static void print_registers(struct Registers* reg) {
   printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
          reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
          reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
          reg->HL, reg->SP, reg->PC);
 }
 
-void print_emulator_info(struct Emulator* e) {
+static void print_emulator_info(struct Emulator* e) {
   if (s_trace) {
     print_registers(&e->reg);
     printf(" | ");
@@ -2407,7 +2415,7 @@ void print_emulator_info(struct Emulator* e) {
   }
 }
 
-uint8_t s_opcode_cycles[] = {
+static uint8_t s_opcode_cycles[] = {
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
     /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  8,  4,
     /* 10 */  0, 12,  8,  8,  4,  4,  8,  4, 12,  8,  8,  8,  4,  4,  8,  4,
@@ -2427,7 +2435,7 @@ uint8_t s_opcode_cycles[] = {
     /* f0 */ 12, 12,  8,  4,  0, 16,  8, 16, 12,  8, 16,  4,  0,  0,  8, 16,
 };
 
-uint8_t s_cb_opcode_cycles[] = {
+static uint8_t s_cb_opcode_cycles[] = {
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
     /* 00 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
     /* 10 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
@@ -2677,7 +2685,7 @@ uint8_t s_cb_opcode_cycles[] = {
 #define TRACEI s_trace = TRUE; s_trace_counter = 2; print_emulator_info(e)
 
 /* Returns the number of cycles executed */
-uint8_t execute_instruction(struct Emulator* e) {
+static uint8_t execute_instruction(struct Emulator* e) {
   uint8_t cycles = 0;
   int8_t s;
   uint8_t u;
@@ -3220,72 +3228,14 @@ uint8_t execute_instruction(struct Emulator* e) {
   return cycles;
 }
 
-enum Result write_frame_ppm(struct Emulator* e) {
-  char filename[100];
-  snprintf(filename, sizeof(filename), "frame%05u.ppm", e->lcd.frame);
-  FILE* f = fopen(filename, "wb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
-  uint8_t x, y;
-  RGBA* data = &e->frame_buffer[0];
-  for (y = 0; y < SCREEN_HEIGHT; ++y) {
-    for (x = 0; x < SCREEN_WIDTH; ++x) {
-      RGBA pixel = *data++;
-      uint8_t b = (pixel >> 16) & 0xff;
-      uint8_t g = (pixel >> 8) & 0xff;
-      uint8_t r = (pixel >> 0) & 0xff;
-      CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
-    }
-    CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
-  }
-  fclose(f);
-  return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
-}
-
-enum Result write_tile_data_ppm(struct Emulator* e) {
-  char filename[100];
-  snprintf(filename, sizeof(filename), "tiledata%05u.ppm", e->lcd.frame);
-  FILE* f = fopen(filename, "wb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  CHECK_MSG(fputs("P3\n192 128\n255\n", f) >= 0, "fputs failed.\n");
-  uint32_t x, y;
-  for (y = 0; y < 16 * 8; ++y) {
-    for (x = 0; x < 24 * 8; ++x) {
-      uint8_t tile_x = x >> 3;
-      uint8_t tile_y = y >> 3;
-      Tile* tile = &e->vram.tile[tile_y * 8 + tile_x];
-      uint8_t palette_index = (*tile)[(y & 7) * 8 + (x & 7)];
-      enum Color color = e->lcd.bgp.color[palette_index];
-      RGBA pixel = s_color_to_rgba[color];
-      uint8_t b = (pixel >> 16) & 0xff;
-      uint8_t g = (pixel >> 8) & 0xff;
-      uint8_t r = (pixel >> 0) & 0xff;
-      CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
-    }
-    CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
-  }
-  fclose(f);
-  return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
-}
-
-void new_frame(struct Emulator* e) {
+static void new_frame(struct Emulator* e) {
   e->lcd.win_y = 0;
   e->lcd.frame_WY = e->lcd.WY;
   e->lcd.frame++;
   e->lcd.new_frame_edge = TRUE;
 }
 
-void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
+static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   if (!e->dma.active) {
     return;
   }
@@ -3302,7 +3252,7 @@ void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
+static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   enum Bool line_edge = FALSE;
   e->lcd.new_frame_edge = FALSE;
   e->lcd.cycles += cycles;
@@ -3363,7 +3313,7 @@ void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
+static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   e->timer.div_cycles += cycles;
   if (e->timer.div_cycles >= DIV_CYCLES) {
     e->timer.div_cycles -= DIV_CYCLES;
@@ -3398,13 +3348,13 @@ void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-void update_cycles(struct Emulator* e, int8_t cycles) {
+static void update_cycles(struct Emulator* e, int8_t cycles) {
   update_dma_cycles(e, cycles);
   update_lcd_cycles(e, cycles);
   update_timer_cycles(e, cycles);
 }
 
-void handle_interrupts(struct Emulator* e) {
+static void handle_interrupts(struct Emulator* e) {
   if (!(e->interrupts.IME || e->interrupts.halt)) {
     return;
   }
