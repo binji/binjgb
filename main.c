@@ -2407,10 +2407,8 @@ void print_emulator_info(struct Emulator* e) {
 }
 
 uint8_t s_opcode_cycles[] = {
-  /* TODO(binji): guessed on 08H: LD (NN),SP; seems like it should be more
-   * expensive than LD (NN),A which is 16 cycles. */
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
-    /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  0,  4,
+    /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  8,  4,
     /* 10 */  0, 12,  8,  8,  4,  4,  8,  4, 12,  8,  8,  8,  4,  4,  8,  4,
     /* 20 */  8, 12,  8,  8,  4,  4,  8,  4,  8,  8,  8,  8,  4,  4,  8,  4,
     /* 30 */  8, 12,  8,  8, 12, 12, 12,  4,  8,  8,  8,  8,  4,  4,  8,  4,
@@ -3388,7 +3386,7 @@ void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
         tima_max_cycles = TIMA_16384_CYCLES;
         break;
     }
-    if (e->timer.tima_cycles >= tima_max_cycles) {
+    while (e->timer.tima_cycles >= tima_max_cycles) {
       e->timer.tima_cycles -= tima_max_cycles;
       e->timer.TIMA++;
       if (e->timer.TIMA == 0) {
