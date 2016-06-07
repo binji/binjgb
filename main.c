@@ -1545,7 +1545,7 @@ static uint8_t read_io(struct Emulator* e, Address addr) {
     case IO_WY_ADDR:
       return e->lcd.WY;
     case IO_WX_ADDR:
-      return e->lcd.WX; /* TODO actually represents window X minus 7 */
+      return e->lcd.WX;
     case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
@@ -2012,7 +2012,7 @@ static void render_line(struct Emulator* e) {
   }
 
   if (e->lcd.lcdc.window_display && e->lcd.WX <= WINDOW_MAX_X &&
-      e->lcd.frame_WY <= WINDOW_MAX_Y && e->lcd.win_y >= e->lcd.frame_WY) {
+      line_y >= e->lcd.frame_WY) {
     TileMap* map = get_tile_map(e, e->lcd.lcdc.window_tile_map_select);
     Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
     struct Palette* palette = &e->lcd.bgp;
@@ -2025,7 +2025,7 @@ static void render_line(struct Emulator* e) {
       /* Start N pixels right of the left of the screen. */
       sx += e->lcd.WX - WINDOW_X_OFFSET;
     }
-    for (; win_x < SCREEN_WIDTH; ++win_x) {
+    for (; sx < SCREEN_WIDTH; ++sx, ++win_x) {
       uint8_t palette_index =
           get_tile_map_palette_index(map, tiles, win_x, e->lcd.win_y);
       bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
