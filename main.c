@@ -8,7 +8,7 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_main.h>
 
-#define LOG_LEVEL 2
+#define LOG_LEVEL 1
 
 #define SUCCESS(x) ((x) == OK)
 #define FAIL(x) ((x) != OK)
@@ -1263,9 +1263,9 @@ uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
     case 1: return obj->x + OBJ_X_OFFSET;
     case 2: return obj->tile;
     case 3:
-      return FROM_REG(obj->priority, OBJ_PRIORITY) |
-             FROM_REG(obj->yflip, OBJ_YFLIP) | FROM_REG(obj->xflip, OBJ_XFLIP) |
-             FROM_REG(obj->palette, OBJ_PALETTE);
+      return TO_REG(obj->priority, OBJ_PRIORITY) |
+             TO_REG(obj->yflip, OBJ_YFLIP) | TO_REG(obj->xflip, OBJ_XFLIP) |
+             TO_REG(obj->palette, OBJ_PALETTE);
   }
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
@@ -1552,29 +1552,26 @@ void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* Ignore writes if the display is on, and the hardware is using OAM. */
   if (e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
                               e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM)) {
+    DEBUG("write_oam(0x%04x, 0x%02x): ignored because in use.\n", addr, value);
     return;
   }
 
-  uint8_t obj_index = addr >> 2;
-  struct Obj* obj = &e->oam.objs[obj_index];
+  struct Obj* obj = &e->oam.objs[addr >> 2];
   switch (addr & 3) {
     case 0:
       obj->y = value - OBJ_Y_OFFSET;
       break;
-
     case 1:
       obj->x = value - OBJ_X_OFFSET;
       break;
-
     case 2:
       obj->tile = value;
       break;
-
     case 3:
-      obj->priority = TO_REG(value, OBJ_PRIORITY);
-      obj->yflip = TO_REG(value, OBJ_YFLIP);
-      obj->xflip = TO_REG(value, OBJ_XFLIP);
-      obj->palette = TO_REG(value, OBJ_PALETTE);
+      obj->priority = FROM_REG(value, OBJ_PRIORITY);
+      obj->yflip = FROM_REG(value, OBJ_YFLIP);
+      obj->xflip = FROM_REG(value, OBJ_XFLIP);
+      obj->palette = FROM_REG(value, OBJ_PALETTE);
       break;
   }
 }
@@ -1971,18 +1968,23 @@ void render_line(struct Emulator* e) {
 
       struct Palette* palette = &e->oam.obp[o->palette];
       int n;
-      int d = o->xflip ? -1: 1;
-      int ox = o->xflip ? 7 : 0;
-      for (n = 0; n < 8; ++n, ox += d) {
-        uint8_t sx = o->x + n;
+      int d = 1;
+      uint8_t sx = o->x;
+      if (o->xflip) {
+        d = -1;
+        tile_data += 7;
+      }
+      for (n = 0; n < 8; ++n, ++sx, tile_data += d) {
         if (sx >= SCREEN_WIDTH) {
           continue;
         }
         if (o->priority == OBJ_PRIORITY_BEHIND_BG && bg_obj_mask[sx] == 0) {
           continue;
         }
-        uint8_t palette_index = tile_data[ox];
-        line_data[sx] = get_palette_index_rgba(palette_index, palette);
+        uint8_t palette_index = *tile_data;
+        if (palette_index != 0) {
+          line_data[sx] = get_palette_index_rgba(palette_index, palette);
+        }
       }
     }
   }
@@ -3294,7 +3296,9 @@ void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
     e->dma.active = FALSE;
     Address i;
     for (i = 0; i < OAM_TRANSFER_SIZE; ++i) {
-      write_u8(e, OAM_START_ADDR + i, read_u8(e, e->dma.addr + i));
+      uint8_t value = read_u8(e, e->dma.addr + i);
+      DEBUG_VERBOSE("dma: [%u.%u] = %u\n", i >> 2, i & 3, value);
+      write_u8(e, OAM_START_ADDR + i, value);
     }
   }
 }
