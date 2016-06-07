@@ -167,6 +167,7 @@ typedef uint32_t RGBA;
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 640
 
+#define ADDR_MASK_1K 0x03ff
 #define ADDR_MASK_4K 0x0fff
 #define ADDR_MASK_8K 0x1fff
 #define ADDR_MASK_16K 0x3fff
@@ -1065,7 +1066,7 @@ static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
 static void mbc1_write_rom(struct Emulator* e,
                            MaskedAddress addr,
                            uint8_t value) {
-  DEBUG("mbc1_write_rom: 0x%04x <= 0x%02x\n", addr, value);
+  DEBUG_VERBOSE("mbc1_write_rom(0x%04x, 0x%02x)\n", addr, value);
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ram_enabled =
@@ -1366,7 +1367,17 @@ static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
+static enum Bool is_using_oam(struct Emulator* e) {
+  return e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
+                                 e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM);
+}
+
 static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
+  if (is_using_oam(e)) {
+    DEBUG("read_oam(0x%04x): returning 0xff because in use.\n", addr);
+    return 0xff;
+  }
+
   uint8_t obj_index = addr >> 2;
   struct Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
@@ -1642,20 +1653,13 @@ static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
     uint32_t map_index = addr >> 10;
     assert(map_index < MAP_COUNT);
-    TileMap* map = &e->vram.map[map_index];
-    uint32_t map_y = (addr >> 5) & 0x1f; /* 32 bytes per row. */
-    uint32_t map_x = addr & 0x1f;
-    uint32_t map_data_index = map_y * TILE_MAP_WIDTH + map_x;
-    assert(map_data_index < TILE_MAP_WIDTH * TILE_MAP_HEIGHT);
-    uint8_t* data = &(*map)[map_data_index];
-    *data = value;
+    e->vram.map[map_index][addr & ADDR_MASK_1K] = value;
   }
 }
 
 static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   /* Ignore writes if the display is on, and the hardware is using OAM. */
-  if (e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
-                              e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM)) {
+  if (is_using_oam(e)) {
     DEBUG("write_oam(0x%04x, 0x%02x): ignored because in use.\n", addr, value);
     return;
   }
@@ -2054,7 +2058,7 @@ static void render_line(struct Emulator* e) {
 
       uint8_t* tile_data;
       if (o->yflip) {
-        oy = obj_height - oy;
+        oy = obj_height - 1 - oy;
       }
       if (obj_height == 8) {
         tile_data = &e->vram.tile[o->tile][oy * TILE_HEIGHT];
@@ -2067,13 +2071,13 @@ static void render_line(struct Emulator* e) {
       }
 
       struct Palette* palette = &e->oam.obp[o->palette];
-      int n;
       int d = 1;
       uint8_t sx = o->x;
       if (o->xflip) {
         d = -1;
         tile_data += 7;
       }
+      int n;
       for (n = 0; n < 8; ++n, ++sx, tile_data += d) {
         if (sx >= SCREEN_WIDTH) {
           continue;
