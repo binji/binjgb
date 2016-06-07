@@ -150,6 +150,7 @@ typedef uint32_t RGBA;
 #define SOUND4 3
 #define VIN 4
 
+#define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
 #define DIV_CYCLES 256
 #define TIMA_4096_CYCLES 1024
@@ -776,6 +777,7 @@ struct LCD {
   uint8_t win_y;    /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
   enum Bool new_frame_edge;
+  enum Bool new_line_edge;
 };
 
 struct DMA {
@@ -803,6 +805,7 @@ struct Emulator {
   struct DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
   FrameBuffer frame_buffer;
+  uint32_t cycles;
 };
 
 static enum Bool s_trace = FALSE;
@@ -3233,6 +3236,7 @@ static void new_frame(struct Emulator* e) {
   e->lcd.frame_WY = e->lcd.WY;
   e->lcd.frame++;
   e->lcd.new_frame_edge = TRUE;
+  e->lcd.new_line_edge = TRUE;
 }
 
 static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
@@ -3253,8 +3257,8 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
-  enum Bool line_edge = FALSE;
   e->lcd.new_frame_edge = FALSE;
+  e->lcd.new_line_edge = FALSE;
   e->lcd.cycles += cycles;
   switch (e->lcd.stat.mode) {
     case LCD_MODE_USING_OAM:
@@ -3275,9 +3279,9 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       break;
     case LCD_MODE_HBLANK:
       if (e->lcd.cycles >= HBLANK_CYCLES) {
-        line_edge = TRUE;
         e->lcd.cycles -= HBLANK_CYCLES;
         e->lcd.LY++;
+        e->lcd.new_line_edge = TRUE;
         if (e->lcd.LY == 144) {
           e->lcd.stat.mode = LCD_MODE_VBLANK;
           e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
@@ -3294,9 +3298,9 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       break;
     case LCD_MODE_VBLANK:
       if (e->lcd.cycles >= LINE_CYCLES) {
-        line_edge = TRUE;
         e->lcd.cycles -= LINE_CYCLES;
         e->lcd.LY++;
+        e->lcd.new_line_edge = TRUE;
         if (e->lcd.LY == 154) {
           new_frame(e);
           e->lcd.LY = 0;
@@ -3308,7 +3312,8 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       }
       break;
   }
-  if (line_edge && e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC) {
+  if (e->lcd.new_line_edge && e->lcd.stat.y_compare_intr &&
+      e->lcd.LY == e->lcd.LYC) {
     e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
   }
 }
@@ -3349,6 +3354,7 @@ static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_cycles(struct Emulator* e, int8_t cycles) {
+  e->cycles += cycles;
   update_dma_cycles(e, cycles);
   update_lcd_cycles(e, cycles);
   update_timer_cycles(e, cycles);
@@ -3392,6 +3398,81 @@ static void handle_interrupts(struct Emulator* e) {
   e->interrupts.halt = FALSE;
 }
 
+static enum Bool sdl_poll_events(struct Emulator* e) {
+  enum Bool running = TRUE;
+  SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    switch (event.type) {
+      case SDL_KEYDOWN:
+      case SDL_KEYUP: {
+        enum Bool set = event.type == SDL_KEYDOWN;
+        switch (event.key.keysym.sym) {
+          case SDLK_UP: e->joypad.up = set; break;
+          case SDLK_DOWN: e->joypad.down = set; break;
+          case SDLK_LEFT: e->joypad.left = set; break;
+          case SDLK_RIGHT: e->joypad.right = set; break;
+          case SDLK_z: e->joypad.B = set; break;
+          case SDLK_x: e->joypad.A = set; break;
+          case SDLK_RETURN: e->joypad.start = set; break;
+          case SDLK_BACKSPACE: e->joypad.select = set; break;
+          case SDLK_ESCAPE: running = FALSE; break;
+          default: break;
+        }
+        break;
+      }
+      case SDL_QUIT: running = FALSE; break;
+      default: break;
+    }
+  }
+  return running;
+}
+
+static void sdl_render_surface(struct Emulator* e, SDL_Surface* surface) {
+  if (SDL_LockSurface(surface) == 0) {
+    uint32_t* pixels = surface->pixels;
+    int sx, sy;
+    for (sy = 0; sy < SCREEN_HEIGHT; sy++) {
+      for (sx = 0; sx < SCREEN_WIDTH; sx++) {
+        int i, j;
+        RGBA pixel = e->frame_buffer[sy * SCREEN_WIDTH + sx];
+        uint8_t r = (pixel >> 16) & 0xff;
+        uint8_t g = (pixel >> 8) & 0xff;
+        uint8_t b = (pixel >> 0) & 0xff;
+        uint32_t mapped = SDL_MapRGB(surface->format, r, g, b);
+        for (j = 0; j < RENDER_SCALE; j++) {
+          for (i = 0; i < RENDER_SCALE; i++) {
+            int rx = sx * RENDER_SCALE + i;
+            int ry = sy * RENDER_SCALE + j;
+            pixels[ry * RENDER_WIDTH + rx] = mapped;
+          }
+        }
+      }
+    }
+    SDL_UnlockSurface(surface);
+  }
+  SDL_Flip(surface);
+}
+
+static void sdl_wait_for_frame(struct Emulator* e,
+                               uint32_t* last_cycles,
+                               uint32_t* last_ticks_ms) {
+  uint32_t ticks_ms = SDL_GetTicks();
+  double gb_ms = (double)(e->cycles - *last_cycles) * MILLISECONDS_PER_SECOND /
+                 GB_CYCLES_PER_SECOND;
+  double real_ms = ticks_ms - *last_ticks_ms;
+  while (real_ms < gb_ms) {
+    double delta_ms = gb_ms - real_ms;
+    if (delta_ms > 10) {
+      SDL_Delay(delta_ms);
+    }
+    ticks_ms = SDL_GetTicks();
+    real_ms = ticks_ms - *last_ticks_ms;
+  }
+
+  *last_cycles = e->cycles;
+  *last_ticks_ms = ticks_ms;
+}
+
 int main(int argc, char** argv) {
   --argc; ++argv;
   int result = 1;
@@ -3408,70 +3489,22 @@ int main(int argc, char** argv) {
   SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
   CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
 
-  enum Bool running = TRUE;
-  while (running) {
+  uint32_t last_cycles = 0;
+  uint32_t last_ticks_ms = SDL_GetTicks();
+  while (TRUE) {
     print_emulator_info(e);
-    uint8_t cycles;
-    if (e->interrupts.halt) {
-      cycles = 4;
-    } else {
-      cycles = execute_instruction(e);
-    }
-
+    uint8_t cycles = e->interrupts.halt ? 4 : execute_instruction(e);
     update_cycles(e, cycles);
     handle_interrupts(e);
 
-    if (e->lcd.new_frame_edge) {
-      SDL_Event event;
-      while (SDL_PollEvent(&event)) {
-        switch (event.type) {
-          case SDL_KEYDOWN:
-          case SDL_KEYUP: {
-            enum Bool set = event.type == SDL_KEYDOWN;
-            switch (event.key.keysym.sym) {
-              case SDLK_UP: e->joypad.up = set; break;
-              case SDLK_DOWN: e->joypad.down = set; break;
-              case SDLK_LEFT: e->joypad.left = set; break;
-              case SDLK_RIGHT: e->joypad.right = set; break;
-              case SDLK_z: e->joypad.B = set; break;
-              case SDLK_x: e->joypad.A = set; break;
-              case SDLK_RETURN: e->joypad.start = set; break;
-              case SDLK_BACKSPACE: e->joypad.select = set; break;
-              case SDLK_ESCAPE: running = FALSE; break;
-              default: break;
-            }
-            break;
-          }
-          case SDL_QUIT: running = FALSE; break;
-          default: break;
-        }
-      }
-
-      if (SDL_LockSurface(surface) == 0) {
-        uint32_t* pixels = surface->pixels;
-        int sx, sy;
-        for (sy = 0; sy < SCREEN_HEIGHT; sy++) {
-          for (sx = 0; sx < SCREEN_WIDTH; sx++) {
-            int i, j;
-            RGBA pixel = e->frame_buffer[sy * SCREEN_WIDTH + sx];
-            uint8_t r = (pixel >> 16) & 0xff;
-            uint8_t g = (pixel >> 8) & 0xff;
-            uint8_t b = (pixel >> 0) & 0xff;
-            uint32_t mapped = SDL_MapRGB(surface->format, r, g, b);
-            for (j = 0; j < RENDER_SCALE; j++) {
-              for (i = 0; i < RENDER_SCALE; i++) {
-                int rx = sx * RENDER_SCALE + i;
-                int ry = sy * RENDER_SCALE + j;
-                pixels[ry * RENDER_WIDTH + rx] = mapped;
-              }
-            }
-          }
-        }
-        SDL_UnlockSurface(surface);
-      }
-      SDL_Flip(surface);
+    if (e->lcd.new_line_edge && !sdl_poll_events(e)) {
+      break;
     }
 
+    if (e->lcd.new_frame_edge) {
+      sdl_wait_for_frame(e, &last_cycles, &last_ticks_ms);
+      sdl_render_surface(e, surface);
+    }
   }
 
   result = 0;
