@@ -107,9 +107,11 @@ typedef uint32_t RGBA;
 
 #define MINIMUM_ROM_SIZE 32768
 #define ROM_BANK_SHIFT 14
+#define EXTERNAL_RAM_BANK_SHIFT 13
 #define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 #define VIDEO_RAM_SIZE 8192
 #define WORK_RAM_SIZE 32768
+#define EXTERNAL_RAM_SIZE 32768
 #define WAVE_RAM_SIZE 32
 #define HIGH_RAM_SIZE 127
 
@@ -356,36 +358,37 @@ typedef uint32_t RGBA;
   V(SGB_FLAG_NONE, 0)       \
   V(SGB_FLAG_SUPPORTED, 3)
 
-#define FOREACH_CARTRIDGE_TYPE(V)                 \
-  V(CARTRIDGE_TYPE_ROM_ONLY, 0x0)                 \
-  V(CARTRIDGE_TYPE_MBC1, 0x1)                     \
-  V(CARTRIDGE_TYPE_MBC1_RAM, 0x2)                 \
-  V(CARTRIDGE_TYPE_MBC1_RAM_BATTERY, 0x3)         \
-  V(CARTRIDGE_TYPE_MBC2, 0x5)                     \
-  V(CARTRIDGE_TYPE_MBC2_BATTERY, 0x6)             \
-  V(CARTRIDGE_TYPE_ROM_RAM, 0x8)                  \
-  V(CARTRIDGE_TYPE_ROM_RAM_BATTERY, 0x9)          \
-  V(CARTRIDGE_TYPE_MMM01, 0xb)                    \
-  V(CARTRIDGE_TYPE_MMM01_RAM, 0xc)                \
-  V(CARTRIDGE_TYPE_MMM01_RAM_BATTERY, 0xd)        \
-  V(CARTRIDGE_TYPE_MBC3_TIMER_BATTERY, 0xf)       \
-  V(CARTRIDGE_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10)  \
-  V(CARTRIDGE_TYPE_MBC3, 0x11)                    \
-  V(CARTRIDGE_TYPE_MBC3_RAM, 0x12)                \
-  V(CARTRIDGE_TYPE_MBC3_RAM_BATTERY, 0x13)        \
-  V(CARTRIDGE_TYPE_MBC4, 0x15)                    \
-  V(CARTRIDGE_TYPE_MBC4_RAM, 0x16)                \
-  V(CARTRIDGE_TYPE_MBC4_RAM_BATTERY, 0x17)        \
-  V(CARTRIDGE_TYPE_MBC5, 0x19)                    \
-  V(CARTRIDGE_TYPE_MBC5_RAM, 0x1a)                \
-  V(CARTRIDGE_TYPE_MBC5_RAM_BATTERY, 0x1b)        \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE, 0x1c)             \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM, 0x1d)         \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e) \
-  V(CARTRIDGE_TYPE_POCKET_CAMERA, 0xfc)           \
-  V(CARTRIDGE_TYPE_BANDAI_TAMA5, 0xfd)            \
-  V(CARTRIDGE_TYPE_HUC3, 0xfe)                    \
-  V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff)
+#define FOREACH_CARTRIDGE_TYPE(V)                                              \
+  V(CARTRIDGE_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY)                  \
+  V(CARTRIDGE_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY)                        \
+  V(CARTRIDGE_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY)                  \
+  V(CARTRIDGE_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY)        \
+  V(CARTRIDGE_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY)                        \
+  V(CARTRIDGE_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY)              \
+  V(CARTRIDGE_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY)                 \
+  V(CARTRIDGE_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY)       \
+  V(CARTRIDGE_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY)                      \
+  V(CARTRIDGE_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY)                \
+  V(CARTRIDGE_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY)      \
+  V(CARTRIDGE_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY)        \
+  V(CARTRIDGE_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY) \
+  V(CARTRIDGE_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY)                       \
+  V(CARTRIDGE_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY)                 \
+  V(CARTRIDGE_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY)       \
+  V(CARTRIDGE_TYPE_MBC4, 0x15, MBC4, NO_RAM, NO_BATTERY)                       \
+  V(CARTRIDGE_TYPE_MBC4_RAM, 0x16, MBC4, WITH_RAM, NO_BATTERY)                 \
+  V(CARTRIDGE_TYPE_MBC4_RAM_BATTERY, 0x17, MBC4, WITH_RAM, WITH_BATTERY)       \
+  V(CARTRIDGE_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY)                       \
+  V(CARTRIDGE_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY)                 \
+  V(CARTRIDGE_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY)       \
+  V(CARTRIDGE_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY)                \
+  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY)          \
+  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM,              \
+    WITH_BATTERY)                                                              \
+  V(CARTRIDGE_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)            \
+  V(CARTRIDGE_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)              \
+  V(CARTRIDGE_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                       \
+  V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, NO_BATTERY)
 
 #define FOREACH_ROM_SIZE(V)  \
   V(ROM_SIZE_32K, 0, 2)      \
@@ -462,6 +465,50 @@ static const char* get_io_reg_string(Address addr) {
 static uint32_t s_rom_bank_size[] = {
 #define V(name, code, bank_size) [code] = bank_size,
     FOREACH_ROM_SIZE(V)
+#undef V
+};
+
+static uint32_t s_ram_bank_size[] = {
+#define V(name, code, bank_size) [code] = bank_size,
+    FOREACH_RAM_SIZE(V)
+#undef V
+};
+
+enum MBCType {
+  NO_MBC,
+  MBC1,
+  MBC2,
+  MBC3,
+  MBC4,
+  MBC5,
+  MMM01,
+  TAMA5,
+  HUC3,
+  HUC1,
+};
+static enum MBCType s_mbc_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = mbc,
+    FOREACH_CARTRIDGE_TYPE(V)
+#undef V
+};
+
+enum ExternalRamType {
+  NO_RAM,
+  WITH_RAM,
+};
+static enum ExternalRamType s_external_ram_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = ram,
+    FOREACH_CARTRIDGE_TYPE(V)
+#undef V
+};
+
+enum BatteryType {
+  NO_BATTERY,
+  WITH_BATTERY,
+};
+static enum BatteryType s_battery_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = battery,
+    FOREACH_CARTRIDGE_TYPE(V)
 #undef V
 };
 
@@ -579,6 +626,11 @@ enum ObjPriority {
 
 struct RomData {
   uint8_t* data;
+  size_t size;
+};
+
+struct ExternalRam {
+  uint8_t data[EXTERNAL_RAM_SIZE];
   size_t size;
 };
 
@@ -794,6 +846,7 @@ struct Emulator {
   struct MemoryMap memory_map;
   struct Registers reg;
   struct VideoRam vram;
+  struct ExternalRam external_ram;
   struct WorkRam ram;
   struct Interrupts interrupts;
   struct OAM oam;
@@ -1079,6 +1132,30 @@ static void dummy_write_external_ram(struct Emulator* e,
                                      MaskedAddress addr,
                                      uint8_t value) {}
 
+static uint32_t get_external_ram_address(struct Emulator* e,
+                                         MaskedAddress addr) {
+  assert(addr <= ADDR_MASK_8K);
+  uint32_t ram_addr =
+      (e->memory_map.ram_bank << EXTERNAL_RAM_BANK_SHIFT) | addr;
+  if (ram_addr < e->external_ram.size) {
+    return ram_addr;
+  } else {
+    LOG("get_external_ram_address(0x%04x): bad address (bank = %u)!\n", addr,
+        e->memory_map.ram_bank);
+    return 0;
+  }
+}
+
+static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
+  return e->external_ram.data[get_external_ram_address(e, addr)];
+}
+
+static void gb_write_external_ram(struct Emulator* e,
+                                  MaskedAddress addr,
+                                  uint8_t value) {
+  e->external_ram.data[get_external_ram_address(e, addr)] = value;
+}
+
 static struct MemoryMap s_rom_only_memory_map = {
     .read_rom_bank_switch = rom_only_read_rom_bank_switch,
     .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
@@ -1103,23 +1180,33 @@ static struct MemoryMap s_mbc1_memory_map = {
 
 static enum Result get_memory_map(struct RomInfo* rom_info,
                                   struct MemoryMap* out_memory_map) {
-  switch (rom_info->cartridge_type) {
-    case CARTRIDGE_TYPE_ROM_ONLY:
+  switch (s_mbc_type[rom_info->cartridge_type]) {
+    case NO_MBC:
       *out_memory_map = s_rom_only_memory_map;
-      return OK;
-
-    case CARTRIDGE_TYPE_MBC1:
-    case CARTRIDGE_TYPE_MBC1_RAM:
-    case CARTRIDGE_TYPE_MBC1_RAM_BATTERY:
+      break;
+    case MBC1:
       *out_memory_map = s_mbc1_memory_map;
-      return OK;
-
+      break;
     default:
       NOT_IMPLEMENTED_NO_EMULATOR(
           "memory map for %s not implemented.\n",
           get_cartridge_type_string(rom_info->cartridge_type));
+      return ERROR;
   }
-  return ERROR;
+
+  switch (s_external_ram_type[rom_info->cartridge_type]) {
+    case WITH_RAM:
+      out_memory_map->read_external_ram = gb_read_external_ram;
+      out_memory_map->write_external_ram = gb_write_external_ram;
+      break;
+    default:
+    case NO_RAM:
+      break;
+  }
+
+  /* TODO */
+  (void)s_battery_type;
+  return OK;
 }
 
 static uint8_t get_f_reg(struct Registers* reg) {
@@ -1149,6 +1236,7 @@ static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   print_rom_info(&e->rom_info);
 #endif
   CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
+  e->external_ram.size = s_ram_bank_size[e->rom_info.ram_size];
   set_af_reg(&e->reg, 0x01b0);
   e->reg.BC = 0x0013;
   e->reg.DE = 0x00d8;
