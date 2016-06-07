@@ -8,14 +8,32 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_main.h>
 
+#define LOG_LEVEL 2
+
 #define SUCCESS(x) ((x) == OK)
 #define FAIL(x) ((x) != OK)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 
+#if LOG_LEVEL > 0
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
+#else
+#define LOG(...)
+#endif
+
+#if LOG_LEVEL > 1
+#define DEBUG(...) LOG(__VA_ARGS__)
+#else
 #define DEBUG(...)
+#endif
+
+#if LOG_LEVEL > 2
+#define DEBUG_VERBOSE(...) LOG(__VA_ARGS__)
+#else
+#define DEBUG_VERBOSE(...)
+#endif
+
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define CHECK_MSG(x, ...)                       \
   if (!(x)) {                                   \
@@ -667,9 +685,11 @@ struct Joypad {
 };
 
 struct Interrupts {
-  enum Bool IME; /* Interrupt Master Enable */
-  uint8_t IE;    /* Interrupt Enable */
-  uint8_t IF;    /* Interrupt Request */
+  enum Bool IME;  /* Interrupt Master Enable */
+  uint8_t IE;     /* Interrupt Enable */
+  uint8_t IF;     /* Interrupt Request */
+  enum Bool halt; /* Halted, waiting for an interrupt. */
+  enum Bool halt_DI; /* Halted w/ disabled interrupts. */
 };
 
 struct Timer {
@@ -1457,7 +1477,7 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
 
     case MEMORY_MAP_IO: {
       uint8_t value = read_io(e, pair.addr);
-      DEBUG("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
+      DEBUG_VERBOSE("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
       return value;
     }
 
@@ -1476,7 +1496,8 @@ void write_vram_tile_data(struct Emulator* e,
                           uint32_t plane,
                           uint32_t y,
                           uint8_t value) {
-  DEBUG("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y, value);
+  DEBUG_VERBOSE("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
+                value);
   assert(index < TILE_COUNT);
   Tile* tile = &e->vram.tile[index];
   uint32_t data_index = y * TILE_WIDTH;
@@ -1801,7 +1822,7 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       return write_io(e, pair.addr, value);
 
     case MEMORY_MAP_HIGH_RAM:
-      DEBUG("write_hram(0x%04x, 0x%02x)\n", addr, value);
+      DEBUG_VERBOSE("write_hram(0x%04x, 0x%02x)\n", addr, value);
       e->hram[pair.addr] = value;
       break;
   }
@@ -2533,6 +2554,12 @@ uint8_t s_cb_opcode_cycles[] = {
 #define DEC_RR(RR) REG(RR)--
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 
+#define HALT                                        \
+  do {                                              \
+    e->interrupts.halt = TRUE;                      \
+    e->interrupts.halt_DI = e->interrupts.IME == 0; \
+  } while (0)
+
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
 #define INC_R(R) BASIC_OP_R(R, INC); INC_FLAGS
@@ -2654,8 +2681,17 @@ uint8_t execute_instruction(struct Emulator* e) {
   int8_t s;
   uint8_t u;
   uint8_t c;
-  uint8_t opcode = read_u8(e, e->reg.PC);
-  Address new_pc = e->reg.PC + s_opcode_bytes[opcode];
+  uint8_t opcode;
+  Address new_pc;
+  opcode = read_u8(e, e->reg.PC);
+  if (e->interrupts.halt_DI) {
+    /* HALT bug. When interrupts are disabled during a HALT, the following byte
+     * will be duplicated when decoding. */
+    e->reg.PC--;
+    e->interrupts.halt_DI = FALSE;
+  }
+  new_pc = e->reg.PC + s_opcode_bytes[opcode];
+
   if (opcode == 0xcb) {
     uint8_t opcode = read_u8(e, e->reg.PC + 1);
     cycles = s_cb_opcode_cycles[opcode];
@@ -3038,7 +3074,7 @@ uint8_t execute_instruction(struct Emulator* e) {
       case 0x73: LD_MR_R(HL, E); break;
       case 0x74: LD_MR_R(HL, H); break;
       case 0x75: LD_MR_R(HL, L); break;
-      case 0x76: NI; break;
+      case 0x76: HALT; break;
       case 0x77: LD_MR_R(HL, A); break;
       case 0x78: LD_R_R(A, B); break;
       case 0x79: LD_R_R(A, C); break;
@@ -3359,8 +3395,14 @@ void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
+void update_cycles(struct Emulator* e, int8_t cycles) {
+  update_dma_cycles(e, cycles);
+  update_lcd_cycles(e, cycles);
+  update_timer_cycles(e, cycles);
+}
+
 void handle_interrupts(struct Emulator* e) {
-  if (e->interrupts.IME == 0) {
+  if (!(e->interrupts.IME || e->interrupts.halt)) {
     return;
   }
 
@@ -3369,27 +3411,32 @@ void handle_interrupts(struct Emulator* e) {
     return;
   }
 
+  uint8_t mask = 0;
   Address vector;
   if (interrupts & INTERRUPT_VBLANK_MASK) {
     DEBUG(">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
     vector = 0x40;
-    e->interrupts.IF &= ~INTERRUPT_VBLANK_MASK;
+    mask = INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
     DEBUG(">> LCD_STAT interrupt\n");
     vector = 0x48;
-    e->interrupts.IF &= ~INTERRUPT_LCD_STAT_MASK;
+    mask = INTERRUPT_LCD_STAT_MASK;
   } else if (interrupts & INTERRUPT_TIMER_MASK) {
     DEBUG(">> TIMER interrupt\n");
     vector = 0x50;
-    e->interrupts.IF &= ~INTERRUPT_TIMER_MASK;
+    mask = INTERRUPT_TIMER_MASK;
   } else {
     return;
   }
 
-  Address new_pc = REG(PC);
-  CALL(vector);
-  REG(PC) = new_pc;
-  e->interrupts.IME = 0;
+  if (!e->interrupts.halt_DI) {
+    e->interrupts.IF &= ~mask;
+    Address new_pc = REG(PC);
+    CALL(vector);
+    REG(PC) = new_pc;
+    e->interrupts.IME = FALSE;
+  }
+  e->interrupts.halt = FALSE;
 }
 
 int main(int argc, char** argv) {
@@ -3411,10 +3458,14 @@ int main(int argc, char** argv) {
   enum Bool running = TRUE;
   while (running) {
     print_emulator_info(e);
-    uint8_t cycles = execute_instruction(e);
-    update_dma_cycles(e, cycles);
-    update_lcd_cycles(e, cycles);
-    update_timer_cycles(e, cycles);
+    uint8_t cycles;
+    if (e->interrupts.halt) {
+      cycles = 4;
+    } else {
+      cycles = execute_instruction(e);
+    }
+
+    update_cycles(e, cycles);
     handle_interrupts(e);
 
     if (e->lcd.new_frame_edge) {
