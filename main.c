@@ -110,6 +110,7 @@ typedef uint32_t RGBA;
 #define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 #define VIDEO_RAM_SIZE 8192
 #define WORK_RAM_SIZE 32768
+#define WAVE_RAM_SIZE 32
 #define HIGH_RAM_SIZE 127
 
 #define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
@@ -179,6 +180,8 @@ typedef uint32_t RGBA;
 #define UNUSED_START_ADDR 0xfea0
 #define UNUSED_END_ADDR 0xfeff
 #define IO_START_ADDR 0xff00
+#define WAVE_RAM_START_ADDR 0xff30
+#define WAVE_RAM_END_ADDR 0xff3f
 #define IO_END_ADDR 0xff7f
 #define HIGH_RAM_START_ADDR 0xff80
 #define HIGH_RAM_END_ADDR 0xfffe
@@ -471,6 +474,7 @@ enum MemoryMapType {
   MEMORY_MAP_OAM,
   MEMORY_MAP_UNUSED,
   MEMORY_MAP_IO,
+  MEMORY_MAP_WAVE_RAM,
   MEMORY_MAP_HIGH_RAM,
 };
 
@@ -735,6 +739,7 @@ struct Sound {
   enum Bool enabled;
   enum Bool sound_on[SOUND_COUNT];
   struct Channel channel[CHANNEL_COUNT];
+  uint8_t wave_ram[WAVE_RAM_SIZE];
 };
 
 struct LCDControl {
@@ -1226,8 +1231,16 @@ struct MemoryTypeAddressPair map_address(Address addr) {
         /* 0xfea0 - 0xfeff */
         result.type = MEMORY_MAP_UNUSED;
         result.addr = addr;
+      } else if (addr < WAVE_RAM_START_ADDR) {
+        /* 0xff00 - 0xff2f */
+        result.type = MEMORY_MAP_IO;
+        result.addr = addr;
+      } else if (addr <= WAVE_RAM_END_ADDR) {
+        /* 0xff30 - 0xff3f */
+        result.type = MEMORY_MAP_WAVE_RAM;
+        result.addr = addr - WAVE_RAM_START_ADDR;
       } else if (addr <= IO_END_ADDR) {
-        /* 0xff00 - 0xff7f */
+        /* 0xff40 - 0xff7f */
         result.type = MEMORY_MAP_IO;
         result.addr = addr;
       } else if (addr <= HIGH_RAM_END_ADDR) {
@@ -1453,34 +1466,27 @@ uint8_t read_u8(struct Emulator* e, Address addr) {
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
-
     case MEMORY_MAP_ROM_BANK_SWITCH:
       return e->memory_map.read_rom_bank_switch(e, pair.addr);
-
     case MEMORY_MAP_VRAM:
       return read_vram(e, pair.addr);
-
     case MEMORY_MAP_EXTERNAL_RAM:
       return e->memory_map.read_external_ram(e, pair.addr);
-
     case MEMORY_MAP_WORK_RAM:
       return e->ram.data[pair.addr];
-
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
       return e->memory_map.read_work_ram_bank_switch(e, pair.addr);
-
     case MEMORY_MAP_OAM:
       return read_oam(e, pair.addr);
-
     case MEMORY_MAP_UNUSED:
       return 0;
-
     case MEMORY_MAP_IO: {
       uint8_t value = read_io(e, pair.addr);
       DEBUG_VERBOSE("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
       return value;
     }
-
+    case MEMORY_MAP_WAVE_RAM:
+      return e->sound.wave_ram[pair.addr];
     case MEMORY_MAP_HIGH_RAM:
       return e->hram[pair.addr];
   }
@@ -1787,37 +1793,32 @@ void write_u8(struct Emulator* e, Address addr, uint8_t value) {
     case MEMORY_MAP_ROM:
       e->memory_map.write_rom(e, pair.addr, value);
       break;
-
     case MEMORY_MAP_ROM_BANK_SWITCH:
       /* TODO(binji): cleanup */
       e->memory_map.write_rom(e, pair.addr + 0x4000, value);
       break;
-
     case MEMORY_MAP_VRAM:
       return write_vram(e, pair.addr, value);
-
     case MEMORY_MAP_EXTERNAL_RAM:
       e->memory_map.write_external_ram(e, pair.addr, value);
       break;
-
     case MEMORY_MAP_WORK_RAM:
       e->ram.data[pair.addr] = value;
       break;
-
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
       e->memory_map.write_work_ram_bank_switch(e, pair.addr, value);
       break;
-
     case MEMORY_MAP_OAM:
       write_oam(e, pair.addr, value);
       break;
-
     case MEMORY_MAP_UNUSED:
       break;
-
     case MEMORY_MAP_IO:
-      return write_io(e, pair.addr, value);
-
+      write_io(e, pair.addr, value);
+      break;
+    case MEMORY_MAP_WAVE_RAM:
+      e->sound.wave_ram[pair.addr] = value;
+      break;
     case MEMORY_MAP_HIGH_RAM:
       DEBUG_VERBOSE("write_hram(0x%04x, 0x%02x)\n", addr, value);
       e->hram[pair.addr] = value;
