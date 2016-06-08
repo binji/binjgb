@@ -835,7 +835,9 @@ struct LCD {
 
 struct DMA {
   enum Bool active;
-  Address addr;
+  enum Bool copying; /* TRUE when performing DMA accesses. */
+  Address base_addr;
+  uint8_t addr_offset;
   uint32_t cycles;
 };
 
@@ -1561,13 +1563,18 @@ static uint8_t read_io(struct Emulator* e, Address addr) {
       return e->interrupts.IE;
     default:
       LOG("read_io(0x%04x [%s]) ignored.\n", addr, get_io_reg_string(addr));
-      return 0;
+      return 0xff;
   }
+}
+
+static enum Bool is_dma_access_ok(struct Emulator* e,
+                                  struct MemoryTypeAddressPair pair) {
+  return !e->dma.active || e->dma.copying || pair.type == MEMORY_MAP_HIGH_RAM;
 }
 
 static uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
-  if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
+  if (!is_dma_access_ok(e, pair)) {
     LOG("read_u8(0x%04x) during DMA.\n", addr);
     return 0;
   }
@@ -1658,8 +1665,10 @@ static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  /* Ignore writes if the display is on, and the hardware is using OAM. */
-  if (is_using_oam(e)) {
+  /* TODO: Not sure this is correct, it seems like DMA shouldn't be able to
+   * write to OAM while the video hardware is reading it. But without it, the
+   * rendering is incorrect. */
+  if (!e->dma.copying && is_using_oam(e)) {
     DEBUG("write_oam(0x%04x, 0x%02x): ignored because in use.\n", addr, value);
     return;
   }
@@ -1850,7 +1859,8 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_DMA_ADDR:
       e->dma.active = TRUE;
-      e->dma.addr = value << 8;
+      e->dma.base_addr = value << 8;
+      e->dma.addr_offset = 0;
       e->dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
@@ -1886,7 +1896,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 
 static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   struct MemoryTypeAddressPair pair = map_address(addr);
-  if (e->dma.active && pair.type != MEMORY_MAP_HIGH_RAM) {
+  if (!is_dma_access_ok(e, pair)) {
     LOG("write_u8(0x%04x, 0x%02x) during DMA.\n", addr, value);
     return;
   }
@@ -3336,15 +3346,20 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
     return;
   }
 
+  if (e->dma.addr_offset < OAM_TRANSFER_SIZE) {
+    e->dma.copying = TRUE;
+    int n;
+    for (n = 0; n < cycles && e->dma.addr_offset < OAM_TRANSFER_SIZE; n += 4) {
+      uint8_t value = read_u8(e, e->dma.base_addr + e->dma.addr_offset);
+      write_oam(e, e->dma.addr_offset, value);
+      e->dma.addr_offset++;
+    }
+    e->dma.copying = FALSE;
+  }
   e->dma.cycles += cycles;
   if (e->dma.cycles >= DMA_CYCLES) {
+    assert(e->dma.addr_offset == OAM_TRANSFER_SIZE);
     e->dma.active = FALSE;
-    Address i;
-    for (i = 0; i < OAM_TRANSFER_SIZE; ++i) {
-      uint8_t value = read_u8(e, e->dma.addr + i);
-      DEBUG_VERBOSE("dma: [%u.%u] = %u\n", i >> 2, i & 3, value);
-      write_u8(e, OAM_START_ADDR + i, value);
-    }
   }
 }
 
