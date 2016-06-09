@@ -1,4 +1,4 @@
-all: bgb
+all: binjgb
 
 out/:
 	mkdir -p out
@@ -6,5 +6,6 @@ out/:
 out/Makefile: | out/
 	cd out && cmake ..
 
-bgb: out/Makefile
+.PHONY: binjgb
+binjgb: out/Makefile
 	$(MAKE) --no-print-directory -C out

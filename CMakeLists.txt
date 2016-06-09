@@ -7,7 +7,7 @@ add_definitions(
 )
 include_directories(${SDL_INCLUDE_DIR})
 add_executable(
-  bgb
+  binjgb
   main.c
 )
-target_link_libraries(bgb ${SDL_LIBRARY})
+target_link_libraries(binjgb ${SDL_LIBRARY})
