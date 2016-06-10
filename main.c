@@ -437,7 +437,8 @@ typedef uint32_t RGBA;
 static const char* get_enum_string(const char** strings,
                                    size_t string_count,
                                    size_t value) {
-  return value < string_count ? strings[value] : "unknown";
+  const char* result = value < string_count ? strings[value] : "unknown";
+  return result ? result : "unknown";
 }
 
 #define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                 \
@@ -1631,6 +1632,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
                 TO_REG(e->sound.channel[CHANNEL3].status, NR52_SOUND3_ON) |
                 TO_REG(e->sound.channel[CHANNEL2].status, NR52_SOUND2_ON) |
                 TO_REG(e->sound.channel[CHANNEL1].status, NR52_SOUND1_ON);
+      DEBUG_VERBOSE("read nr52: 0x%02x\n", result);
       break;
     default:
       break;
@@ -1865,7 +1867,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 static void from_nrx1_reg(struct Channel* channel, uint8_t value) {
   channel->wave_duty = FROM_REG(value, NRX1_WAVE_DUTY);
   channel->length = NRX1_MAX_LENGTH - FROM_REG(value, NRX1_LENGTH);
-  DEBUG("from_nrx1_reg(0x%02x) length=%u\n", value, channel->length);
+  DEBUG_VERBOSE("from_nrx1_reg(0x%02x) length=%u\n", value, channel->length);
 }
 
 static void from_nrx2_reg(struct Channel* channel, uint8_t value) {
@@ -1873,12 +1875,12 @@ static void from_nrx2_reg(struct Channel* channel, uint8_t value) {
   channel->dac_enabled = FROM_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    DEBUG("from_nrx2_reg(0x%02x) dac_enabled = false\n", value);
+    DEBUG_VERBOSE("from_nrx2_reg(0x%02x) dac_enabled = false\n", value);
   }
   channel->envelope_direction = FROM_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope_count = FROM_REG(value, NRX2_ENVELOPE_COUNT);
-  DEBUG("from_nrx2_reg(0x%02x) initial_volume=%u\n", value,
-        channel->initial_volume);
+  DEBUG_VERBOSE("from_nrx2_reg(0x%02x) initial_volume=%u\n", value,
+                channel->initial_volume);
 }
 
 static void from_nrx3_reg(struct Channel* channel, uint8_t value) {
@@ -1887,22 +1889,45 @@ static void from_nrx3_reg(struct Channel* channel, uint8_t value) {
 }
 
 static void from_nrx4_reg(struct Channel* channel,
-                          uint8_t value,
-                          uint16_t max_length) {
+                           uint8_t value,
+                           uint16_t max_length) {
   enum Bool trigger = FROM_REG(value, NRX4_INITIAL);
+  enum Bool was_length_enabled = channel->length_enabled;
   channel->length_enabled = FROM_REG(value, NRX4_LENGTH_ENABLED);
+  channel->frequency &= 0xff;
+  channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
+
+  /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
+   * length counter frame. This only occurs on transition from disabled to
+   * enabled. */
+  enum Bool next_frame_is_length = (channel->frame & 1) == 1;
+  if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
+      channel->length > 0) {
+    channel->length--;
+    DEBUG("from_nrx4_reg(0x%02x) extra length clock = %u\n", value,
+          channel->length);
+    if (!trigger && channel->length == 0) {
+      DEBUG("from_nrx4_reg(0x%02x) disabling channel.\n", value);
+      channel->status = FALSE;
+    }
+  }
+
   if (trigger) {
     if (channel->length == 0) {
       channel->length = max_length;
+      if (channel->length_enabled && !next_frame_is_length) {
+        channel->length--;
+      }
+      DEBUG("from_nrx4_reg(0x%02x) trigger, new length = %u\n", value,
+            channel->length);
     }
     if (channel->dac_enabled) {
       channel->status = TRUE;
     }
   }
-  channel->frequency &= 0xff;
-  channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
-  DEBUG("from_nrx4_reg(0x%02x) trigger=%u length_enabled=%u\n", value, trigger,
-      channel->length_enabled);
+
+  DEBUG_VERBOSE("from_nrx4_reg(0x%02x) trigger=%u length_enabled=%u\n", value,
+                trigger, channel->length_enabled);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -3582,12 +3607,12 @@ static void update_channel_cycles(struct Emulator* e,
                                   uint8_t cycles) {
   channel->cycles += cycles;
   if (VALUE_WRAPPED(channel->cycles, SOUND_FRAME_CYCLES)) {
-    uint8_t frame = channel->frame++;
+    channel->frame++;
     VALUE_WRAPPED(channel->frame, SOUND_FRAME_COUNT);
     enum Bool update_length = FALSE;
     enum Bool update_envelope = FALSE;
     enum Bool update_sweep = FALSE;
-    switch (frame) {
+    switch (channel->frame) {
       case 0: update_length = TRUE; break;
       case 1: break;
       case 2: update_length = update_sweep = TRUE; break;
@@ -3597,6 +3622,10 @@ static void update_channel_cycles(struct Emulator* e,
       case 6: update_length = update_sweep = TRUE; break;
       case 7: update_envelope = TRUE; break;
     }
+
+    DEBUG_VERBOSE("channel %u: %c%c%c frame: %u cycle: %u\n", channel_index,
+                  update_length ? 'L' : ' ', update_envelope ? 'E' : ' ',
+                  update_sweep ? 'S' : ' ', channel->frame, channel->cycles);
 
     if (update_length && channel->length_enabled && channel->length > 0) {
       if (--channel->length == 0) {
