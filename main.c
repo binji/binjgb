@@ -156,6 +156,7 @@ typedef uint32_t RGBA;
 
 #define NRX1_MAX_LENGTH 64
 #define NR31_MAX_LENGTH 256
+#define SWEEP_MAX_PERIOD 8
 #define SWEEP_MAX_FREQUENCY 2047
 
 #define MILLISECONDS_PER_SECOND 1000
@@ -796,6 +797,7 @@ struct Sweep {
   uint16_t frequency;
   uint8_t timer; /* 0..time */
   enum Bool enabled;
+  enum Bool calculated_subtract;
 };
 
 struct Channel {
@@ -1782,7 +1784,8 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  DEBUG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
+  DEBUG("write_io(0x%04x [%s], 0x%02x)\n", addr, get_io_reg_string(addr),
+        value);
   switch (addr) {
     case IO_JOYP_ADDR:
       e->joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
@@ -1872,7 +1875,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->interrupts.IE = value;
       break;
     default:
-      LOG("write_io(0x%04x, %u) ignored.\n", addr, value);
+      LOG("write_io(0x%04x, 0x%02x) ignored.\n", addr, value);
       break;
   }
 }
@@ -1917,6 +1920,7 @@ static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
   if (sweep->direction == SWEEP_DIRECTION_ADDITION) {
     return f + (f >> sweep->shift);
   } else {
+    sweep->calculated_subtract = TRUE;
     return f - (f >> sweep->shift);
   }
 }
@@ -1962,17 +1966,21 @@ static void write_nrx4_reg(struct Emulator* e,
     }
 
     if (channel_index == CHANNEL1) {
-      channel->sweep.enabled = channel->sweep.period || channel->sweep.shift;
-      channel->sweep.frequency = channel->frequency;
-      channel->sweep.timer = 0;
-      if (channel->sweep.shift) {
-        if (calculate_sweep_frequency(&channel->sweep) > SWEEP_MAX_FREQUENCY) {
-          channel->status = FALSE;
-          DEBUG(
-              "write_nrx4_reg(%u, 0x%02x) disabling, sweep overflow on "
-              "trigger\n",
-              channel_index, value);
-        }
+      struct Sweep* sweep = &channel->sweep;
+      sweep->enabled = sweep->period || sweep->shift;
+      sweep->frequency = channel->frequency;
+      sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
+      sweep->calculated_subtract = FALSE;
+      if (sweep->shift &&
+          calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+        channel->status = FALSE;
+        DEBUG(
+            "write_nrx4_reg(%u, 0x%02x) disabling, sweep overflow on trigger\n",
+            channel_index, value);
+      } else {
+        DEBUG(
+            "write_nrx4_reg(%u, 0x%02x) sweep frequency=%u\n",
+            channel_index, value, sweep->frequency);
       }
     }
   }
@@ -1987,13 +1995,21 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     return;
   }
 
-  DEBUG("write_apu(0x%04x [%s], %u)\n", addr, get_apu_reg_string(addr), value);
+  DEBUG("write_apu(0x%04x [%s], 0x%02x)\n", addr, get_apu_reg_string(addr),
+        value);
   switch (addr) {
     case APU_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
-      channel->sweep.period = WRITE_REG(value, NR10_SWEEP_PERIOD);
-      channel->sweep.direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
-      channel->sweep.shift = WRITE_REG(value, NR10_SWEEP_SHIFT);
+      struct Sweep* sweep = &channel->sweep;
+      enum SweepDirection old_direction = sweep->direction;
+      sweep->period = WRITE_REG(value, NR10_SWEEP_PERIOD);
+      sweep->direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
+      sweep->shift = WRITE_REG(value, NR10_SWEEP_SHIFT);
+      if (old_direction == SWEEP_DIRECTION_SUBTRACTION &&
+          sweep->direction == SWEEP_DIRECTION_ADDITION &&
+          sweep->calculated_subtract) {
+        channel->status = FALSE;
+      }
       break;
     }
     case APU_NR11_ADDR:
@@ -3674,9 +3690,9 @@ static void update_channel_cycles(struct Emulator* e,
       case 7: update_envelope = TRUE; break;
     }
 
-    DEBUG_VERBOSE("channel %u: %c%c%c frame: %u cycle: %u\n", channel_index,
-                  update_length ? 'L' : ' ', update_envelope ? 'E' : ' ',
-                  update_sweep ? 'S' : ' ', channel->frame, channel->cycles);
+    DEBUG("channel %u: %c%c%c frame: %u cycle: %u\n", channel_index,
+          update_length ? 'L' : ' ', update_envelope ? 'E' : ' ',
+          update_sweep ? 'S' : ' ', channel->frame, channel->cycles);
 
     if (update_length && channel->length_enabled && channel->length > 0) {
       if (--channel->length == 0) {
@@ -3687,23 +3703,29 @@ static void update_channel_cycles(struct Emulator* e,
     if (update_sweep && channel->sweep.enabled) {
       struct Sweep* sweep = &channel->sweep;
       uint8_t period = sweep->period;
-      if (period && ++sweep->timer == period) {
-        sweep->timer = 0;
-        uint16_t new_frequency = calculate_sweep_frequency(sweep);
-        if (new_frequency > SWEEP_MAX_FREQUENCY) {
-          DEBUG("channel %u: disabling from sweep overflow\n", channel_index);
-          channel->status = FALSE;
-        } else {
-          if (sweep->shift) {
-            sweep->frequency = channel->frequency = new_frequency;
-          }
-
-          /* Perform another overflow check */
-          if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
-            DEBUG("channel %u: disabling from 2nd sweep overflow\n",
-                  channel_index);
+      if (--sweep->timer == 0) {
+        if (period) {
+          sweep->timer = period;
+          uint16_t new_frequency = calculate_sweep_frequency(sweep);
+          if (new_frequency > SWEEP_MAX_FREQUENCY) {
+            DEBUG("channel %u: disabling from sweep overflow\n", channel_index);
             channel->status = FALSE;
+          } else {
+            if (sweep->shift) {
+              DEBUG("channel %u: updated frequency=%u\n", channel_index,
+                    new_frequency);
+              sweep->frequency = channel->frequency = new_frequency;
+            }
+
+            /* Perform another overflow check */
+            if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+              DEBUG("channel %u: disabling from 2nd sweep overflow\n",
+                    channel_index);
+              channel->status = FALSE;
+            }
           }
+        } else {
+          sweep->timer = SWEEP_MAX_PERIOD;
         }
       }
     }
