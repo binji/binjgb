@@ -111,6 +111,7 @@ typedef uint32_t RGBA;
 #define WAVE_RAM_SIZE 32
 #define HIGH_RAM_SIZE 127
 
+#define FRAME_LIMITER 1
 #define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
 #define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
 #define RENDER_SCALE 4
@@ -1277,6 +1278,8 @@ static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   e->reg.SP = 0xfffe;
   e->reg.PC = 0x0100;
   e->interrupts.IME = TRUE;
+  /* Enable sound first, so subsequent writes succeed. */
+  write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR10_ADDR, 0x80);
   write_apu(e, APU_NR11_ADDR, 0xbf);
   write_apu(e, APU_NR12_ADDR, 0xf3);
@@ -1294,7 +1297,6 @@ static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   write_apu(e, APU_NR44_ADDR, 0xbf);
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
-  write_apu(e, APU_NR52_ADDR, 0xf1);
   write_io(e, IO_LCDC_ADDR, 0x91);
   write_io(e, IO_SCY_ADDR, 0x00);
   write_io(e, IO_SCX_ADDR, 0x00);
@@ -1876,7 +1878,9 @@ static void write_nrx1_reg(struct Emulator* e,
                            int channel_index,
                            uint8_t value) {
   struct Channel* channel = &e->sound.channel[channel_index];
-  channel->wave_duty = WRITE_REG(value, NRX1_WAVE_DUTY);
+  if (e->sound.enabled) {
+    channel->wave_duty = WRITE_REG(value, NRX1_WAVE_DUTY);
+  }
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
   DEBUG_VERBOSE("write_nrx1_reg(%u, 0x%02x) length=%u\n", channel_index, value,
                 channel->length);
@@ -1982,9 +1986,18 @@ static void write_nrx4_reg(struct Emulator* e,
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (!e->sound.enabled && addr != APU_NR52_ADDR) {
-    /* Ignore all writes to APU registers when disabled. */
-    return;
+  if (!e->sound.enabled) {
+    if (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
+        addr == APU_NR31_ADDR || addr == APU_NR41_ADDR) {
+      /* DMG allows writes to the length counters when power is disabled. */
+    } else if (addr == APU_NR52_ADDR) {
+      /* Always can write to NR52; it's necessary to re-enable power. */
+    } else {
+      /* Ignore all other writes. */
+      DEBUG("write_apu(0x%04x [%s], 0x%02x) ignored.\n", addr,
+            get_apu_reg_string(addr), value);
+      return;
+    }
   }
 
   DEBUG("write_apu(0x%04x [%s], 0x%02x)\n", addr, get_apu_reg_string(addr),
@@ -2087,11 +2100,14 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       if (was_enabled && !is_enabled) {
         DEBUG("Powered down APU. Clearing registers.\n");
         int i;
-        for (i = APU_START_ADDR; i < APU_END_ADDR; ++i) {
-          if (i == APU_START_ADDR + APU_NR52_ADDR) {
-            continue;
+        for (i = 0; i < APU_REG_COUNT; ++i) {
+          switch (i) {
+            case APU_NR52_ADDR:
+              /* Don't clear. */
+              break;
+            default:
+              write_apu(e, i, 0);
           }
-          write_apu(e, i - APU_START_ADDR, 0);
         }
       } else if (!was_enabled && is_enabled) {
         DEBUG("Powered up APU. Resetting frame and sweep timers.\n");
@@ -3912,7 +3928,12 @@ int main(int argc, char** argv) {
     }
 
     if (e->lcd.new_frame_edge) {
+#if FRAME_LIMITER
       sdl_wait_for_frame(e, &last_cycles, &last_ticks_ms);
+#else
+      (void)last_cycles;
+      (void)last_ticks_ms;
+#endif
       sdl_render_surface(e, surface);
     }
   }
