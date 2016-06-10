@@ -156,6 +156,7 @@ typedef uint32_t RGBA;
 
 #define NRX1_MAX_LENGTH 64
 #define NR31_MAX_LENGTH 256
+#define SWEEP_MAX_FREQUENCY 2047
 
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
@@ -285,9 +286,9 @@ typedef uint32_t RGBA;
 #define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
 /* TODO better names for all sound stuff */
-#define NR10_SWEEP_TIME(X, OP) BITS(X, OP, 6, 4)
+#define NR10_SWEEP_PERIOD(X, OP) BITS(X, OP, 6, 4)
 #define NR10_SWEEP_DIRECTION(X, OP) BIT(X, OP, 3)
-#define NR10_SWEEP_COUNT(X, OP) BITS(X, OP, 2, 0)
+#define NR10_SWEEP_SHIFT(X, OP) BITS(X, OP, 2, 0)
 
 #define NRX1_WAVE_DUTY(X, OP) BITS(X, OP, 7, 6)
 #define NRX1_LENGTH(X, OP) BITS(X, OP, 5, 0)
@@ -786,10 +787,19 @@ struct Serial {
   enum Bool shift_clock;
 };
 
+struct Sweep {
+  uint8_t period;
+  enum SweepDirection direction;
+  uint8_t shift;
+
+  /* Internal state */
+  uint16_t frequency;
+  uint8_t timer; /* 0..time */
+  enum Bool enabled;
+};
+
 struct Channel {
-  uint8_t sweep_time;                        /* Channel 1 */
-  enum SweepDirection sweep_direction;       /* Channel 1 */
-  uint8_t sweep_count;                       /* Channel 1 */
+  struct Sweep sweep;                        /* Channel 1 */
   enum WaveDuty wave_duty;                   /* Channel 1, 2 */
   uint16_t length;                           /* All channels */
   uint8_t initial_volume;                    /* Channel 1, 2, 4 */
@@ -802,6 +812,7 @@ struct Channel {
   enum CounterStep counter_step;             /* Channel 4 */
   uint8_t divide_ratio;                      /* Channel 4 */
 
+  /* Internal state */
   enum Bool dac_enabled;
   uint8_t volume;
   uint32_t cycles;  /* 0..SOUND_FRAME_CYCLES */
@@ -1548,9 +1559,9 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case APU_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
-      result |= READ_REG(channel->sweep_time, NR10_SWEEP_TIME) |
-                READ_REG(channel->sweep_direction, NR10_SWEEP_DIRECTION) |
-                READ_REG(channel->sweep_count, NR10_SWEEP_COUNT);
+      result |= READ_REG(channel->sweep.period, NR10_SWEEP_PERIOD) |
+                READ_REG(channel->sweep.direction, NR10_SWEEP_DIRECTION) |
+                READ_REG(channel->sweep.shift, NR10_SWEEP_SHIFT);
       break;
     }
     case APU_NR11_ADDR:
@@ -1866,33 +1877,55 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-static void write_nrx1_reg(struct Channel* channel, uint8_t value) {
+static void write_nrx1_reg(struct Emulator* e,
+                           int channel_index,
+                           uint8_t value) {
+  struct Channel* channel = &e->sound.channel[channel_index];
   channel->wave_duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
-  DEBUG_VERBOSE("write_nrx1_reg(0x%02x) length=%u\n", value, channel->length);
+  DEBUG_VERBOSE("write_nrx1_reg(%u, 0x%02x) length=%u\n", channel_index, value,
+                channel->length);
 }
 
-static void write_nrx2_reg(struct Channel* channel, uint8_t value) {
+static void write_nrx2_reg(struct Emulator* e,
+                           int channel_index,
+                           uint8_t value) {
+  struct Channel* channel = &e->sound.channel[channel_index];
   channel->initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    DEBUG_VERBOSE("write_nrx2_reg(0x%02x) dac_enabled = false\n", value);
+    DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) dac_enabled = false\n",
+                  channel_index, value);
   }
   channel->envelope_direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope_count = WRITE_REG(value, NRX2_ENVELOPE_COUNT);
-  DEBUG_VERBOSE("write_nrx2_reg(0x%02x) initial_volume=%u\n", value,
-                channel->initial_volume);
+  DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) initial_volume=%u\n", channel_index,
+                value, channel->initial_volume);
 }
 
-static void write_nrx3_reg(struct Channel* channel, uint8_t value) {
+static void write_nrx3_reg(struct Emulator* e,
+                           int channel_index,
+                           uint8_t value) {
+  struct Channel* channel = &e->sound.channel[channel_index];
   channel->frequency &= ~0xff;
   channel->frequency |= value;
 }
 
-static void write_nrx4_reg(struct Channel* channel,
+static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
+  uint16_t f = sweep->frequency;
+  if (sweep->direction == SWEEP_DIRECTION_ADDITION) {
+    return f + (f >> sweep->shift);
+  } else {
+    return f - (f >> sweep->shift);
+  }
+}
+
+static void write_nrx4_reg(struct Emulator* e,
+                           int channel_index,
                            uint8_t value,
                            uint16_t max_length) {
+  struct Channel* channel = &e->sound.channel[channel_index];
   enum Bool trigger = WRITE_REG(value, NRX4_INITIAL);
   enum Bool was_length_enabled = channel->length_enabled;
   channel->length_enabled = WRITE_REG(value, NRX4_LENGTH_ENABLED);
@@ -1906,10 +1939,11 @@ static void write_nrx4_reg(struct Channel* channel,
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG("write_nrx4_reg(0x%02x) extra length clock = %u\n", value,
-          channel->length);
+    DEBUG("write_nrx4_reg(%u, 0x%02x) extra length clock = %u\n", channel_index,
+          value, channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG("write_nrx4_reg(0x%02x) disabling channel.\n", value);
+      DEBUG("write_nrx4_reg(%u, 0x%02x) disabling channel.\n", channel_index,
+            value);
       channel->status = FALSE;
     }
   }
@@ -1920,16 +1954,31 @@ static void write_nrx4_reg(struct Channel* channel,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG("write_nrx4_reg(0x%02x) trigger, new length = %u\n", value,
-            channel->length);
+      DEBUG("write_nrx4_reg(%u, 0x%02x) trigger, new length = %u\n",
+            channel_index, value, channel->length);
     }
     if (channel->dac_enabled) {
       channel->status = TRUE;
     }
+
+    if (channel_index == CHANNEL1) {
+      channel->sweep.enabled = channel->sweep.period || channel->sweep.shift;
+      channel->sweep.frequency = channel->frequency;
+      channel->sweep.timer = 0;
+      if (channel->sweep.shift) {
+        if (calculate_sweep_frequency(&channel->sweep) > SWEEP_MAX_FREQUENCY) {
+          channel->status = FALSE;
+          DEBUG(
+              "write_nrx4_reg(%u, 0x%02x) disabling, sweep overflow on "
+              "trigger\n",
+              channel_index, value);
+        }
+      }
+    }
   }
 
-  DEBUG_VERBOSE("write_nrx4_reg(0x%02x) trigger=%u length_enabled=%u\n", value,
-                trigger, channel->length_enabled);
+  DEBUG_VERBOSE("write_nrx4_reg(%u, 0x%02x) trigger=%u length_enabled=%u\n",
+                channel_index, value, trigger, channel->length_enabled);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -1942,34 +1991,34 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   switch (addr) {
     case APU_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
-      channel->sweep_time = WRITE_REG(value, NR10_SWEEP_TIME);
-      channel->sweep_direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
-      channel->sweep_count = WRITE_REG(value, NR10_SWEEP_COUNT);
+      channel->sweep.period = WRITE_REG(value, NR10_SWEEP_PERIOD);
+      channel->sweep.direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
+      channel->sweep.shift = WRITE_REG(value, NR10_SWEEP_SHIFT);
       break;
     }
     case APU_NR11_ADDR:
-      write_nrx1_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx1_reg(e, CHANNEL1, value);
       break;
     case APU_NR12_ADDR:
-      write_nrx2_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx2_reg(e, CHANNEL1, value);
       break;
     case APU_NR13_ADDR:
-      write_nrx3_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx3_reg(e, CHANNEL1, value);
       break;
     case APU_NR14_ADDR:
-      write_nrx4_reg(&e->sound.channel[CHANNEL1], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(e, CHANNEL1, value, NRX1_MAX_LENGTH);
       break;
     case APU_NR21_ADDR:
-      write_nrx1_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx1_reg(e, CHANNEL2, value);
       break;
     case APU_NR22_ADDR:
-      write_nrx2_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx2_reg(e, CHANNEL2, value);
       break;
     case APU_NR23_ADDR:
-      write_nrx3_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx3_reg(e, CHANNEL2, value);
       break;
     case APU_NR24_ADDR:
-      write_nrx4_reg(&e->sound.channel[CHANNEL2], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(e, CHANNEL2, value, NRX1_MAX_LENGTH);
       break;
     case APU_NR30_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL3];
@@ -1987,16 +2036,16 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
           WRITE_REG(value, NR32_SELECT_OUTPUT_LEVEL);
       break;
     case APU_NR33_ADDR:
-      write_nrx3_reg(&e->sound.channel[CHANNEL3], value);
+      write_nrx3_reg(e, CHANNEL3, value);
       break;
     case APU_NR34_ADDR:
-      write_nrx4_reg(&e->sound.channel[CHANNEL3], value, NR31_MAX_LENGTH);
+      write_nrx4_reg(e, CHANNEL3, value, NR31_MAX_LENGTH);
       break;
     case APU_NR41_ADDR:
-      write_nrx1_reg(&e->sound.channel[CHANNEL4], value);
+      write_nrx1_reg(e, CHANNEL4, value);
       break;
     case APU_NR42_ADDR:
-      write_nrx2_reg(&e->sound.channel[CHANNEL4], value);
+      write_nrx2_reg(e, CHANNEL4, value);
       break;
     case APU_NR43_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL4];
@@ -2007,7 +2056,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case APU_NR44_ADDR:
-      write_nrx4_reg(&e->sound.channel[CHANNEL4], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(e, CHANNEL4, value, NRX1_MAX_LENGTH);
       break;
     case APU_NR50_ADDR:
       e->sound.so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
@@ -3635,9 +3684,32 @@ static void update_channel_cycles(struct Emulator* e,
       }
     }
 
-    // TODO envelope and sweep
+    if (update_sweep && channel->sweep.enabled) {
+      struct Sweep* sweep = &channel->sweep;
+      uint8_t period = sweep->period;
+      if (period && ++sweep->timer == period) {
+        sweep->timer = 0;
+        uint16_t new_frequency = calculate_sweep_frequency(sweep);
+        if (new_frequency > SWEEP_MAX_FREQUENCY) {
+          DEBUG("channel %u: disabling from sweep overflow\n", channel_index);
+          channel->status = FALSE;
+        } else {
+          if (sweep->shift) {
+            sweep->frequency = channel->frequency = new_frequency;
+          }
+
+          /* Perform another overflow check */
+          if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+            DEBUG("channel %u: disabling from 2nd sweep overflow\n",
+                  channel_index);
+            channel->status = FALSE;
+          }
+        }
+      }
+    }
+
+    // TODO envelope
     (void)update_envelope;
-    (void)update_sweep;
   }
 }
 
