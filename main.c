@@ -169,7 +169,7 @@ typedef uint32_t RGBA;
 #define DMA_CYCLES 648
 
 #define SOUND_FRAME_COUNT 8
-#define SOUND_FRAME_CYCLES 8192
+#define SOUND_FRAME_CYCLES 8192 /* 512Hz */
 
 #define ADDR_MASK_1K 0x03ff
 #define ADDR_MASK_4K 0x0fff
@@ -789,13 +789,12 @@ struct Sweep {
 
   /* Internal state */
   uint16_t frequency;
-  uint8_t timer; /* 0..time */
+  uint8_t timer;   /* 0..period */
   enum Bool enabled;
   enum Bool calculated_subtract;
 };
 
 struct Channel {
-  struct Sweep sweep;                        /* Channel 1 */
   enum WaveDuty wave_duty;                   /* Channel 1, 2 */
   uint16_t length;                           /* All channels */
   uint8_t initial_volume;                    /* Channel 1, 2, 4 */
@@ -811,8 +810,6 @@ struct Channel {
   /* Internal state */
   enum Bool dac_enabled;
   uint8_t volume;
-  uint32_t cycles;  /* 0..SOUND_FRAME_CYCLES */
-  uint8_t frame;    /* 0..SOUND_FRAME_COUNT */
   enum Bool status; /* Status bit for NR52 */
 };
 
@@ -822,8 +819,11 @@ struct Sound {
   enum Bool so2_output[SOUND_COUNT];
   enum Bool so1_output[SOUND_COUNT];
   enum Bool enabled;
+  struct Sweep sweep;
   struct Channel channel[CHANNEL_COUNT];
   uint8_t wave_ram[WAVE_RAM_SIZE];
+  uint8_t frame;   /* 0..SOUND_FRAME_COUNT */
+  uint32_t cycles; /* 0..SOUND_FRAME_CYCLES */
 };
 
 struct LCDControl {
@@ -1553,10 +1553,9 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
 
   switch (addr) {
     case APU_NR10_ADDR: {
-      struct Channel* channel = &e->sound.channel[CHANNEL1];
-      result |= READ_REG(channel->sweep.period, NR10_SWEEP_PERIOD) |
-                READ_REG(channel->sweep.direction, NR10_SWEEP_DIRECTION) |
-                READ_REG(channel->sweep.shift, NR10_SWEEP_SHIFT);
+      result |= READ_REG(e->sound.sweep.period, NR10_SWEEP_PERIOD) |
+                READ_REG(e->sound.sweep.direction, NR10_SWEEP_DIRECTION) |
+                READ_REG(e->sound.sweep.shift, NR10_SWEEP_SHIFT);
       break;
     }
     case APU_NR11_ADDR:
@@ -1639,7 +1638,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
                 READ_REG(e->sound.channel[CHANNEL3].status, NR52_SOUND3_ON) |
                 READ_REG(e->sound.channel[CHANNEL2].status, NR52_SOUND2_ON) |
                 READ_REG(e->sound.channel[CHANNEL1].status, NR52_SOUND1_ON);
-      DEBUG_VERBOSE("read nr52: 0x%02x\n", result);
+      DEBUG_VERBOSE("read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
       break;
     default:
       break;
@@ -1932,7 +1931,7 @@ static void write_nrx4_reg(struct Emulator* e,
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
    * enabled. */
-  enum Bool next_frame_is_length = (channel->frame & 1) == 1;
+  enum Bool next_frame_is_length = (e->sound.frame & 1) == 1;
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
@@ -1959,7 +1958,7 @@ static void write_nrx4_reg(struct Emulator* e,
     }
 
     if (channel_index == CHANNEL1) {
-      struct Sweep* sweep = &channel->sweep;
+      struct Sweep* sweep = &e->sound.sweep;
       sweep->enabled = sweep->period || sweep->shift;
       sweep->frequency = channel->frequency;
       sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
@@ -1992,8 +1991,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
         value);
   switch (addr) {
     case APU_NR10_ADDR: {
-      struct Channel* channel = &e->sound.channel[CHANNEL1];
-      struct Sweep* sweep = &channel->sweep;
+      struct Sweep* sweep = &e->sound.sweep;
       enum SweepDirection old_direction = sweep->direction;
       sweep->period = WRITE_REG(value, NR10_SWEEP_PERIOD);
       sweep->direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
@@ -2001,7 +1999,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       if (old_direction == SWEEP_DIRECTION_SUBTRACTION &&
           sweep->direction == SWEEP_DIRECTION_ADDITION &&
           sweep->calculated_subtract) {
-        channel->status = FALSE;
+        e->sound.channel[CHANNEL1].status = FALSE;
       }
       break;
     }
@@ -2084,14 +2082,20 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->sound.so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
+      enum Bool was_enabled = e->sound.enabled;
       enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
-      /* Clear the APU registers when sound is disabled. */
-      int i;
-      for (i = APU_START_ADDR; i < APU_END_ADDR; ++i) {
-        if (i == APU_START_ADDR + APU_NR52_ADDR) {
-          continue;
+      if (was_enabled && !is_enabled) {
+        DEBUG("Powered down APU. Clearing registers.\n");
+        int i;
+        for (i = APU_START_ADDR; i < APU_END_ADDR; ++i) {
+          if (i == APU_START_ADDR + APU_NR52_ADDR) {
+            continue;
+          }
+          write_apu(e, i - APU_START_ADDR, 0);
         }
-        write_apu(e, i - APU_START_ADDR, 0);
+      } else if (!was_enabled && is_enabled) {
+        DEBUG("Powered up APU. Resetting frame and sweep timers.\n");
+        e->sound.frame = 7;
       }
       e->sound.enabled = is_enabled;
       break;
@@ -3661,70 +3665,49 @@ static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_channel_cycles(struct Emulator* e,
+static void update_channel(struct Emulator* e,
                                   struct Channel* channel,
                                   int channel_index,
-                                  uint8_t cycles) {
-  channel->cycles += cycles;
-  if (VALUE_WRAPPED(channel->cycles, SOUND_FRAME_CYCLES)) {
-    channel->frame++;
-    VALUE_WRAPPED(channel->frame, SOUND_FRAME_COUNT);
-    enum Bool update_length = FALSE;
-    enum Bool update_envelope = FALSE;
-    enum Bool update_sweep = FALSE;
-    switch (channel->frame) {
-      case 0: update_length = TRUE; break;
-      case 1: break;
-      case 2: update_length = update_sweep = TRUE; break;
-      case 3: break;
-      case 4: update_length = TRUE; break;
-      case 5: break;
-      case 6: update_length = update_sweep = TRUE; break;
-      case 7: update_envelope = TRUE; break;
+                                  enum Bool update_length,
+                                  enum Bool update_envelope) {
+  if (update_length && channel->length_enabled && channel->length > 0) {
+    if (--channel->length == 0) {
+      channel->status = FALSE;
     }
+  }
 
-    DEBUG("channel %u: %c%c%c frame: %u cycle: %u\n", channel_index,
-          update_length ? 'L' : ' ', update_envelope ? 'E' : ' ',
-          update_sweep ? 'S' : ' ', channel->frame, channel->cycles);
+  // TODO envelope
+  (void)update_envelope;
+}
 
-    if (update_length && channel->length_enabled && channel->length > 0) {
-      if (--channel->length == 0) {
+static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
+  if (!sweep->enabled) {
+    return;
+  }
+
+  uint8_t period = sweep->period;
+  if (--sweep->timer == 0) {
+    if (period) {
+      sweep->timer = period;
+      uint16_t new_frequency = calculate_sweep_frequency(sweep);
+      if (new_frequency > SWEEP_MAX_FREQUENCY) {
+        DEBUG("channel 1: disabling from sweep overflow\n");
         channel->status = FALSE;
-      }
-    }
+      } else {
+        if (sweep->shift) {
+          DEBUG("channel 1: updated frequency=%u\n", new_frequency);
+          sweep->frequency = channel->frequency = new_frequency;
+        }
 
-    if (update_sweep && channel->sweep.enabled) {
-      struct Sweep* sweep = &channel->sweep;
-      uint8_t period = sweep->period;
-      if (--sweep->timer == 0) {
-        if (period) {
-          sweep->timer = period;
-          uint16_t new_frequency = calculate_sweep_frequency(sweep);
-          if (new_frequency > SWEEP_MAX_FREQUENCY) {
-            DEBUG("channel %u: disabling from sweep overflow\n", channel_index);
-            channel->status = FALSE;
-          } else {
-            if (sweep->shift) {
-              DEBUG("channel %u: updated frequency=%u\n", channel_index,
-                    new_frequency);
-              sweep->frequency = channel->frequency = new_frequency;
-            }
-
-            /* Perform another overflow check */
-            if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
-              DEBUG("channel %u: disabling from 2nd sweep overflow\n",
-                    channel_index);
-              channel->status = FALSE;
-            }
-          }
-        } else {
-          sweep->timer = SWEEP_MAX_PERIOD;
+        /* Perform another overflow check */
+        if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+          DEBUG("channel 1: disabling from 2nd sweep overflow\n");
+          channel->status = FALSE;
         }
       }
+    } else {
+      sweep->timer = SWEEP_MAX_PERIOD;
     }
-
-    // TODO envelope
-    (void)update_envelope;
   }
 }
 
@@ -3733,10 +3716,38 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     return;
   }
 
-  int i;
-  for (i = 0; i < CHANNEL_COUNT; ++i) {
-    struct Channel* channel = &e->sound.channel[i];
-    update_channel_cycles(e, channel, i, cycles);
+  enum Bool length = FALSE;
+  enum Bool envelope = FALSE;
+  enum Bool sweep = FALSE;
+  e->sound.cycles += cycles;
+  if (VALUE_WRAPPED(e->sound.cycles, SOUND_FRAME_CYCLES)) {
+    e->sound.frame++;
+    VALUE_WRAPPED(e->sound.frame, SOUND_FRAME_COUNT);
+
+    switch (e->sound.frame) {
+      case 0: length = TRUE; break;
+      case 1: break;
+      case 2: length = sweep = TRUE; break;
+      case 3: break;
+      case 4: length = TRUE; break;
+      case 5: break;
+      case 6: length = sweep = TRUE; break;
+      case 7: envelope = TRUE; break;
+    }
+
+    DEBUG("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
+          length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
+          e->sound.frame, e->sound.cycles);
+
+    int i;
+    for (i = 0; i < CHANNEL_COUNT; ++i) {
+      struct Channel* channel = &e->sound.channel[i];
+      update_channel(e, channel, i, length, envelope);
+    }
+
+    if (sweep) {
+      update_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
+    }
   }
 }
 
