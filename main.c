@@ -52,12 +52,6 @@
     exit(1);                  \
   } while (0)
 
-#define NOT_IMPLEMENTED_NO_EMULATOR(...)  \
-  do {                                    \
-    printf("%s:%d:", __FILE__, __LINE__); \
-    UNREACHABLE(__VA_ARGS__);             \
-  } while (0)
-
 #define NOT_IMPLEMENTED(...)  \
   do {                        \
     s_trace = TRUE;           \
@@ -172,7 +166,7 @@ typedef uint32_t RGBA;
 #define VBLANK_CYCLES 4560        /* LCD STAT mode 1 */
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
-#define DMA_CYCLES 640
+#define DMA_CYCLES 648
 
 #define SOUND_FRAME_COUNT 8
 #define SOUND_FRAME_CYCLES 8192
@@ -1228,9 +1222,8 @@ static enum Result get_memory_map(struct RomInfo* rom_info,
       *out_memory_map = s_mbc1_memory_map;
       break;
     default:
-      NOT_IMPLEMENTED_NO_EMULATOR(
-          "memory map for %s not implemented.\n",
-          get_cartridge_type_string(rom_info->cartridge_type));
+      PRINT_ERROR("memory map for %s not implemented.\n",
+                  get_cartridge_type_string(rom_info->cartridge_type));
       return ERROR;
   }
 
@@ -3779,11 +3772,22 @@ static void handle_interrupts(struct Emulator* e) {
     DEBUG(">> TIMER interrupt\n");
     vector = 0x50;
     mask = INTERRUPT_TIMER_MASK;
+  } else if (interrupts & INTERRUPT_SERIAL_MASK) {
+    DEBUG(">> SERIAL interrupt\n");
+    vector = 0x58;
+    mask = INTERRUPT_SERIAL_MASK;
+  } else if (interrupts & INTERRUPT_JOYPAD_MASK) {
+    DEBUG(">> JOYPAD interrupt\n");
+    vector = 0x60;
+    mask = INTERRUPT_JOYPAD_MASK;
   } else {
+    LOG("handle_interrupts: Unhandled interrupt!\n");
     return;
   }
 
-  if (!e->interrupts.halt_DI) {
+  if (e->interrupts.halt_DI) {
+    LOG("Interrupt fired during HALT w/ disabled interrupts.\n");
+  } else {
     e->interrupts.IF &= ~mask;
     Address new_pc = REG(PC);
     CALL(vector);
