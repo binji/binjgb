@@ -256,8 +256,8 @@ typedef uint32_t RGBA;
 #define INTERRUPT_SERIAL_MASK 0x08
 #define INTERRUPT_JOYPAD_MASK 0x10
 
-#define FROM_REG(X, MACRO) MACRO(X, DECODE)
-#define TO_REG(X, MACRO) MACRO(X, ENCODE)
+#define WRITE_REG(X, MACRO) MACRO(X, DECODE)
+#define READ_REG(X, MACRO) MACRO(X, ENCODE)
 #define BITS_MASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
 #define ENCODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) << (LO))
 #define DECODE(X, HI, LO) (((X) >> (LO)) & BITS_MASK(HI, LO))
@@ -1237,10 +1237,10 @@ static enum Result get_memory_map(struct RomInfo* rom_info,
 }
 
 static uint8_t get_f_reg(struct Registers* reg) {
-  return TO_REG(reg->flags.Z, CPU_FLAG_Z) |
-         TO_REG(reg->flags.N, CPU_FLAG_N) |
-         TO_REG(reg->flags.H, CPU_FLAG_H) |
-         TO_REG(reg->flags.C, CPU_FLAG_C);
+  return READ_REG(reg->flags.Z, CPU_FLAG_Z) |
+         READ_REG(reg->flags.N, CPU_FLAG_N) |
+         READ_REG(reg->flags.H, CPU_FLAG_H) |
+         READ_REG(reg->flags.C, CPU_FLAG_C);
 }
 
 static uint16_t get_af_reg(struct Registers* reg) {
@@ -1249,10 +1249,10 @@ static uint16_t get_af_reg(struct Registers* reg) {
 
 static void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->A = af >> 8;
-  reg->flags.Z = FROM_REG(af, CPU_FLAG_Z);
-  reg->flags.N = FROM_REG(af, CPU_FLAG_N);
-  reg->flags.H = FROM_REG(af, CPU_FLAG_H);
-  reg->flags.C = FROM_REG(af, CPU_FLAG_C);
+  reg->flags.Z = WRITE_REG(af, CPU_FLAG_Z);
+  reg->flags.N = WRITE_REG(af, CPU_FLAG_N);
+  reg->flags.H = WRITE_REG(af, CPU_FLAG_H);
+  reg->flags.C = WRITE_REG(af, CPU_FLAG_C);
 }
 
 static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
@@ -1415,9 +1415,9 @@ static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
     case 1: return obj->x + OBJ_X_OFFSET;
     case 2: return obj->tile;
     case 3:
-      return TO_REG(obj->priority, OBJ_PRIORITY) |
-             TO_REG(obj->yflip, OBJ_YFLIP) | TO_REG(obj->xflip, OBJ_XFLIP) |
-             TO_REG(obj->palette, OBJ_PALETTE);
+      return READ_REG(obj->priority, OBJ_PRIORITY) |
+             READ_REG(obj->yflip, OBJ_YFLIP) | READ_REG(obj->xflip, OBJ_XFLIP) |
+             READ_REG(obj->palette, OBJ_PALETTE);
   }
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
@@ -1429,29 +1429,29 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
       /* TODO is this the correct behavior when both select bits are low? */
       if (e->joypad.joypad_select == JOYPAD_SELECT_BUTTONS ||
           e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= TO_REG(e->joypad.start, JOYP_BUTTON_START) |
-                  TO_REG(e->joypad.select, JOYP_BUTTON_SELECT) |
-                  TO_REG(e->joypad.B, JOYP_BUTTON_B) |
-                  TO_REG(e->joypad.A, JOYP_BUTTON_A);
+        result |= READ_REG(e->joypad.start, JOYP_BUTTON_START) |
+                  READ_REG(e->joypad.select, JOYP_BUTTON_SELECT) |
+                  READ_REG(e->joypad.B, JOYP_BUTTON_B) |
+                  READ_REG(e->joypad.A, JOYP_BUTTON_A);
       }
 
       if (e->joypad.joypad_select == JOYPAD_SELECT_DPAD ||
           e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= TO_REG(e->joypad.down, JOYP_DPAD_DOWN) |
-                  TO_REG(e->joypad.up, JOYP_DPAD_UP) |
-                  TO_REG(e->joypad.left, JOYP_DPAD_LEFT) |
-                  TO_REG(e->joypad.right, JOYP_DPAD_RIGHT);
+        result |= READ_REG(e->joypad.down, JOYP_DPAD_DOWN) |
+                  READ_REG(e->joypad.up, JOYP_DPAD_UP) |
+                  READ_REG(e->joypad.left, JOYP_DPAD_LEFT) |
+                  READ_REG(e->joypad.right, JOYP_DPAD_RIGHT);
       }
 
       /* The bits are low when the buttons are pressed. */
-      return TO_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) | ~result;
+      return READ_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) | ~result;
     }
     case IO_SB_ADDR:
       return 0; /* TODO */
     case IO_SC_ADDR:
-      return TO_REG(e->serial.transfer_start, SC_TRANSFER_START) |
-             TO_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
-             TO_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
+      return READ_REG(e->serial.transfer_start, SC_TRANSFER_START) |
+             READ_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
+             READ_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
       return e->timer.DIV;
     case IO_TIMA_ADDR:
@@ -1459,27 +1459,28 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_TMA_ADDR:
       return e->timer.TMA;
     case IO_TAC_ADDR:
-      return TO_REG(e->timer.on, TAC_TIMER_ON) |
-             TO_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
+      return READ_REG(e->timer.on, TAC_TIMER_ON) |
+             READ_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
     case IO_IF_ADDR:
       return e->interrupts.IF;
     case IO_LCDC_ADDR:
-      return TO_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
-             TO_REG(e->lcd.lcdc.window_tile_map_select,
-                    LCDC_WINDOW_TILE_MAP_SELECT) |
-             TO_REG(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
-             TO_REG(e->lcd.lcdc.bg_tile_data_select, LCDC_BG_TILE_DATA_SELECT) |
-             TO_REG(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
-             TO_REG(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
-             TO_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
-             TO_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
+      return READ_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
+             READ_REG(e->lcd.lcdc.window_tile_map_select,
+                      LCDC_WINDOW_TILE_MAP_SELECT) |
+             READ_REG(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
+             READ_REG(e->lcd.lcdc.bg_tile_data_select,
+                      LCDC_BG_TILE_DATA_SELECT) |
+             READ_REG(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
+             READ_REG(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
+             READ_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
+             READ_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
-      return TO_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
-             TO_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
-             TO_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
-             TO_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
-             TO_REG(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
-             TO_REG(e->lcd.stat.mode, STAT_MODE);
+      return READ_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
+             READ_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
+             READ_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
+             READ_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
+             READ_REG(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
+             READ_REG(e->lcd.stat.mode, STAT_MODE);
     case IO_SCY_ADDR:
       return e->lcd.SCY;
     case IO_SCX_ADDR:
@@ -1491,18 +1492,18 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_DMA_ADDR:
       return INVALID_READ_BYTE; /* Write only. */
     case IO_BGP_ADDR:
-      return TO_REG(e->lcd.bgp.color[3], PALETTE_COLOR3) |
-             TO_REG(e->lcd.bgp.color[2], PALETTE_COLOR2) |
-             TO_REG(e->lcd.bgp.color[1], PALETTE_COLOR1) |
-             TO_REG(e->lcd.bgp.color[0], PALETTE_COLOR0);
+      return READ_REG(e->lcd.bgp.color[3], PALETTE_COLOR3) |
+             READ_REG(e->lcd.bgp.color[2], PALETTE_COLOR2) |
+             READ_REG(e->lcd.bgp.color[1], PALETTE_COLOR1) |
+             READ_REG(e->lcd.bgp.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return TO_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
-             TO_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
-             TO_REG(e->oam.obp[0].color[1], PALETTE_COLOR1);
+      return READ_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
+             READ_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
+             READ_REG(e->oam.obp[0].color[1], PALETTE_COLOR1);
     case IO_OBP1_ADDR:
-      return TO_REG(e->oam.obp[1].color[3], PALETTE_COLOR3) |
-             TO_REG(e->oam.obp[1].color[2], PALETTE_COLOR2) |
-             TO_REG(e->oam.obp[1].color[1], PALETTE_COLOR1);
+      return READ_REG(e->oam.obp[1].color[3], PALETTE_COLOR3) |
+             READ_REG(e->oam.obp[1].color[2], PALETTE_COLOR2) |
+             READ_REG(e->oam.obp[1].color[1], PALETTE_COLOR1);
     case IO_WY_ADDR:
       return e->lcd.WY;
     case IO_WX_ADDR:
@@ -1515,29 +1516,29 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static uint8_t to_nrx1_reg(struct Channel* channel) {
-  return TO_REG(channel->wave_duty, NRX1_WAVE_DUTY);
+static uint8_t read_nrx1_reg(struct Channel* channel) {
+  return READ_REG(channel->wave_duty, NRX1_WAVE_DUTY);
 }
 
-static uint8_t to_nrx2_reg(struct Channel* channel) {
-  return TO_REG(channel->initial_volume, NRX2_INITIAL_VOLUME) |
-         TO_REG(channel->envelope_direction, NRX2_ENVELOPE_DIRECTION) |
-         TO_REG(channel->envelope_count, NRX2_ENVELOPE_COUNT);
+static uint8_t read_nrx2_reg(struct Channel* channel) {
+  return READ_REG(channel->initial_volume, NRX2_INITIAL_VOLUME) |
+         READ_REG(channel->envelope_direction, NRX2_ENVELOPE_DIRECTION) |
+         READ_REG(channel->envelope_count, NRX2_ENVELOPE_COUNT);
 }
 
-static uint8_t to_nrx4_reg(struct Channel* channel) {
-  return TO_REG(channel->length_enabled, NRX4_LENGTH_ENABLED);
+static uint8_t read_nrx4_reg(struct Channel* channel) {
+  return READ_REG(channel->length_enabled, NRX4_LENGTH_ENABLED);
 }
 
 static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   /* APU returns 1 for invalid bits. */
   static uint8_t mask[] = {
-     0x80, 0x3f, 0x00, 0xff, 0xbf, /* NR10-NR14 */
-     0xff, 0x3f, 0x00, 0xff, 0xbf, /* NR20-NR24 */
-     0x7f, 0xff, 0x9f, 0xff, 0xbf, /* NR30-NR34 */
-     0xff, 0xff, 0x00, 0x00, 0xbf, /* NR40-NR44 */
-     0x00, 0x00, 0x70,             /* NR50-NR52 */
-     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff /* Unused. */
+      0x80, 0x3f, 0x00, 0xff, 0xbf,                        /* NR10-NR14 */
+      0xff, 0x3f, 0x00, 0xff, 0xbf,                        /* NR20-NR24 */
+      0x7f, 0xff, 0x9f, 0xff, 0xbf,                        /* NR30-NR34 */
+      0xff, 0xff, 0x00, 0x00, 0xbf,                        /* NR40-NR44 */
+      0x00, 0x00, 0x70,                                    /* NR50-NR52 */
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff /* Unused. */
   };
 
   /* addr is relative to APU_START_ADDR, apu_addr to APU_START_ADDR. */
@@ -1547,91 +1548,91 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case APU_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
-      result |= TO_REG(channel->sweep_time, NR10_SWEEP_TIME) |
-                TO_REG(channel->sweep_direction, NR10_SWEEP_DIRECTION) |
-                TO_REG(channel->sweep_count, NR10_SWEEP_COUNT);
+      result |= READ_REG(channel->sweep_time, NR10_SWEEP_TIME) |
+                READ_REG(channel->sweep_direction, NR10_SWEEP_DIRECTION) |
+                READ_REG(channel->sweep_count, NR10_SWEEP_COUNT);
       break;
     }
     case APU_NR11_ADDR:
-      result |= to_nrx1_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx1_reg(&e->sound.channel[CHANNEL1]);
       break;
     case APU_NR12_ADDR:
-      result |= to_nrx2_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx2_reg(&e->sound.channel[CHANNEL1]);
       break;
     case APU_NR13_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR14_ADDR:
-      result |= to_nrx4_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx4_reg(&e->sound.channel[CHANNEL1]);
       break;
     case APU_NR21_ADDR:
-      result |= to_nrx1_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx1_reg(&e->sound.channel[CHANNEL2]);
       break;
     case APU_NR22_ADDR:
-      result |= to_nrx2_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx2_reg(&e->sound.channel[CHANNEL2]);
       break;
     case APU_NR23_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR24_ADDR:
-      result |= to_nrx4_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx4_reg(&e->sound.channel[CHANNEL2]);
       break;
     case APU_NR30_ADDR:
       result |=
-          TO_REG(e->sound.channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
+          READ_REG(e->sound.channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
       break;
     case APU_NR31_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR32_ADDR:
-      result |= TO_REG(e->sound.channel[CHANNEL3].output_level,
-                       NR32_SELECT_OUTPUT_LEVEL);
+      result |= READ_REG(e->sound.channel[CHANNEL3].output_level,
+                         NR32_SELECT_OUTPUT_LEVEL);
       break;
     case APU_NR33_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR34_ADDR:
-      result |= to_nrx4_reg(&e->sound.channel[CHANNEL3]);
+      result |= read_nrx4_reg(&e->sound.channel[CHANNEL3]);
       break;
     case APU_NR41_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR42_ADDR:
-      result |= to_nrx2_reg(&e->sound.channel[CHANNEL4]);
+      result |= read_nrx2_reg(&e->sound.channel[CHANNEL4]);
       break;
     case APU_NR43_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL4];
       result |=
-          TO_REG(channel->shift_clock_frequency, NR43_SHIFT_CLOCK_FREQUENCY) |
-          TO_REG(channel->counter_step, NR43_COUNTER_STEP) |
-          TO_REG(channel->divide_ratio, NR43_DIVIDE_RATIO);
+          READ_REG(channel->shift_clock_frequency, NR43_SHIFT_CLOCK_FREQUENCY) |
+          READ_REG(channel->counter_step, NR43_COUNTER_STEP) |
+          READ_REG(channel->divide_ratio, NR43_DIVIDE_RATIO);
       break;
     }
     case APU_NR44_ADDR:
-      result |= to_nrx4_reg(&e->sound.channel[CHANNEL4]);
+      result |= read_nrx4_reg(&e->sound.channel[CHANNEL4]);
       break;
     case APU_NR50_ADDR:
-      result |= TO_REG(e->sound.so2_output[VIN], NR50_VIN_SO2) |
-                TO_REG(e->sound.so2_volume, NR50_SO2_VOLUME) |
-                TO_REG(e->sound.so1_output[VIN], NR50_VIN_SO1) |
-                TO_REG(e->sound.so1_volume, NR50_SO1_VOLUME);
+      result |= READ_REG(e->sound.so2_output[VIN], NR50_VIN_SO2) |
+                READ_REG(e->sound.so2_volume, NR50_SO2_VOLUME) |
+                READ_REG(e->sound.so1_output[VIN], NR50_VIN_SO1) |
+                READ_REG(e->sound.so1_volume, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      result |= TO_REG(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
-                TO_REG(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
-                TO_REG(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
-                TO_REG(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
-                TO_REG(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
-                TO_REG(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
-                TO_REG(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
-                TO_REG(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
+      result |= READ_REG(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
+                READ_REG(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
+                READ_REG(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
+                READ_REG(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
+                READ_REG(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
+                READ_REG(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
+                READ_REG(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
+                READ_REG(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR:
-      result |= TO_REG(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
-                TO_REG(e->sound.channel[CHANNEL4].status, NR52_SOUND4_ON) |
-                TO_REG(e->sound.channel[CHANNEL3].status, NR52_SOUND3_ON) |
-                TO_REG(e->sound.channel[CHANNEL2].status, NR52_SOUND2_ON) |
-                TO_REG(e->sound.channel[CHANNEL1].status, NR52_SOUND1_ON);
+      result |= READ_REG(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
+                READ_REG(e->sound.channel[CHANNEL4].status, NR52_SOUND4_ON) |
+                READ_REG(e->sound.channel[CHANNEL3].status, NR52_SOUND3_ON) |
+                READ_REG(e->sound.channel[CHANNEL2].status, NR52_SOUND2_ON) |
+                READ_REG(e->sound.channel[CHANNEL1].status, NR52_SOUND1_ON);
       DEBUG_VERBOSE("read nr52: 0x%02x\n", result);
       break;
     default:
@@ -1761,10 +1762,10 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       obj->tile = value;
       break;
     case 3:
-      obj->priority = FROM_REG(value, OBJ_PRIORITY);
-      obj->yflip = FROM_REG(value, OBJ_YFLIP);
-      obj->xflip = FROM_REG(value, OBJ_XFLIP);
-      obj->palette = FROM_REG(value, OBJ_PALETTE);
+      obj->priority = WRITE_REG(value, OBJ_PRIORITY);
+      obj->yflip = WRITE_REG(value, OBJ_YFLIP);
+      obj->xflip = WRITE_REG(value, OBJ_XFLIP);
+      obj->palette = WRITE_REG(value, OBJ_PALETTE);
       break;
   }
 }
@@ -1773,14 +1774,14 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG("write_io(0x%04x [%s], %u)\n", addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
-      e->joypad.joypad_select = FROM_REG(value, JOYP_JOYPAD_SELECT);
+      e->joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
       break;
     case IO_SB_ADDR: /* TODO */
       break;
     case IO_SC_ADDR:
-      e->serial.transfer_start = FROM_REG(value, SC_TRANSFER_START);
-      e->serial.clock_speed = FROM_REG(value, SC_CLOCK_SPEED);
-      e->serial.shift_clock = FROM_REG(value, SC_SHIFT_CLOCK);
+      e->serial.transfer_start = WRITE_REG(value, SC_TRANSFER_START);
+      e->serial.clock_speed = WRITE_REG(value, SC_CLOCK_SPEED);
+      e->serial.shift_clock = WRITE_REG(value, SC_SHIFT_CLOCK);
       break;
     case IO_DIV_ADDR:
       e->timer.DIV = 0;
@@ -1792,29 +1793,30 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->timer.TMA = value;
       break;
     case IO_TAC_ADDR:
-      e->timer.input_clock_select = FROM_REG(value, TAC_INPUT_CLOCK_SELECT);
-      e->timer.on = FROM_REG(value, TAC_TIMER_ON);
+      e->timer.input_clock_select = WRITE_REG(value, TAC_INPUT_CLOCK_SELECT);
+      e->timer.on = WRITE_REG(value, TAC_TIMER_ON);
       break;
     case IO_IF_ADDR:
       e->interrupts.IF = value;
       break;
     case IO_LCDC_ADDR:
-      e->lcd.lcdc.display = FROM_REG(value, LCDC_DISPLAY);
+      e->lcd.lcdc.display = WRITE_REG(value, LCDC_DISPLAY);
       e->lcd.lcdc.window_tile_map_select =
-          FROM_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
-      e->lcd.lcdc.window_display = FROM_REG(value, LCDC_WINDOW_DISPLAY);
+          WRITE_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
+      e->lcd.lcdc.window_display = WRITE_REG(value, LCDC_WINDOW_DISPLAY);
       e->lcd.lcdc.bg_tile_data_select =
-          FROM_REG(value, LCDC_BG_TILE_DATA_SELECT);
-      e->lcd.lcdc.bg_tile_map_select = FROM_REG(value, LCDC_BG_TILE_MAP_SELECT);
-      e->lcd.lcdc.obj_size = FROM_REG(value, LCDC_OBJ_SIZE);
-      e->lcd.lcdc.obj_display = FROM_REG(value, LCDC_OBJ_DISPLAY);
-      e->lcd.lcdc.bg_display = FROM_REG(value, LCDC_BG_DISPLAY);
+          WRITE_REG(value, LCDC_BG_TILE_DATA_SELECT);
+      e->lcd.lcdc.bg_tile_map_select =
+          WRITE_REG(value, LCDC_BG_TILE_MAP_SELECT);
+      e->lcd.lcdc.obj_size = WRITE_REG(value, LCDC_OBJ_SIZE);
+      e->lcd.lcdc.obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
+      e->lcd.lcdc.bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
       break;
     case IO_STAT_ADDR:
-      e->lcd.stat.y_compare_intr = FROM_REG(value, STAT_YCOMPARE_INTR);
-      e->lcd.stat.using_oam_intr = FROM_REG(value, STAT_USING_OAM_INTR);
-      e->lcd.stat.vblank_intr = FROM_REG(value, STAT_VBLANK_INTR);
-      e->lcd.stat.hblank_intr = FROM_REG(value, STAT_HBLANK_INTR);
+      e->lcd.stat.y_compare_intr = WRITE_REG(value, STAT_YCOMPARE_INTR);
+      e->lcd.stat.using_oam_intr = WRITE_REG(value, STAT_USING_OAM_INTR);
+      e->lcd.stat.vblank_intr = WRITE_REG(value, STAT_VBLANK_INTR);
+      e->lcd.stat.hblank_intr = WRITE_REG(value, STAT_HBLANK_INTR);
       break;
     case IO_SCY_ADDR:
       e->lcd.SCY = value;
@@ -1834,20 +1836,20 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
-      e->lcd.bgp.color[3] = FROM_REG(value, PALETTE_COLOR3);
-      e->lcd.bgp.color[2] = FROM_REG(value, PALETTE_COLOR2);
-      e->lcd.bgp.color[1] = FROM_REG(value, PALETTE_COLOR1);
-      e->lcd.bgp.color[0] = FROM_REG(value, PALETTE_COLOR0);
+      e->lcd.bgp.color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->lcd.bgp.color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->lcd.bgp.color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->lcd.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
-      e->oam.obp[0].color[3] = FROM_REG(value, PALETTE_COLOR3);
-      e->oam.obp[0].color[2] = FROM_REG(value, PALETTE_COLOR2);
-      e->oam.obp[0].color[1] = FROM_REG(value, PALETTE_COLOR1);
+      e->oam.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->oam.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->oam.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
       break;
     case IO_OBP1_ADDR:
-      e->oam.obp[1].color[3] = FROM_REG(value, PALETTE_COLOR3);
-      e->oam.obp[1].color[2] = FROM_REG(value, PALETTE_COLOR2);
-      e->oam.obp[1].color[1] = FROM_REG(value, PALETTE_COLOR1);
+      e->oam.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->oam.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->oam.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
       break;
     case IO_WY_ADDR:
       e->lcd.WY = value;
@@ -1864,38 +1866,38 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-static void from_nrx1_reg(struct Channel* channel, uint8_t value) {
-  channel->wave_duty = FROM_REG(value, NRX1_WAVE_DUTY);
-  channel->length = NRX1_MAX_LENGTH - FROM_REG(value, NRX1_LENGTH);
-  DEBUG_VERBOSE("from_nrx1_reg(0x%02x) length=%u\n", value, channel->length);
+static void write_nrx1_reg(struct Channel* channel, uint8_t value) {
+  channel->wave_duty = WRITE_REG(value, NRX1_WAVE_DUTY);
+  channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
+  DEBUG_VERBOSE("write_nrx1_reg(0x%02x) length=%u\n", value, channel->length);
 }
 
-static void from_nrx2_reg(struct Channel* channel, uint8_t value) {
-  channel->initial_volume = FROM_REG(value, NRX2_INITIAL_VOLUME);
-  channel->dac_enabled = FROM_REG(value, NRX2_DAC_ENABLED) != 0;
+static void write_nrx2_reg(struct Channel* channel, uint8_t value) {
+  channel->initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
+  channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    DEBUG_VERBOSE("from_nrx2_reg(0x%02x) dac_enabled = false\n", value);
+    DEBUG_VERBOSE("write_nrx2_reg(0x%02x) dac_enabled = false\n", value);
   }
-  channel->envelope_direction = FROM_REG(value, NRX2_ENVELOPE_DIRECTION);
-  channel->envelope_count = FROM_REG(value, NRX2_ENVELOPE_COUNT);
-  DEBUG_VERBOSE("from_nrx2_reg(0x%02x) initial_volume=%u\n", value,
+  channel->envelope_direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
+  channel->envelope_count = WRITE_REG(value, NRX2_ENVELOPE_COUNT);
+  DEBUG_VERBOSE("write_nrx2_reg(0x%02x) initial_volume=%u\n", value,
                 channel->initial_volume);
 }
 
-static void from_nrx3_reg(struct Channel* channel, uint8_t value) {
+static void write_nrx3_reg(struct Channel* channel, uint8_t value) {
   channel->frequency &= ~0xff;
   channel->frequency |= value;
 }
 
-static void from_nrx4_reg(struct Channel* channel,
+static void write_nrx4_reg(struct Channel* channel,
                            uint8_t value,
                            uint16_t max_length) {
-  enum Bool trigger = FROM_REG(value, NRX4_INITIAL);
+  enum Bool trigger = WRITE_REG(value, NRX4_INITIAL);
   enum Bool was_length_enabled = channel->length_enabled;
-  channel->length_enabled = FROM_REG(value, NRX4_LENGTH_ENABLED);
+  channel->length_enabled = WRITE_REG(value, NRX4_LENGTH_ENABLED);
   channel->frequency &= 0xff;
-  channel->frequency |= FROM_REG(value, NRX4_FREQUENCY_HI) << 8;
+  channel->frequency |= WRITE_REG(value, NRX4_FREQUENCY_HI) << 8;
 
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
@@ -1904,10 +1906,10 @@ static void from_nrx4_reg(struct Channel* channel,
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG("from_nrx4_reg(0x%02x) extra length clock = %u\n", value,
+    DEBUG("write_nrx4_reg(0x%02x) extra length clock = %u\n", value,
           channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG("from_nrx4_reg(0x%02x) disabling channel.\n", value);
+      DEBUG("write_nrx4_reg(0x%02x) disabling channel.\n", value);
       channel->status = FALSE;
     }
   }
@@ -1918,7 +1920,7 @@ static void from_nrx4_reg(struct Channel* channel,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG("from_nrx4_reg(0x%02x) trigger, new length = %u\n", value,
+      DEBUG("write_nrx4_reg(0x%02x) trigger, new length = %u\n", value,
             channel->length);
     }
     if (channel->dac_enabled) {
@@ -1926,7 +1928,7 @@ static void from_nrx4_reg(struct Channel* channel,
     }
   }
 
-  DEBUG_VERBOSE("from_nrx4_reg(0x%02x) trigger=%u length_enabled=%u\n", value,
+  DEBUG_VERBOSE("write_nrx4_reg(0x%02x) trigger=%u length_enabled=%u\n", value,
                 trigger, channel->length_enabled);
 }
 
@@ -1940,38 +1942,38 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   switch (addr) {
     case APU_NR10_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL1];
-      channel->sweep_time = FROM_REG(value, NR10_SWEEP_TIME);
-      channel->sweep_direction = FROM_REG(value, NR10_SWEEP_DIRECTION);
-      channel->sweep_count = FROM_REG(value, NR10_SWEEP_COUNT);
+      channel->sweep_time = WRITE_REG(value, NR10_SWEEP_TIME);
+      channel->sweep_direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
+      channel->sweep_count = WRITE_REG(value, NR10_SWEEP_COUNT);
       break;
     }
     case APU_NR11_ADDR:
-      from_nrx1_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx1_reg(&e->sound.channel[CHANNEL1], value);
       break;
     case APU_NR12_ADDR:
-      from_nrx2_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx2_reg(&e->sound.channel[CHANNEL1], value);
       break;
     case APU_NR13_ADDR:
-      from_nrx3_reg(&e->sound.channel[CHANNEL1], value);
+      write_nrx3_reg(&e->sound.channel[CHANNEL1], value);
       break;
     case APU_NR14_ADDR:
-      from_nrx4_reg(&e->sound.channel[CHANNEL1], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(&e->sound.channel[CHANNEL1], value, NRX1_MAX_LENGTH);
       break;
     case APU_NR21_ADDR:
-      from_nrx1_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx1_reg(&e->sound.channel[CHANNEL2], value);
       break;
     case APU_NR22_ADDR:
-      from_nrx2_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx2_reg(&e->sound.channel[CHANNEL2], value);
       break;
     case APU_NR23_ADDR:
-      from_nrx3_reg(&e->sound.channel[CHANNEL2], value);
+      write_nrx3_reg(&e->sound.channel[CHANNEL2], value);
       break;
     case APU_NR24_ADDR:
-      from_nrx4_reg(&e->sound.channel[CHANNEL2], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(&e->sound.channel[CHANNEL2], value, NRX1_MAX_LENGTH);
       break;
     case APU_NR30_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL3];
-      channel->dac_enabled = FROM_REG(value, NR30_DAC_ENABLED);
+      channel->dac_enabled = WRITE_REG(value, NR30_DAC_ENABLED);
       if (!channel->dac_enabled) {
         channel->status = FALSE;
       }
@@ -1982,49 +1984,49 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case APU_NR32_ADDR:
       e->sound.channel[CHANNEL3].output_level =
-          FROM_REG(value, NR32_SELECT_OUTPUT_LEVEL);
+          WRITE_REG(value, NR32_SELECT_OUTPUT_LEVEL);
       break;
     case APU_NR33_ADDR:
-      from_nrx3_reg(&e->sound.channel[CHANNEL3], value);
+      write_nrx3_reg(&e->sound.channel[CHANNEL3], value);
       break;
     case APU_NR34_ADDR:
-      from_nrx4_reg(&e->sound.channel[CHANNEL3], value, NR31_MAX_LENGTH);
+      write_nrx4_reg(&e->sound.channel[CHANNEL3], value, NR31_MAX_LENGTH);
       break;
     case APU_NR41_ADDR:
-      from_nrx1_reg(&e->sound.channel[CHANNEL4], value);
+      write_nrx1_reg(&e->sound.channel[CHANNEL4], value);
       break;
     case APU_NR42_ADDR:
-      from_nrx2_reg(&e->sound.channel[CHANNEL4], value);
+      write_nrx2_reg(&e->sound.channel[CHANNEL4], value);
       break;
     case APU_NR43_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL4];
       channel->shift_clock_frequency =
-          FROM_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
-      channel->counter_step = FROM_REG(value, NR43_COUNTER_STEP);
-      channel->divide_ratio = FROM_REG(value, NR43_DIVIDE_RATIO);
+          WRITE_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
+      channel->counter_step = WRITE_REG(value, NR43_COUNTER_STEP);
+      channel->divide_ratio = WRITE_REG(value, NR43_DIVIDE_RATIO);
       break;
     }
     case APU_NR44_ADDR:
-      from_nrx4_reg(&e->sound.channel[CHANNEL4], value, NRX1_MAX_LENGTH);
+      write_nrx4_reg(&e->sound.channel[CHANNEL4], value, NRX1_MAX_LENGTH);
       break;
     case APU_NR50_ADDR:
-      e->sound.so2_output[VIN] = FROM_REG(value, NR50_VIN_SO2);
-      e->sound.so2_volume = FROM_REG(value, NR50_SO2_VOLUME);
-      e->sound.so1_output[VIN] = FROM_REG(value, NR50_VIN_SO1);
-      e->sound.so1_volume = FROM_REG(value, NR50_SO1_VOLUME);
+      e->sound.so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
+      e->sound.so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
+      e->sound.so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
+      e->sound.so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      e->sound.so2_output[SOUND4] = FROM_REG(value, NR51_SOUND4_SO2);
-      e->sound.so2_output[SOUND3] = FROM_REG(value, NR51_SOUND3_SO2);
-      e->sound.so2_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO2);
-      e->sound.so2_output[SOUND1] = FROM_REG(value, NR51_SOUND1_SO2);
-      e->sound.so1_output[SOUND4] = FROM_REG(value, NR51_SOUND4_SO1);
-      e->sound.so1_output[SOUND3] = FROM_REG(value, NR51_SOUND3_SO1);
-      e->sound.so1_output[SOUND2] = FROM_REG(value, NR51_SOUND2_SO1);
-      e->sound.so1_output[SOUND1] = FROM_REG(value, NR51_SOUND1_SO1);
+      e->sound.so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
+      e->sound.so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
+      e->sound.so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
+      e->sound.so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
+      e->sound.so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
+      e->sound.so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
+      e->sound.so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
+      e->sound.so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
-      enum Bool is_enabled = FROM_REG(value, NR52_ALL_SOUND_ENABLED);
+      enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
       /* Clear the APU registers when sound is disabled. */
       int i;
       for (i = APU_START_ADDR; i < APU_END_ADDR; ++i) {
