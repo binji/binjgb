@@ -108,7 +108,7 @@ typedef uint32_t RGBA;
 #define VIDEO_RAM_SIZE 8192
 #define WORK_RAM_SIZE 32768
 #define EXTERNAL_RAM_SIZE 32768
-#define WAVE_RAM_SIZE 32
+#define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
 
 #define FRAME_LIMITER 1
@@ -153,6 +153,8 @@ typedef uint32_t RGBA;
 #define NR31_MAX_LENGTH 256
 #define SWEEP_MAX_PERIOD 8
 #define SWEEP_MAX_FREQUENCY 2047
+#define WAVE_MAX_FREQUENCY 2047
+#define WAVE_SAMPLE_COUNT 32
 
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
@@ -300,7 +302,7 @@ typedef uint32_t RGBA;
 
 #define NR30_DAC_ENABLED(X, OP) BIT(X, OP, 7)
 
-#define NR32_SELECT_OUTPUT_LEVEL(X, OP) BITS(X, OP, 6, 5)
+#define NR32_SELECT_WAVE_VOLUME(X, OP) BITS(X, OP, 6, 5)
 
 #define NR43_SHIFT_CLOCK_FREQUENCY(X, OP) BITS(X, OP, 7, 4)
 #define NR43_COUNTER_STEP(X, OP) BIT(X, OP, 3)
@@ -580,11 +582,11 @@ enum WaveDuty {
   WAVE_DUTY_75 = 3,
 };
 
-enum OutputLevel {
-  OUTPUT_LEVEL_MUTE = 0,
-  OUTPUT_LEVEL_100 = 1,
-  OUTPUT_LEVEL_50 = 2,
-  OUTPUT_LEVEL_25 = 3,
+enum WaveVolume {
+  WAVE_VOLUME_MUTE = 0,
+  WAVE_VOLUME_100 = 1,
+  WAVE_VOLUME_50 = 2,
+  WAVE_VOLUME_25 = 3,
 };
 
 enum CounterStep {
@@ -795,6 +797,18 @@ struct Sweep {
   enum Bool calculated_subtract;
 };
 
+struct Wave {
+  enum WaveVolume volume; /* Channel 3 */
+  uint8_t ram[WAVE_RAM_SIZE];
+
+  /* Internal state */
+  uint8_t sample;
+  uint32_t period;      /* Calculated from the frequency. */
+  uint8_t position;     /* 0..31 */
+  uint32_t cycles;      /* 0..period */
+  enum Bool new_sample; /* Sample read on this clock. */
+};
+
 struct Channel {
   enum WaveDuty wave_duty;                   /* Channel 1, 2 */
   uint16_t length;                           /* All channels */
@@ -803,7 +817,6 @@ struct Channel {
   uint8_t envelope_count;                    /* Channel 1, 2, 4 */
   uint16_t frequency;                        /* Channel 1, 2, 3 */
   enum Bool length_enabled;                  /* All channels */
-  enum OutputLevel output_level;             /* Channel 3 */
   uint8_t shift_clock_frequency;             /* Channel 4 */
   enum CounterStep counter_step;             /* Channel 4 */
   uint8_t divide_ratio;                      /* Channel 4 */
@@ -821,8 +834,8 @@ struct Sound {
   enum Bool so1_output[SOUND_COUNT];
   enum Bool enabled;
   struct Sweep sweep;
+  struct Wave wave;
   struct Channel channel[CHANNEL_COUNT];
-  uint8_t wave_ram[WAVE_RAM_SIZE];
   uint8_t frame;   /* 0..SOUND_FRAME_COUNT */
   uint32_t cycles; /* 0..SOUND_FRAME_CYCLES */
 };
@@ -1592,8 +1605,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR32_ADDR:
-      result |= READ_REG(e->sound.channel[CHANNEL3].output_level,
-                         NR32_SELECT_OUTPUT_LEVEL);
+      result |= READ_REG(e->sound.wave.volume, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
       result |= INVALID_READ_BYTE;
@@ -1654,6 +1666,29 @@ static enum Bool is_dma_access_ok(struct Emulator* e,
   return !e->dma.active || e->dma.copying || pair.type == MEMORY_MAP_HIGH_RAM;
 }
 
+static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
+  struct Wave* wave = &e->sound.wave;
+  if (e->sound.channel[CHANNEL3].status) {
+    /* If the wave channel is playing, the byte is read from the sample
+     * position. Each sample is 4-bits, so shift right by one to get the byte
+     * position. */
+    uint8_t result;
+    if (wave->new_sample) {
+      result = wave->ram[wave->position >> 1];
+      DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n", addr,
+            result, wave->cycles);
+    } else {
+      result = INVALID_READ_BYTE;
+      DEBUG(
+          "read_wave_ram(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
+          addr, wave->cycles);
+    }
+    return result;
+  } else {
+    return wave->ram[addr];
+  }
+}
+
 static uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
@@ -1686,7 +1721,7 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
     case MEMORY_MAP_APU:
       return read_apu(e, pair.addr);
     case MEMORY_MAP_WAVE_RAM:
-      return e->sound.wave_ram[pair.addr];
+      return read_wave_ram(e, pair.addr);
     case MEMORY_MAP_HIGH_RAM:
       return e->hram[pair.addr];
   }
@@ -1921,10 +1956,11 @@ static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
   }
 }
 
-static void write_nrx4_reg(struct Emulator* e,
-                           int channel_index,
-                           uint8_t value,
-                           uint16_t max_length) {
+/* Returns TRUE if this channel was triggered. */
+static enum Bool write_nrx4_reg(struct Emulator* e,
+                                int channel_index,
+                                uint8_t value,
+                                uint16_t max_length) {
   struct Channel* channel = &e->sound.channel[channel_index];
   enum Bool trigger = WRITE_REG(value, NRX4_INITIAL);
   enum Bool was_length_enabled = channel->length_enabled;
@@ -1960,29 +1996,39 @@ static void write_nrx4_reg(struct Emulator* e,
     if (channel->dac_enabled) {
       channel->status = TRUE;
     }
-
-    if (channel_index == CHANNEL1) {
-      struct Sweep* sweep = &e->sound.sweep;
-      sweep->enabled = sweep->period || sweep->shift;
-      sweep->frequency = channel->frequency;
-      sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
-      sweep->calculated_subtract = FALSE;
-      if (sweep->shift &&
-          calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
-        channel->status = FALSE;
-        DEBUG(
-            "write_nrx4_reg(%u, 0x%02x) disabling, sweep overflow on trigger\n",
-            channel_index, value);
-      } else {
-        DEBUG(
-            "write_nrx4_reg(%u, 0x%02x) sweep frequency=%u\n",
-            channel_index, value, sweep->frequency);
-      }
-    }
   }
 
   DEBUG_VERBOSE("write_nrx4_reg(%u, 0x%02x) trigger=%u length_enabled=%u\n",
                 channel_index, value, trigger, channel->length_enabled);
+  return trigger;
+}
+
+static void trigger_nr14_reg(struct Emulator* e) {
+  struct Channel* channel = &e->sound.channel[CHANNEL1];
+  struct Sweep* sweep = &e->sound.sweep;
+  sweep->enabled = sweep->period || sweep->shift;
+  sweep->frequency = channel->frequency;
+  sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
+  sweep->calculated_subtract = FALSE;
+  if (sweep->shift && calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+    channel->status = FALSE;
+    DEBUG("trigger_nr11_reg: disabling, sweep overflow.\n");
+  } else {
+    DEBUG("trigger_nr11_reg: sweep frequency=%u\n", sweep->frequency);
+  }
+}
+
+static void trigger_nr34_reg(struct Emulator* e) {
+  e->sound.wave.position = 0;
+  e->sound.wave.cycles = e->sound.wave.period;
+}
+
+static void write_wave_period(struct Emulator* e) {
+  struct Wave* wave = &e->sound.wave;
+  uint16_t frequency = e->sound.channel[CHANNEL3].frequency;
+  wave->period = ((WAVE_MAX_FREQUENCY + 1) - frequency) * 2;
+  DEBUG("write_wave_period: freq: %u cycle: %u period: %u\n", frequency,
+        wave->cycles, wave->period);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -2026,7 +2072,9 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_nrx3_reg(e, CHANNEL1, value);
       break;
     case APU_NR14_ADDR:
-      write_nrx4_reg(e, CHANNEL1, value, NRX1_MAX_LENGTH);
+      if (write_nrx4_reg(e, CHANNEL1, value, NRX1_MAX_LENGTH)) {
+        trigger_nr14_reg(e);
+      }
       break;
     case APU_NR21_ADDR:
       write_nrx1_reg(e, CHANNEL2, value);
@@ -2052,14 +2100,17 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->sound.channel[CHANNEL3].length = NR31_MAX_LENGTH - value;
       break;
     case APU_NR32_ADDR:
-      e->sound.channel[CHANNEL3].output_level =
-          WRITE_REG(value, NR32_SELECT_OUTPUT_LEVEL);
+      e->sound.wave.volume = WRITE_REG(value, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
       write_nrx3_reg(e, CHANNEL3, value);
+      write_wave_period(e);
       break;
     case APU_NR34_ADDR:
-      write_nrx4_reg(e, CHANNEL3, value, NR31_MAX_LENGTH);
+      if (write_nrx4_reg(e, CHANNEL3, value, NR31_MAX_LENGTH)) {
+        write_wave_period(e);
+        trigger_nr34_reg(e);
+      }
       break;
     case APU_NR41_ADDR:
       write_nrx1_reg(e, CHANNEL4, value);
@@ -2119,6 +2170,27 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
+static void write_wave_ram(struct Emulator* e,
+                           MaskedAddress addr,
+                           uint8_t value) {
+  struct Wave* wave = &e->sound.wave;
+  if (e->sound.channel[CHANNEL3].status) {
+    /* If the wave channel is playing, the byte is written to the sample
+     * position. Each sample is 4-bits, so shift right by one to get the byte
+     * position. */
+    if (e->sound.wave.new_sample) {
+      e->sound.wave.ram[wave->position >> 1] = value;
+      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
+    } else {
+      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing, ignored.\n", addr,
+            value);
+    }
+  } else {
+    e->sound.wave.ram[addr] = value;
+    DEBUG("write_wave_ram(0x%02x, 0x%02x)\n", addr, value);
+  }
+}
+
 static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
@@ -2157,7 +2229,7 @@ static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       write_apu(e, pair.addr, value);
       break;
     case MEMORY_MAP_WAVE_RAM:
-      e->sound.wave_ram[pair.addr] = value;
+      write_wave_ram(e, pair.addr, value);
       break;
     case MEMORY_MAP_HIGH_RAM:
       DEBUG_VERBOSE("write_hram(0x%04x, 0x%02x)\n", addr, value);
@@ -2737,7 +2809,7 @@ static void print_registers(struct Registers* reg) {
 static void print_emulator_info(struct Emulator* e) {
   if (s_trace) {
     print_registers(&e->reg);
-    printf(" | ");
+    printf(" (cy: %u) | ", e->cycles);
     print_instruction(e, e->reg.PC);
     printf("\n");
     if (s_trace_counter > 0) {
@@ -3727,6 +3799,23 @@ static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
   }
 }
 
+static void update_wave(struct Emulator* e, uint8_t cycles) {
+  struct Wave* wave = &e->sound.wave;
+  while (wave->cycles < cycles) {
+    wave->new_sample = FALSE;
+    wave->cycles += wave->period;
+    wave->position++;
+    VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
+    if ((wave->position & 1) == 1) {
+      wave->sample = wave->ram[wave->position >> 1];
+      wave->new_sample = TRUE;
+    }
+    DEBUG("update_wave: position: %u%c = %u (cy: %u)\n", wave->position,
+          wave->new_sample ? '!' : ' ', wave->sample, e->cycles);
+  }
+  wave->cycles -= cycles;
+}
+
 static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
   if (!e->sound.enabled) {
     return;
@@ -3765,6 +3854,8 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
       update_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
     }
   }
+
+  update_wave(e, cycles);
 }
 
 static void update_cycles(struct Emulator* e, uint8_t cycles) {
