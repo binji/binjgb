@@ -770,7 +770,10 @@ struct Interrupts {
   enum Bool IME;  /* Interrupt Master Enable */
   uint8_t IE;     /* Interrupt Enable */
   uint8_t IF;     /* Interrupt Request */
-  enum Bool halt; /* Halted, waiting for an interrupt. */
+
+  /* Internal state */
+  enum Bool enable;  /* Set after EI instruction. This delays updating IME. */
+  enum Bool halt;    /* Halted, waiting for an interrupt. */
   enum Bool halt_DI; /* Halted w/ disabled interrupts. */
 };
 
@@ -2913,6 +2916,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
+#define INTR(m) e->interrupts.m
 #define CYCLES(X) update_cycles(e, X)
 
 #define RA REG(A)
@@ -3016,10 +3020,13 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define DEC_RR(RR) REG(RR)--
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 
-#define HALT                                        \
-  do {                                              \
-    e->interrupts.halt = TRUE;                      \
-    e->interrupts.halt_DI = e->interrupts.IME == 0; \
+#define DI INTR(IME) = INTR(enable) = FALSE;
+#define EI INTR(enable) = TRUE;
+
+#define HALT                        \
+  do {                              \
+    INTR(halt) = TRUE;              \
+    INTR(halt_DI) = INTR(IME) == 0; \
   } while (0)
 
 #define INC u++
@@ -3068,7 +3075,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 
 #define RET new_pc = READ16(RSP); RSP += 2
 #define RET_F(COND) if (COND) { RET; CYCLES(12); }
-#define RETI e->interrupts.IME = TRUE; RET
+#define RETI INTR(enable) = FALSE; INTR(IME) = TRUE; RET
 
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
 #define RL_FLAGS FZ_EQ0(u); FN = FH = 0
@@ -3144,17 +3151,22 @@ static void execute_instruction(struct Emulator* e) {
   uint8_t opcode;
   Address new_pc;
 
-  if (e->interrupts.halt) {
+  if (INTR(enable)) {
+    INTR(enable) = FALSE;
+    INTR(IME) = TRUE;
+  }
+
+  if (INTR(halt)) {
     update_cycles(e, 4);
     return;
   }
 
   opcode = read_u8(e, e->reg.PC);
-  if (e->interrupts.halt_DI) {
+  if (INTR(halt_DI)) {
     /* HALT bug. When interrupts are disabled during a HALT, the following byte
      * will be duplicated when decoding. */
     e->reg.PC--;
-    e->interrupts.halt_DI = FALSE;
+    INTR(halt_DI) = FALSE;
   }
   new_pc = e->reg.PC + s_opcode_bytes[opcode];
 
@@ -3665,7 +3677,7 @@ static void execute_instruction(struct Emulator* e) {
       case 0xf0: LD_R_MFF00_N(A); break;
       case 0xf1: POP_AF; break;
       case 0xf2: LD_R_MFF00_R(A, C); break;
-      case 0xf3: e->interrupts.IME = FALSE; break;
+      case 0xf3: DI; break;
       case 0xf4: INVALID; break;
       case 0xf5: PUSH_AF; break;
       case 0xf6: OR_N; break;
@@ -3673,7 +3685,7 @@ static void execute_instruction(struct Emulator* e) {
       case 0xf8: LD_HL_SP_N; break;
       case 0xf9: LD_RR_RR(SP, HL); break;
       case 0xfa: LD_R_MN(A); break;
-      case 0xfb: e->interrupts.IME = TRUE; break;
+      case 0xfb: EI; break;
       case 0xfc: INVALID; break;
       case 0xfd: INVALID; break;
       case 0xfe: CP_N; break;
