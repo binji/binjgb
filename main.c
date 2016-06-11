@@ -2820,12 +2820,14 @@ static void print_emulator_info(struct Emulator* e) {
   }
 }
 
+static void update_cycles(struct Emulator*, uint8_t cycles);
+
 static uint8_t s_opcode_cycles[] = {
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
     /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  8,  4,
     /* 10 */  0, 12,  8,  8,  4,  4,  8,  4, 12,  8,  8,  8,  4,  4,  8,  4,
     /* 20 */  8, 12,  8,  8,  4,  4,  8,  4,  8,  8,  8,  8,  4,  4,  8,  4,
-    /* 30 */  8, 12,  8,  8, 12, 12, 12,  4,  8,  8,  8,  8,  4,  4,  8,  4,
+    /* 30 */  8, 12,  8,  8,  8,  8, 12,  4,  8,  8,  8,  8,  4,  4,  8,  4,
     /* 40 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
     /* 50 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
     /* 60 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
@@ -2842,22 +2844,22 @@ static uint8_t s_opcode_cycles[] = {
 
 static uint8_t s_cb_opcode_cycles[] = {
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
-    /* 00 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* 10 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* 20 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* 30 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 00 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 10 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 20 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 30 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
     /* 40 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
     /* 50 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
     /* 60 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
     /* 70 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 80 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* 90 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* a0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* b0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* c0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* d0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* e0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
-    /* f0 */  8,  8,  8,  8,  8,  8, 16,  8,  8,  8,  8,  8,  8,  8, 16,  8,
+    /* 80 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* 90 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* a0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* b0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* c0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* d0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* e0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
+    /* f0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
 };
 
 #define NI NOT_IMPLEMENTED("opcode not implemented!\n")
@@ -2865,7 +2867,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 
 #define REG(R) e->reg.R
 #define FLAG(F) e->reg.flags.F
-#define CYCLES(X) cycles += (X)
+#define CYCLES(X) update_cycles(e, X)
 
 #define RA REG(A)
 #define RHL REG(HL)
@@ -2909,7 +2911,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define WRITEMR(MR, V) WRITE8(REG(MR), V)
 
 #define BASIC_OP_R(R, OP) u = REG(R); OP; REG(R) = u
-#define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; WRITEMR(MR, u)
+#define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; CYCLES(4); WRITEMR(MR, u)
 
 #define ADD_FLAGS(X, Y) FZ_EQ0((X) + (Y)); FN = 0; FCH_ADD(X, Y)
 #define ADD_FLAGS16(X, Y) FN = 0; FCH_ADD16(X, Y)
@@ -3089,14 +3091,18 @@ static uint8_t s_cb_opcode_cycles[] = {
 
 #define TRACEI s_trace = TRUE; s_trace_counter = 2; print_emulator_info(e)
 
-/* Returns the number of cycles executed */
-static uint8_t execute_instruction(struct Emulator* e) {
-  uint8_t cycles = 0;
+static void execute_instruction(struct Emulator* e) {
   int8_t s;
   uint8_t u;
   uint8_t c;
   uint8_t opcode;
   Address new_pc;
+
+  if (e->interrupts.halt) {
+    update_cycles(e, 4);
+    return;
+  }
+
   opcode = read_u8(e, e->reg.PC);
   if (e->interrupts.halt_DI) {
     /* HALT bug. When interrupts are disabled during a HALT, the following byte
@@ -3108,7 +3114,7 @@ static uint8_t execute_instruction(struct Emulator* e) {
 
   if (opcode == 0xcb) {
     uint8_t opcode = read_u8(e, e->reg.PC + 1);
-    cycles = s_cb_opcode_cycles[opcode];
+    update_cycles(e, s_cb_opcode_cycles[opcode]);
     switch (opcode) {
       case 0x00: RLC_R(B); break;
       case 0x01: RLC_R(C); break;
@@ -3368,7 +3374,7 @@ static uint8_t execute_instruction(struct Emulator* e) {
       case 0xff: SET_R(7, A); break;
     }
   } else {
-    cycles = s_opcode_cycles[opcode];
+    update_cycles(e, s_opcode_cycles[opcode]);
     switch (opcode) {
       case 0x00: break;
       case 0x01: LD_RR_NN(BC); break;
@@ -3630,7 +3636,6 @@ static uint8_t execute_instruction(struct Emulator* e) {
     }
   }
   e->reg.PC = new_pc;
-  return cycles;
 }
 
 static void new_frame(struct Emulator* e) {
@@ -4010,8 +4015,7 @@ int main(int argc, char** argv) {
   uint32_t last_ticks_ms = SDL_GetTicks();
   while (TRUE) {
     print_emulator_info(e);
-    uint8_t cycles = e->interrupts.halt ? 4 : execute_instruction(e);
-    update_cycles(e, cycles);
+    execute_instruction(e);
     handle_interrupts(e);
 
     if (e->lcd.new_line_edge && !sdl_poll_events(e)) {
