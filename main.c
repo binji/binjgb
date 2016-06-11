@@ -170,6 +170,7 @@ typedef uint32_t RGBA;
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 648
+#define WAVE_SAMPLE_READ_OFFSET_CYCLES 2
 
 #define SOUND_FRAME_COUNT 8
 #define SOUND_FRAME_CYCLES 8192 /* 512Hz */
@@ -797,16 +798,21 @@ struct Sweep {
   enum Bool calculated_subtract;
 };
 
+struct WaveSample {
+  uint32_t time;    /* Time (in cycles) the sample was read. */
+  uint8_t position; /* Position in Wave RAM when read. */
+  uint8_t data;
+};
+
 struct Wave {
-  enum WaveVolume volume; /* Channel 3 */
+  enum WaveVolume volume;
   uint8_t ram[WAVE_RAM_SIZE];
 
   /* Internal state */
-  uint8_t sample;
-  uint32_t period;      /* Calculated from the frequency. */
-  uint8_t position;     /* 0..31 */
-  uint32_t cycles;      /* 0..period */
-  enum Bool new_sample; /* Sample read on this clock. */
+  struct WaveSample sample[2]; /* The two most recent samples read. */
+  uint32_t period;             /* Calculated from the frequency. */
+  uint8_t position;            /* 0..31 */
+  uint32_t cycles;             /* 0..period */
 };
 
 struct Channel {
@@ -1661,32 +1667,38 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   return result;
 }
 
-static enum Bool is_dma_access_ok(struct Emulator* e,
-                                  struct MemoryTypeAddressPair pair) {
-  return !e->dma.active || e->dma.copying || pair.type == MEMORY_MAP_HIGH_RAM;
-}
-
 static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
   struct Wave* wave = &e->sound.wave;
   if (e->sound.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
-     * position. Each sample is 4-bits, so shift right by one to get the byte
-     * position. */
+     * position. On DMG, this is only allowed if the read occurs exactly when
+     * it is being accessed by the Wave channel.  */
+    enum Bool found = FALSE;
     uint8_t result;
-    if (wave->new_sample) {
-      result = wave->ram[wave->position >> 1];
-      DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n", addr,
-            result, wave->cycles);
-    } else {
+    size_t i;
+    for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
+      if (wave->sample[i].time == e->cycles) {
+        found = TRUE;
+        result = wave->sample[i].data;
+        DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n",
+              addr, result, e->cycles);
+      }
+    }
+    if (!found) {
       result = INVALID_READ_BYTE;
       DEBUG(
           "read_wave_ram(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
-          addr, wave->cycles);
+          addr, e->cycles);
     }
     return result;
   } else {
     return wave->ram[addr];
   }
+}
+
+static enum Bool is_dma_access_ok(struct Emulator* e,
+                                  struct MemoryTypeAddressPair pair) {
+  return !e->dma.active || e->dma.copying || pair.type == MEMORY_MAP_HIGH_RAM;
 }
 
 static uint8_t read_u8(struct Emulator* e, Address addr) {
@@ -2176,14 +2188,14 @@ static void write_wave_ram(struct Emulator* e,
   struct Wave* wave = &e->sound.wave;
   if (e->sound.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
-     * position. Each sample is 4-bits, so shift right by one to get the byte
-     * position. */
-    if (e->sound.wave.new_sample) {
-      e->sound.wave.ram[wave->position >> 1] = value;
-      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
-    } else {
-      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing, ignored.\n", addr,
-            value);
+     * position. On DMG, this is only allowed if the write occurs exactly when
+     * it is being accessed by the Wave channel. */
+    size_t i;
+    for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
+      if (wave->sample[i].time == e->cycles) {
+        e->sound.wave.ram[wave->sample[i].position >> 1] = value;
+        DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
+      }
     }
   } else {
     e->sound.wave.ram[addr] = value;
@@ -3807,16 +3819,17 @@ static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
 static void update_wave(struct Emulator* e, uint8_t cycles) {
   struct Wave* wave = &e->sound.wave;
   while (wave->cycles < cycles) {
-    wave->new_sample = FALSE;
     wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
-    if ((wave->position & 1) == 1) {
-      wave->sample = wave->ram[wave->position >> 1];
-      wave->new_sample = TRUE;
-    }
-    DEBUG("update_wave: position: %u%c = %u (cy: %u)\n", wave->position,
-          wave->new_sample ? '!' : ' ', wave->sample, e->cycles);
+    struct WaveSample sample;
+    sample.time = e->cycles + wave->cycles + WAVE_SAMPLE_READ_OFFSET_CYCLES;
+    sample.position = wave->position;
+    sample.data = wave->ram[wave->position >> 1];
+    wave->sample[0] = wave->sample[1];
+    wave->sample[1] = sample;
+    DEBUG("update_wave: position: %u => %u (cy: %u)\n", wave->position,
+          sample.data, sample.time);
   }
   wave->cycles -= cycles;
 }
@@ -3864,11 +3877,11 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_cycles(struct Emulator* e, uint8_t cycles) {
-  e->cycles += cycles;
   update_dma_cycles(e, cycles);
   update_lcd_cycles(e, cycles);
   update_timer_cycles(e, cycles);
   update_sound_cycles(e, cycles);
+  e->cycles += cycles;
 }
 
 static void handle_interrupts(struct Emulator* e) {
