@@ -170,7 +170,11 @@ typedef uint32_t RGBA;
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 648
+
+/* TODO hack to make dmg_sound-2 tests pass. */
+#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 0
 #define WAVE_SAMPLE_READ_OFFSET_CYCLES 2
+#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 2
 
 #define SOUND_FRAME_COUNT 8
 #define SOUND_FRAME_CYCLES 8192 /* 512Hz */
@@ -1667,24 +1671,32 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   return result;
 }
 
+static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
+                                                        uint8_t offset_cycles) {
+  struct Wave* wave = &e->sound.wave;
+  size_t i;
+  for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
+    if (wave->sample[i].time + offset_cycles == e->cycles) {
+      return &wave->sample[i];
+    }
+  }
+  return NULL;
+}
+
 static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
   struct Wave* wave = &e->sound.wave;
   if (e->sound.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel.  */
-    enum Bool found = FALSE;
     uint8_t result;
-    size_t i;
-    for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
-      if (wave->sample[i].time == e->cycles) {
-        found = TRUE;
-        result = wave->sample[i].data;
-        DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n",
-              addr, result, e->cycles);
-      }
-    }
-    if (!found) {
+    struct WaveSample* sample =
+        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_READ_OFFSET_CYCLES);
+    if (sample) {
+      result = sample->data;
+      DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n", addr,
+            result, e->cycles);
+    } else {
       result = INVALID_READ_BYTE;
       DEBUG(
           "read_wave_ram(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
@@ -2031,8 +2043,31 @@ static void trigger_nr14_reg(struct Emulator* e) {
 }
 
 static void trigger_nr34_reg(struct Emulator* e) {
-  e->sound.wave.position = 0;
-  e->sound.wave.cycles = e->sound.wave.period;
+  struct Wave* wave = &e->sound.wave;
+  wave->position = 0;
+  wave->cycles = wave->period;
+  /* Triggering the wave channel while it is already playing will corrupt the
+   * wave RAM. */
+  if (e->sound.channel[CHANNEL3].status) {
+    struct WaveSample* sample =
+        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES);
+    if (sample) {
+      assert(sample->position < 32);
+      switch (sample->position >> 3) {
+        case 0:
+          wave->ram[0] = sample->data;
+          break;
+        case 1:
+        case 2:
+        case 3:
+          memcpy(&wave->ram[0], &wave->ram[(sample->position >> 1) & 12], 4);
+          break;
+      }
+      DEBUG("trigger_nr34_reg: corrupting wave ram. (cy: %u)\n", e->cycles);
+    } else {
+      DEBUG("trigger_nr34_reg: ignoring write (cy: %u)\n", e->cycles);
+    }
+  }
 }
 
 static void write_wave_period(struct Emulator* e) {
@@ -2190,12 +2225,11 @@ static void write_wave_ram(struct Emulator* e,
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    size_t i;
-    for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
-      if (wave->sample[i].time == e->cycles) {
-        e->sound.wave.ram[wave->sample[i].position >> 1] = value;
-        DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
-      }
+    struct WaveSample* sample =
+        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_WRITE_OFFSET_CYCLES);
+    if (sample) {
+      wave->ram[sample->position >> 1] = value;
+      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
     }
   } else {
     e->sound.wave.ram[addr] = value;
@@ -3823,7 +3857,7 @@ static void update_wave(struct Emulator* e, uint8_t cycles) {
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
     struct WaveSample sample;
-    sample.time = e->cycles + wave->cycles + WAVE_SAMPLE_READ_OFFSET_CYCLES;
+    sample.time = e->cycles + wave->cycles;
     sample.position = wave->position;
     sample.data = wave->ram[wave->position >> 1];
     wave->sample[0] = wave->sample[1];
