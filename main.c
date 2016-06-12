@@ -689,11 +689,21 @@ struct RomInfo {
 
 struct Emulator;
 
-struct MemoryMap {
-  uint32_t rom_bank;
-  uint32_t ram_bank;
+struct MBC1 {
+  uint8_t byte_2000_3fff;
+  uint8_t byte_4000_5fff;
+  uint8_t rom_bank;
+  uint8_t ram_bank;
   enum Bool ram_enabled;
   enum BankMode bank_mode;
+};
+
+union MBC {
+  struct MBC1 mbc1;
+};
+
+struct MemoryMap {
+  union MBC state;
   uint8_t (*read_rom_bank_switch)(struct Emulator*, MaskedAddress);
   uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
   uint8_t (*read_external_ram)(struct Emulator*, MaskedAddress);
@@ -1113,12 +1123,13 @@ static uint8_t gb_read_work_ram_bank_switch(struct Emulator* e,
 static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
                                          MaskedAddress addr) {
   assert(addr <= ADDR_MASK_16K);
-  uint32_t rom_addr = (e->memory_map.rom_bank << ROM_BANK_SHIFT) | addr;
+  uint8_t rom_bank = e->memory_map.state.mbc1.rom_bank;
+  uint32_t rom_addr = (rom_bank << ROM_BANK_SHIFT) | addr;
   if (rom_addr < e->rom_data.size) {
     return e->rom_data.data[rom_addr];
   } else {
     LOG("mbc1_read_rom_bank_switch(0x%04x): bad address (bank = %u)!\n", addr,
-        e->memory_map.rom_bank);
+        rom_bank);
     return 0;
   }
 }
@@ -1126,56 +1137,41 @@ static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
 static void mbc1_write_rom(struct Emulator* e,
                            MaskedAddress addr,
                            uint8_t value) {
-  DEBUG_VERBOSE("mbc1_write_rom(0x%04x, 0x%02x)\n", addr, value);
+  struct MBC1* mbc1 = &e->memory_map.state.mbc1;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
-      e->memory_map.ram_enabled =
+      mbc1->ram_enabled =
           (value & MBC1_RAM_ENABLED_MASK) == MBC1_RAM_ENABLED_VALUE;
       break;
-
     case 1: /* 2000-3fff */
-      e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
-      e->memory_map.rom_bank |= value & MBC1_ROM_BANK_LO_MASK;
-      /* Banks 0, 0x20, 0x40, 0x60 map to 1, 0x21, 0x41, 0x61 respectively. */
-      if (e->memory_map.rom_bank == 0) {
-        e->memory_map.rom_bank++;
-      }
+      mbc1->byte_2000_3fff = value;
       break;
-
     case 2: /* 4000-5fff */
-      value &= MBC1_BANK_HI_MASK;
-      if (e->memory_map.bank_mode == BANK_MODE_ROM) {
-        e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
-        e->memory_map.rom_bank |= value << MBC1_BANK_HI_SHIFT;
-      } else {
-        e->memory_map.ram_bank = value;
-      }
+      mbc1->byte_4000_5fff = value;
       break;
-
-    case 3: { /* 6000-7fff */
-      enum BankMode new_bank_mode = (enum BankMode)(value & 1);
-      if (e->memory_map.bank_mode != new_bank_mode) {
-        if (new_bank_mode == BANK_MODE_ROM) {
-          /* Use the ram bank bits as the high rom bank bits. */
-          assert(e->memory_map.rom_bank <= MBC1_ROM_BANK_LO_MASK);
-          e->memory_map.rom_bank |= e->memory_map.ram_bank
-                                    << MBC1_BANK_HI_SHIFT;
-          e->memory_map.ram_bank = 0;
-        } else {
-          /* Use the high rom bank bits as the ram bank bits. */
-          e->memory_map.ram_bank = e->memory_map.rom_bank >> MBC1_BANK_HI_SHIFT;
-          assert(e->memory_map.ram_bank <= MBC1_BANK_HI_MASK);
-          e->memory_map.rom_bank &= ~MBC1_ROM_BANK_LO_MASK;
-        }
-        e->memory_map.bank_mode = new_bank_mode;
-      }
+    case 3: /* 6000-7fff */
+      mbc1->bank_mode = (enum BankMode)(value & 1);
       break;
-    }
-
     default:
       UNREACHABLE("invalid addr: 0x%04x\n", addr);
       break;
   }
+
+  mbc1->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_MASK;
+  if (mbc1->rom_bank == 0) {
+    mbc1->rom_bank++;
+  }
+
+  if (mbc1->bank_mode == BANK_MODE_ROM) {
+    mbc1->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK)
+                      << MBC1_BANK_HI_SHIFT;
+    mbc1->ram_bank = 0;
+  } else {
+    mbc1->ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK;
+  }
+
+  DEBUG_VERBOSE("mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
+                addr, value, mbc1->rom_bank, mbc1->rom_bank << ROM_BANK_SHIFT);
 }
 
 static void gb_write_work_ram_bank_switch(struct Emulator* e,
@@ -1196,13 +1192,13 @@ static void dummy_write_external_ram(struct Emulator* e,
 static uint32_t get_external_ram_address(struct Emulator* e,
                                          MaskedAddress addr) {
   assert(addr <= ADDR_MASK_8K);
-  uint32_t ram_addr =
-      (e->memory_map.ram_bank << EXTERNAL_RAM_BANK_SHIFT) | addr;
+  uint8_t ram_bank = e->memory_map.state.mbc1.ram_bank;
+  uint32_t ram_addr = (ram_bank << EXTERNAL_RAM_BANK_SHIFT) | addr;
   if (ram_addr < e->external_ram.size) {
     return ram_addr;
   } else {
     LOG("get_external_ram_address(0x%04x): bad address (bank = %u)!\n", addr,
-        e->memory_map.ram_bank);
+        ram_bank);
     return 0;
   }
 }
@@ -1214,7 +1210,12 @@ static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
 static void gb_write_external_ram(struct Emulator* e,
                                   MaskedAddress addr,
                                   uint8_t value) {
-  e->external_ram.data[get_external_ram_address(e, addr)] = value;
+  if (e->memory_map.state.mbc1.ram_enabled) {
+    e->external_ram.data[get_external_ram_address(e, addr)] = value;
+  } else {
+    LOG("gb_write_external_ram(0x%04x, 0x%02x) ignored, ram disabled.\n", addr,
+        value);
+  }
 }
 
 static struct MemoryMap s_rom_only_memory_map = {
@@ -1227,10 +1228,9 @@ static struct MemoryMap s_rom_only_memory_map = {
 };
 
 static struct MemoryMap s_mbc1_memory_map = {
-    .rom_bank = 1,
-    .ram_bank = 0,
-    .ram_enabled = FALSE,
-    .bank_mode = BANK_MODE_ROM,
+    .state = {
+      .mbc1 = { .rom_bank = 1 }
+    },
     .read_rom_bank_switch = mbc1_read_rom_bank_switch,
     .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
     .read_external_ram = dummy_read_external_ram,
@@ -3874,8 +3874,8 @@ static void update_wave(struct Emulator* e, uint8_t cycles) {
     sample.data = wave->ram[wave->position >> 1];
     wave->sample[0] = wave->sample[1];
     wave->sample[1] = sample;
-    DEBUG("update_wave: position: %u => %u (cy: %u)\n", wave->position,
-          sample.data, sample.time);
+    DEBUG_VERBOSE("update_wave: position: %u => %u (cy: %u)\n", wave->position,
+                  sample.data, sample.time);
   }
   wave->cycles -= cycles;
 }
@@ -3904,9 +3904,9 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
       case 7: envelope = TRUE; break;
     }
 
-    DEBUG("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
-          length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
-          e->sound.frame, e->sound.cycles);
+    DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
+                  length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
+                  e->sound.frame, e->sound.cycles);
 
     int i;
     for (i = 0; i < CHANNEL_COUNT; ++i) {
