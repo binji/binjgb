@@ -2469,6 +2469,249 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   }
 }
 
+static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
+  if (!e->dma.active) {
+    return;
+  }
+
+  if (e->dma.addr_offset < OAM_TRANSFER_SIZE) {
+    e->dma.copying = TRUE;
+    int n;
+    for (n = 0; n < cycles && e->dma.addr_offset < OAM_TRANSFER_SIZE; n += 4) {
+      uint8_t value = read_u8(e, e->dma.base_addr + e->dma.addr_offset);
+      write_oam(e, e->dma.addr_offset, value);
+      e->dma.addr_offset++;
+    }
+    e->dma.copying = FALSE;
+  }
+  e->dma.cycles += cycles;
+  if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
+    assert(e->dma.addr_offset == OAM_TRANSFER_SIZE);
+    e->dma.active = FALSE;
+  }
+}
+
+static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
+  struct LCD* lcd = &e->lcd;
+  lcd->cycles += cycles;
+
+  if (lcd->lcdc.display) {
+    switch (lcd->stat.mode) {
+      case LCD_MODE_USING_OAM:
+        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_CYCLES)) {
+          render_line(e, lcd->LY);
+          lcd->stat.mode = LCD_MODE_USING_OAM_VRAM;
+        }
+        break;
+      case LCD_MODE_USING_OAM_VRAM:
+        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_VRAM_CYCLES)) {
+          lcd->stat.mode = LCD_MODE_HBLANK;
+          if (lcd->stat.hblank_intr) {
+            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+          }
+        }
+        break;
+      case LCD_MODE_HBLANK:
+        if (VALUE_WRAPPED(lcd->cycles, HBLANK_CYCLES)) {
+          lcd->LY++;
+          lcd->new_line_edge = TRUE;
+          if (lcd->LY == SCREEN_HEIGHT) {
+            lcd->stat.mode = LCD_MODE_VBLANK;
+            e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
+            if (lcd->stat.vblank_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
+          } else {
+            lcd->stat.mode = LCD_MODE_USING_OAM;
+            if (lcd->stat.using_oam_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
+          }
+        }
+        break;
+      case LCD_MODE_VBLANK:
+        if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
+          lcd->new_line_edge = TRUE;
+          lcd->LY++;
+          if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+            lcd->win_y = 0;
+            lcd->frame_WY = lcd->WY;
+            lcd->frame++;
+            lcd->new_frame_edge = TRUE;
+            lcd->new_line_edge = TRUE;
+            lcd->stat.mode = LCD_MODE_USING_OAM;
+            if (lcd->stat.using_oam_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
+          }
+        }
+        break;
+    }
+    if (lcd->new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
+      e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+    }
+  } else {
+    if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
+      lcd->fake_LY++;
+      lcd->new_line_edge = TRUE;
+      if (VALUE_WRAPPED(lcd->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+        lcd->new_frame_edge = TRUE;
+        lcd->frame++;
+      }
+      if (lcd->fake_LY < SCREEN_HEIGHT) {
+        render_line(e, lcd->fake_LY);
+      }
+    }
+  }
+}
+
+static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
+  e->timer.div_cycles += cycles;
+  if (VALUE_WRAPPED(e->timer.div_cycles, DIV_CYCLES)) {
+    e->timer.DIV++;
+  }
+
+  if (e->timer.on) {
+    e->timer.tima_cycles += cycles;
+    uint32_t tima_max_cycles = 0;
+    switch (e->timer.input_clock_select) {
+      case TIMER_CLOCK_4096_HZ:
+        tima_max_cycles = TIMA_4096_CYCLES;
+        break;
+      case TIMER_CLOCK_262144_HZ:
+        tima_max_cycles = TIMA_262144_CYCLES;
+        break;
+      case TIMER_CLOCK_65536_HZ:
+        tima_max_cycles = TIMA_65536_CYCLES;
+        break;
+      case TIMER_CLOCK_16384_HZ:
+        tima_max_cycles = TIMA_16384_CYCLES;
+        break;
+    }
+    while (VALUE_WRAPPED(e->timer.tima_cycles, tima_max_cycles)) {
+      e->timer.TIMA++;
+      if (e->timer.TIMA == 0) {
+        e->timer.TIMA = e->timer.TMA;
+        e->interrupts.IF |= INTERRUPT_TIMER_MASK;
+      }
+    }
+  }
+}
+
+static void update_channel(struct Emulator* e,
+                                  struct Channel* channel,
+                                  int channel_index,
+                                  enum Bool update_length,
+                                  enum Bool update_envelope) {
+  if (update_length && channel->length_enabled && channel->length > 0) {
+    if (--channel->length == 0) {
+      channel->status = FALSE;
+    }
+  }
+
+  // TODO envelope
+  (void)update_envelope;
+}
+
+static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
+  if (!sweep->enabled) {
+    return;
+  }
+
+  uint8_t period = sweep->period;
+  if (--sweep->timer == 0) {
+    if (period) {
+      sweep->timer = period;
+      uint16_t new_frequency = calculate_sweep_frequency(sweep);
+      if (new_frequency > SWEEP_MAX_FREQUENCY) {
+        DEBUG("channel 1: disabling from sweep overflow\n");
+        channel->status = FALSE;
+      } else {
+        if (sweep->shift) {
+          DEBUG("channel 1: updated frequency=%u\n", new_frequency);
+          sweep->frequency = channel->frequency = new_frequency;
+        }
+
+        /* Perform another overflow check */
+        if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+          DEBUG("channel 1: disabling from 2nd sweep overflow\n");
+          channel->status = FALSE;
+        }
+      }
+    } else {
+      sweep->timer = SWEEP_MAX_PERIOD;
+    }
+  }
+}
+
+static void update_wave(struct Emulator* e, uint8_t cycles) {
+  struct Wave* wave = &e->sound.wave;
+  while (wave->cycles < cycles) {
+    wave->cycles += wave->period;
+    wave->position++;
+    VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
+    struct WaveSample sample;
+    sample.time = e->cycles + wave->cycles;
+    sample.position = wave->position;
+    sample.data = wave->ram[wave->position >> 1];
+    wave->sample[0] = wave->sample[1];
+    wave->sample[1] = sample;
+    DEBUG_VERBOSE("update_wave: position: %u => %u (cy: %u)\n", wave->position,
+                  sample.data, sample.time);
+  }
+  wave->cycles -= cycles;
+}
+
+static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
+  if (!e->sound.enabled) {
+    return;
+  }
+
+  enum Bool length = FALSE;
+  enum Bool envelope = FALSE;
+  enum Bool sweep = FALSE;
+  e->sound.cycles += cycles;
+  if (VALUE_WRAPPED(e->sound.cycles, SOUND_FRAME_CYCLES)) {
+    e->sound.frame++;
+    VALUE_WRAPPED(e->sound.frame, SOUND_FRAME_COUNT);
+
+    switch (e->sound.frame) {
+      case 0: length = TRUE; break;
+      case 1: break;
+      case 2: length = sweep = TRUE; break;
+      case 3: break;
+      case 4: length = TRUE; break;
+      case 5: break;
+      case 6: length = sweep = TRUE; break;
+      case 7: envelope = TRUE; break;
+    }
+
+    DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
+                  length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
+                  e->sound.frame, e->sound.cycles);
+
+    int i;
+    for (i = 0; i < CHANNEL_COUNT; ++i) {
+      struct Channel* channel = &e->sound.channel[i];
+      update_channel(e, channel, i, length, envelope);
+    }
+
+    if (sweep) {
+      update_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
+    }
+  }
+
+  update_wave(e, cycles);
+}
+
+static void update_cycles(struct Emulator* e, uint8_t cycles) {
+  update_dma_cycles(e, cycles);
+  update_lcd_cycles(e, cycles);
+  update_timer_cycles(e, cycles);
+  update_sound_cycles(e, cycles);
+  e->cycles += cycles;
+}
+
 static uint8_t s_opcode_bytes[] = {
     /*       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
     /* 00 */ 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
@@ -2885,8 +3128,6 @@ static void print_emulator_info(struct Emulator* e) {
     }
   }
 }
-
-static void update_cycles(struct Emulator*, uint8_t cycles);
 
 static uint8_t s_opcode_cycles[] = {
     /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
@@ -3713,249 +3954,6 @@ static void execute_instruction(struct Emulator* e) {
   e->reg.PC = new_pc;
 }
 
-static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
-  if (!e->dma.active) {
-    return;
-  }
-
-  if (e->dma.addr_offset < OAM_TRANSFER_SIZE) {
-    e->dma.copying = TRUE;
-    int n;
-    for (n = 0; n < cycles && e->dma.addr_offset < OAM_TRANSFER_SIZE; n += 4) {
-      uint8_t value = read_u8(e, e->dma.base_addr + e->dma.addr_offset);
-      write_oam(e, e->dma.addr_offset, value);
-      e->dma.addr_offset++;
-    }
-    e->dma.copying = FALSE;
-  }
-  e->dma.cycles += cycles;
-  if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
-    assert(e->dma.addr_offset == OAM_TRANSFER_SIZE);
-    e->dma.active = FALSE;
-  }
-}
-
-static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
-  struct LCD* lcd = &e->lcd;
-  lcd->cycles += cycles;
-
-  if (lcd->lcdc.display) {
-    switch (lcd->stat.mode) {
-      case LCD_MODE_USING_OAM:
-        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_CYCLES)) {
-          render_line(e, lcd->LY);
-          lcd->stat.mode = LCD_MODE_USING_OAM_VRAM;
-        }
-        break;
-      case LCD_MODE_USING_OAM_VRAM:
-        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_VRAM_CYCLES)) {
-          lcd->stat.mode = LCD_MODE_HBLANK;
-          if (lcd->stat.hblank_intr) {
-            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-          }
-        }
-        break;
-      case LCD_MODE_HBLANK:
-        if (VALUE_WRAPPED(lcd->cycles, HBLANK_CYCLES)) {
-          lcd->LY++;
-          lcd->new_line_edge = TRUE;
-          if (lcd->LY == SCREEN_HEIGHT) {
-            lcd->stat.mode = LCD_MODE_VBLANK;
-            e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
-            if (lcd->stat.vblank_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
-          } else {
-            lcd->stat.mode = LCD_MODE_USING_OAM;
-            if (lcd->stat.using_oam_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
-          }
-        }
-        break;
-      case LCD_MODE_VBLANK:
-        if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-          lcd->new_line_edge = TRUE;
-          lcd->LY++;
-          if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
-            lcd->win_y = 0;
-            lcd->frame_WY = lcd->WY;
-            lcd->frame++;
-            lcd->new_frame_edge = TRUE;
-            lcd->new_line_edge = TRUE;
-            lcd->stat.mode = LCD_MODE_USING_OAM;
-            if (lcd->stat.using_oam_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
-          }
-        }
-        break;
-    }
-    if (lcd->new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
-      e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-    }
-  } else {
-    if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-      lcd->fake_LY++;
-      lcd->new_line_edge = TRUE;
-      if (VALUE_WRAPPED(lcd->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
-        lcd->new_frame_edge = TRUE;
-        lcd->frame++;
-      }
-      if (lcd->fake_LY < SCREEN_HEIGHT) {
-        render_line(e, lcd->fake_LY);
-      }
-    }
-  }
-}
-
-static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
-  e->timer.div_cycles += cycles;
-  if (VALUE_WRAPPED(e->timer.div_cycles, DIV_CYCLES)) {
-    e->timer.DIV++;
-  }
-
-  if (e->timer.on) {
-    e->timer.tima_cycles += cycles;
-    uint32_t tima_max_cycles = 0;
-    switch (e->timer.input_clock_select) {
-      case TIMER_CLOCK_4096_HZ:
-        tima_max_cycles = TIMA_4096_CYCLES;
-        break;
-      case TIMER_CLOCK_262144_HZ:
-        tima_max_cycles = TIMA_262144_CYCLES;
-        break;
-      case TIMER_CLOCK_65536_HZ:
-        tima_max_cycles = TIMA_65536_CYCLES;
-        break;
-      case TIMER_CLOCK_16384_HZ:
-        tima_max_cycles = TIMA_16384_CYCLES;
-        break;
-    }
-    while (VALUE_WRAPPED(e->timer.tima_cycles, tima_max_cycles)) {
-      e->timer.TIMA++;
-      if (e->timer.TIMA == 0) {
-        e->timer.TIMA = e->timer.TMA;
-        e->interrupts.IF |= INTERRUPT_TIMER_MASK;
-      }
-    }
-  }
-}
-
-static void update_channel(struct Emulator* e,
-                                  struct Channel* channel,
-                                  int channel_index,
-                                  enum Bool update_length,
-                                  enum Bool update_envelope) {
-  if (update_length && channel->length_enabled && channel->length > 0) {
-    if (--channel->length == 0) {
-      channel->status = FALSE;
-    }
-  }
-
-  // TODO envelope
-  (void)update_envelope;
-}
-
-static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
-  if (!sweep->enabled) {
-    return;
-  }
-
-  uint8_t period = sweep->period;
-  if (--sweep->timer == 0) {
-    if (period) {
-      sweep->timer = period;
-      uint16_t new_frequency = calculate_sweep_frequency(sweep);
-      if (new_frequency > SWEEP_MAX_FREQUENCY) {
-        DEBUG("channel 1: disabling from sweep overflow\n");
-        channel->status = FALSE;
-      } else {
-        if (sweep->shift) {
-          DEBUG("channel 1: updated frequency=%u\n", new_frequency);
-          sweep->frequency = channel->frequency = new_frequency;
-        }
-
-        /* Perform another overflow check */
-        if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
-          DEBUG("channel 1: disabling from 2nd sweep overflow\n");
-          channel->status = FALSE;
-        }
-      }
-    } else {
-      sweep->timer = SWEEP_MAX_PERIOD;
-    }
-  }
-}
-
-static void update_wave(struct Emulator* e, uint8_t cycles) {
-  struct Wave* wave = &e->sound.wave;
-  while (wave->cycles < cycles) {
-    wave->cycles += wave->period;
-    wave->position++;
-    VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
-    struct WaveSample sample;
-    sample.time = e->cycles + wave->cycles;
-    sample.position = wave->position;
-    sample.data = wave->ram[wave->position >> 1];
-    wave->sample[0] = wave->sample[1];
-    wave->sample[1] = sample;
-    DEBUG_VERBOSE("update_wave: position: %u => %u (cy: %u)\n", wave->position,
-                  sample.data, sample.time);
-  }
-  wave->cycles -= cycles;
-}
-
-static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
-  if (!e->sound.enabled) {
-    return;
-  }
-
-  enum Bool length = FALSE;
-  enum Bool envelope = FALSE;
-  enum Bool sweep = FALSE;
-  e->sound.cycles += cycles;
-  if (VALUE_WRAPPED(e->sound.cycles, SOUND_FRAME_CYCLES)) {
-    e->sound.frame++;
-    VALUE_WRAPPED(e->sound.frame, SOUND_FRAME_COUNT);
-
-    switch (e->sound.frame) {
-      case 0: length = TRUE; break;
-      case 1: break;
-      case 2: length = sweep = TRUE; break;
-      case 3: break;
-      case 4: length = TRUE; break;
-      case 5: break;
-      case 6: length = sweep = TRUE; break;
-      case 7: envelope = TRUE; break;
-    }
-
-    DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
-                  length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
-                  e->sound.frame, e->sound.cycles);
-
-    int i;
-    for (i = 0; i < CHANNEL_COUNT; ++i) {
-      struct Channel* channel = &e->sound.channel[i];
-      update_channel(e, channel, i, length, envelope);
-    }
-
-    if (sweep) {
-      update_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
-    }
-  }
-
-  update_wave(e, cycles);
-}
-
-static void update_cycles(struct Emulator* e, uint8_t cycles) {
-  update_dma_cycles(e, cycles);
-  update_lcd_cycles(e, cycles);
-  update_timer_cycles(e, cycles);
-  update_sound_cycles(e, cycles);
-  e->cycles += cycles;
-}
-
 static void handle_interrupts(struct Emulator* e) {
   if (!(e->interrupts.IME || e->interrupts.halt)) {
     return;
@@ -4003,6 +4001,14 @@ static void handle_interrupts(struct Emulator* e) {
     e->interrupts.IME = FALSE;
   }
   e->interrupts.halt = FALSE;
+}
+
+static void step_emulator(struct Emulator* e) {
+  e->lcd.new_frame_edge = FALSE;
+  e->lcd.new_line_edge = FALSE;
+  print_emulator_info(e);
+  execute_instruction(e);
+  handle_interrupts(e);
 }
 
 static enum Bool sdl_poll_events(struct Emulator* e) {
@@ -4099,12 +4105,7 @@ int main(int argc, char** argv) {
   uint32_t last_cycles = 0;
   uint32_t last_ticks_ms = SDL_GetTicks();
   while (TRUE) {
-    /* TODO better place for this */
-    e->lcd.new_frame_edge = FALSE;
-    e->lcd.new_line_edge = FALSE;
-    print_emulator_info(e);
-    execute_instruction(e);
-    handle_interrupts(e);
+    step_emulator(e);
 
     if (e->lcd.new_line_edge && !sdl_poll_events(e)) {
       break;
