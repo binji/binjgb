@@ -156,6 +156,8 @@ typedef uint32_t RGBA;
 #define SWEEP_MAX_FREQUENCY 2047
 #define WAVE_MAX_FREQUENCY 2047
 #define WAVE_SAMPLE_COUNT 32
+#define ENVELOPE_MAX_PERIOD 8
+#define ENVELOPE_MAX_VOLUME 15
 
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
@@ -179,6 +181,7 @@ typedef uint32_t RGBA;
 
 #define SOUND_FRAME_COUNT 8
 #define SOUND_FRAME_CYCLES 8192 /* 512Hz */
+#define SOUND_FRAME_UPDATE_ENVELOPE 7
 
 #define ADDR_MASK_1K 0x03ff
 #define ADDR_MASK_4K 0x0fff
@@ -300,7 +303,7 @@ typedef uint32_t RGBA;
 #define NRX2_INITIAL_VOLUME(X, OP) BITS(X, OP, 7, 4)
 #define NRX2_DAC_ENABLED(X, OP) BITS(X, OP, 7, 3)
 #define NRX2_ENVELOPE_DIRECTION(X, OP) BIT(X, OP, 3)
-#define NRX2_ENVELOPE_COUNT(X, OP) BITS(X, OP, 2, 0)
+#define NRX2_ENVELOPE_PERIOD(X, OP) BITS(X, OP, 2, 0)
 
 #define NRX4_INITIAL(X, OP) BIT(X, OP, 7)
 #define NRX4_LENGTH_ENABLED(X, OP) BIT(X, OP, 6)
@@ -816,6 +819,17 @@ struct Sweep {
   enum Bool calculated_subtract;
 };
 
+struct Envelope {
+  uint8_t initial_volume;
+  enum EnvelopeDirection direction;
+  uint8_t period;
+
+  /* Internal state */
+  uint8_t volume;      /* 0..15 */
+  uint32_t timer;      /* 0..period */
+  enum Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
+};
+
 struct WaveSample {
   uint32_t time;    /* Time (in cycles) the sample was read. */
   uint8_t position; /* Position in Wave RAM when read. */
@@ -834,16 +848,14 @@ struct Wave {
 };
 
 struct Channel {
-  enum WaveDuty wave_duty;                   /* Channel 1, 2 */
-  uint16_t length;                           /* All channels */
-  uint8_t initial_volume;                    /* Channel 1, 2, 4 */
-  enum EnvelopeDirection envelope_direction; /* Channel 1, 2, 4 */
-  uint8_t envelope_count;                    /* Channel 1, 2, 4 */
-  uint16_t frequency;                        /* Channel 1, 2, 3 */
-  enum Bool length_enabled;                  /* All channels */
-  uint8_t shift_clock_frequency;             /* Channel 4 */
-  enum CounterStep counter_step;             /* Channel 4 */
-  uint8_t divide_ratio;                      /* Channel 4 */
+  enum WaveDuty wave_duty;       /* Channel 1, 2 */
+  struct Envelope envelope;      /* Channel 1, 2, 4 */
+  uint16_t frequency;            /* Channel 1, 2, 3 */
+  uint8_t shift_clock_frequency; /* Channel 4 */
+  enum CounterStep counter_step; /* Channel 4 */
+  uint8_t divide_ratio;          /* Channel 4 */
+  uint16_t length;               /* All channels */
+  enum Bool length_enabled;      /* All channels */
 
   /* Internal state */
   enum Bool dac_enabled;
@@ -1559,9 +1571,9 @@ static uint8_t read_nrx1_reg(struct Channel* channel) {
 }
 
 static uint8_t read_nrx2_reg(struct Channel* channel) {
-  return READ_REG(channel->initial_volume, NRX2_INITIAL_VOLUME) |
-         READ_REG(channel->envelope_direction, NRX2_ENVELOPE_DIRECTION) |
-         READ_REG(channel->envelope_count, NRX2_ENVELOPE_COUNT);
+  return READ_REG(channel->envelope.initial_volume, NRX2_INITIAL_VOLUME) |
+         READ_REG(channel->envelope.direction, NRX2_ENVELOPE_DIRECTION) |
+         READ_REG(channel->envelope.period, NRX2_ENVELOPE_PERIOD);
 }
 
 static uint8_t read_nrx4_reg(struct Channel* channel) {
@@ -1969,15 +1981,15 @@ static void write_nrx2_reg(struct Emulator* e,
                            int channel_index,
                            uint8_t value) {
   struct Channel* channel = &e->sound.channel[channel_index];
-  channel->initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
+  channel->envelope.initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
     DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) dac_enabled = false\n",
                   channel_index, value);
   }
-  channel->envelope_direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
-  channel->envelope_count = WRITE_REG(value, NRX2_ENVELOPE_COUNT);
+  channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
+  channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
   DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) initial_volume=%u\n", channel_index,
                 value, channel->initial_volume);
 }
@@ -2045,6 +2057,20 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   DEBUG_VERBOSE("write_nrx4_reg(%u, 0x%02x) trigger=%u length_enabled=%u\n",
                 channel_index, value, trigger, channel->length_enabled);
   return trigger;
+}
+
+static void trigger_nrx4_envelope(struct Emulator* e,
+                                  struct Envelope* envelope) {
+  envelope->volume = envelope->initial_volume;
+  envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
+  envelope->automatic = TRUE;
+  /* If the next APU frame will update the envelope, increment the timer. */
+  if (e->sound.frame + 1 == SOUND_FRAME_UPDATE_ENVELOPE) {
+    envelope->timer++;
+  }
+  /* TODO zombie mode */
+  DEBUG("trigger_nrx4_envelope: volume=%u, timer=%u\n", envelope->volume,
+        envelope->timer);
 }
 
 static void trigger_nr14_reg(struct Emulator* e) {
@@ -2140,6 +2166,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case APU_NR14_ADDR:
       if (write_nrx4_reg(e, CHANNEL1, value, NRX1_MAX_LENGTH)) {
+        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL1].envelope);
         trigger_nr14_reg(e);
       }
       break;
@@ -2153,7 +2180,9 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_nrx3_reg(e, CHANNEL2, value);
       break;
     case APU_NR24_ADDR:
-      write_nrx4_reg(e, CHANNEL2, value, NRX1_MAX_LENGTH);
+      if (write_nrx4_reg(e, CHANNEL2, value, NRX1_MAX_LENGTH)) {
+        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL2].envelope);
+      }
       break;
     case APU_NR30_ADDR: {
       struct Channel* channel = &e->sound.channel[CHANNEL3];
@@ -2194,7 +2223,9 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case APU_NR44_ADDR:
-      write_nrx4_reg(e, CHANNEL4, value, NRX1_MAX_LENGTH);
+      if (write_nrx4_reg(e, CHANNEL4, value, NRX1_MAX_LENGTH)) {
+        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL3].envelope);
+      }
       break;
     case APU_NR50_ADDR:
       e->sound.so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
@@ -2598,22 +2629,33 @@ static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_channel(struct Emulator* e,
-                                  struct Channel* channel,
-                                  int channel_index,
-                                  enum Bool update_length,
-                                  enum Bool update_envelope) {
-  if (update_length && channel->length_enabled && channel->length > 0) {
-    if (--channel->length == 0) {
-      channel->status = FALSE;
-    }
+static void update_channel_length(struct Channel* channel) {
+  if (--channel->length == 0) {
+    channel->status = FALSE;
   }
-
-  // TODO envelope
-  (void)update_envelope;
 }
 
-static void update_sweep(struct Channel* channel, struct Sweep* sweep) {
+static void update_channel_envelope(struct Channel* channel) {
+  struct Envelope* envelope = &channel->envelope;
+  if (envelope->period) {
+    if (envelope->automatic && --envelope->timer == 0) {
+      if (envelope->direction == ENVELOPE_ATTENUATE) {
+        envelope->volume--;
+      } else {
+        envelope->volume++;
+      }
+      if (envelope->volume > ENVELOPE_MAX_VOLUME) {
+        envelope->volume =
+            envelope->direction == ENVELOPE_ATTENUATE ? 0 : ENVELOPE_MAX_VOLUME;
+        envelope->automatic = FALSE;
+      }
+    }
+  } else {
+    envelope->timer = ENVELOPE_MAX_PERIOD;
+  }
+}
+
+static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
   if (!sweep->enabled) {
     return;
   }
@@ -2667,37 +2709,42 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     return;
   }
 
-  enum Bool length = FALSE;
-  enum Bool envelope = FALSE;
-  enum Bool sweep = FALSE;
+  enum Bool do_length = FALSE;
+  enum Bool do_envelope = FALSE;
+  enum Bool do_sweep = FALSE;
   e->sound.cycles += cycles;
   if (VALUE_WRAPPED(e->sound.cycles, SOUND_FRAME_CYCLES)) {
     e->sound.frame++;
     VALUE_WRAPPED(e->sound.frame, SOUND_FRAME_COUNT);
 
     switch (e->sound.frame) {
-      case 0: length = TRUE; break;
+      case 0: do_length = TRUE; break;
       case 1: break;
-      case 2: length = sweep = TRUE; break;
+      case 2: do_length = do_sweep = TRUE; break;
       case 3: break;
-      case 4: length = TRUE; break;
+      case 4: do_length = TRUE; break;
       case 5: break;
-      case 6: length = sweep = TRUE; break;
-      case 7: envelope = TRUE; break;
+      case 6: do_length = do_sweep = TRUE; break;
+      case 7: do_envelope = TRUE; break;
     }
 
     DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
-                  length ? 'L' : '.', envelope ? 'E' : '.', sweep ? 'S' : '.',
-                  e->sound.frame, e->sound.cycles);
+                  do_length ? 'L' : '.', do_envelope ? 'E' : '.',
+                  do_sweep ? 'S' : '.', e->sound.frame, e->sound.cycles);
 
     int i;
     for (i = 0; i < CHANNEL_COUNT; ++i) {
       struct Channel* channel = &e->sound.channel[i];
-      update_channel(e, channel, i, length, envelope);
+      if (do_length && channel->length_enabled && channel->length > 0) {
+        update_channel_length(channel);
+      }
+      if (i != CHANNEL3 && do_envelope) {
+        update_channel_envelope(channel);
+      }
     }
 
-    if (sweep) {
-      update_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
+    if (do_sweep) {
+      update_channel_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
     }
   }
 
