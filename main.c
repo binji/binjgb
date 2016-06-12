@@ -117,6 +117,7 @@ typedef uint32_t RGBA;
 #define RENDER_SCALE 4
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
+#define SCREEN_HEIGHT_WITH_VBLANK 154
 #define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
 #define TILE_WIDTH 8
 #define TILE_HEIGHT 8
@@ -892,8 +893,11 @@ struct LCD {
   uint8_t WY;             /* Window Y */
   uint8_t WX;             /* Window X */
   struct Palette bgp;     /* BG Palette */
+
+  /* Internal state */
   uint32_t cycles;
   uint32_t frame;
+  uint8_t fake_LY;  /* Used when display is disabled. */
   uint8_t win_y;    /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
   enum Bool new_frame_edge;
@@ -1422,8 +1426,8 @@ static struct MemoryTypeAddressPair map_address(Address addr) {
 }
 
 static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
-  if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    /* return garbage if read while the io is using vram */
+  if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
+    DEBUG("read_vram(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
@@ -1432,8 +1436,8 @@ static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
 }
 
 static enum Bool is_using_oam(struct Emulator* e) {
-  return e->lcd.lcdc.display && (e->lcd.stat.mode == LCD_MODE_USING_OAM ||
-                                 e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM);
+  return e->lcd.stat.mode == LCD_MODE_USING_OAM ||
+         e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM;
 }
 
 static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
@@ -1780,8 +1784,8 @@ static void write_vram_tile_data(struct Emulator* e,
 }
 
 static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  /* Ignore writes if the display is on, and the hardware is using vram. */
-  if (e->lcd.lcdc.display && e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
+  if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
+    DEBUG("write_vram(0x%04x, 0x%02x) ignored, using vram.\n", addr, value);
     return;
   }
 
@@ -1869,19 +1873,32 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     case IO_IF_ADDR:
       e->interrupts.IF = value;
       break;
-    case IO_LCDC_ADDR:
-      e->lcd.lcdc.display = WRITE_REG(value, LCDC_DISPLAY);
-      e->lcd.lcdc.window_tile_map_select =
+    case IO_LCDC_ADDR: {
+      struct LCDControl* lcdc = &e->lcd.lcdc;
+      enum Bool was_enabled = lcdc->display;
+      lcdc->display = WRITE_REG(value, LCDC_DISPLAY);
+      lcdc->window_tile_map_select =
           WRITE_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
-      e->lcd.lcdc.window_display = WRITE_REG(value, LCDC_WINDOW_DISPLAY);
-      e->lcd.lcdc.bg_tile_data_select =
-          WRITE_REG(value, LCDC_BG_TILE_DATA_SELECT);
-      e->lcd.lcdc.bg_tile_map_select =
-          WRITE_REG(value, LCDC_BG_TILE_MAP_SELECT);
-      e->lcd.lcdc.obj_size = WRITE_REG(value, LCDC_OBJ_SIZE);
-      e->lcd.lcdc.obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
-      e->lcd.lcdc.bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
+      lcdc->window_display = WRITE_REG(value, LCDC_WINDOW_DISPLAY);
+      lcdc->bg_tile_data_select = WRITE_REG(value, LCDC_BG_TILE_DATA_SELECT);
+      lcdc->bg_tile_map_select = WRITE_REG(value, LCDC_BG_TILE_MAP_SELECT);
+      lcdc->obj_size = WRITE_REG(value, LCDC_OBJ_SIZE);
+      lcdc->obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
+      lcdc->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
+      if (was_enabled && !lcdc->display) {
+        e->lcd.cycles = 0;
+        e->lcd.LY = 0;
+        e->lcd.fake_LY = 0;
+        e->lcd.stat.mode = LCD_MODE_VBLANK;
+        DEBUG("Disabling display.\n");
+      } else if (!was_enabled && lcdc->display) {
+        e->lcd.cycles = 0;
+        e->lcd.LY = 0;
+        e->lcd.stat.mode = LCD_MODE_USING_OAM;
+        DEBUG("Enabling display.\n");
+      }
       break;
+    }
     case IO_STAT_ADDR:
       e->lcd.stat.y_compare_intr = WRITE_REG(value, STAT_YCOMPARE_INTR);
       e->lcd.stat.using_oam_intr = WRITE_REG(value, STAT_USING_OAM_INTR);
@@ -2340,8 +2357,7 @@ static int obj_cmp(const void* v1, const void* v2, void* arg) {
   return o1 - o2;
 }
 
-static void render_line(struct Emulator* e) {
-  uint8_t line_y = e->lcd.LY;
+static void render_line(struct Emulator* e, uint8_t line_y) {
   assert(line_y < SCREEN_HEIGHT);
   RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
 
@@ -2856,9 +2872,10 @@ static void print_registers(struct Registers* reg) {
 }
 
 static void print_emulator_info(struct Emulator* e) {
-  if (s_trace) {
+  if (s_trace && !e->interrupts.halt) {
     print_registers(&e->reg);
-    printf(" (cy: %u) | ", e->cycles);
+    printf(" (cy: %u) lcd:%c%u | ", e->cycles, e->lcd.lcdc.display ? '+' : '-',
+           e->lcd.stat.mode);
     print_instruction(e, e->reg.PC);
     printf("\n");
     if (s_trace_counter > 0) {
@@ -3696,14 +3713,6 @@ static void execute_instruction(struct Emulator* e) {
   e->reg.PC = new_pc;
 }
 
-static void new_frame(struct Emulator* e) {
-  e->lcd.win_y = 0;
-  e->lcd.frame_WY = e->lcd.WY;
-  e->lcd.frame++;
-  e->lcd.new_frame_edge = TRUE;
-  e->lcd.new_line_edge = TRUE;
-}
-
 static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   if (!e->dma.active) {
     return;
@@ -3727,59 +3736,76 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
-  e->lcd.new_frame_edge = FALSE;
-  e->lcd.new_line_edge = FALSE;
-  e->lcd.cycles += cycles;
-  switch (e->lcd.stat.mode) {
-    case LCD_MODE_USING_OAM:
-      if (VALUE_WRAPPED(e->lcd.cycles, USING_OAM_CYCLES)) {
-        render_line(e);
-        e->lcd.stat.mode = LCD_MODE_USING_OAM_VRAM;
-      }
-      break;
-    case LCD_MODE_USING_OAM_VRAM:
-      if (VALUE_WRAPPED(e->lcd.cycles, USING_OAM_VRAM_CYCLES)) {
-        e->lcd.stat.mode = LCD_MODE_HBLANK;
-        if (e->lcd.stat.hblank_intr) {
-          e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+  struct LCD* lcd = &e->lcd;
+  lcd->cycles += cycles;
+
+  if (lcd->lcdc.display) {
+    switch (lcd->stat.mode) {
+      case LCD_MODE_USING_OAM:
+        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_CYCLES)) {
+          render_line(e, lcd->LY);
+          lcd->stat.mode = LCD_MODE_USING_OAM_VRAM;
         }
-      }
-      break;
-    case LCD_MODE_HBLANK:
-      if (VALUE_WRAPPED(e->lcd.cycles, HBLANK_CYCLES)) {
-        e->lcd.LY++;
-        e->lcd.new_line_edge = TRUE;
-        if (e->lcd.LY == 144) {
-          e->lcd.stat.mode = LCD_MODE_VBLANK;
-          e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
-          if (e->lcd.stat.vblank_intr) {
-            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-          }
-        } else {
-          e->lcd.stat.mode = LCD_MODE_USING_OAM;
-          if (e->lcd.stat.using_oam_intr) {
+        break;
+      case LCD_MODE_USING_OAM_VRAM:
+        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_VRAM_CYCLES)) {
+          lcd->stat.mode = LCD_MODE_HBLANK;
+          if (lcd->stat.hblank_intr) {
             e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
           }
         }
-      }
-      break;
-    case LCD_MODE_VBLANK:
-      if (VALUE_WRAPPED(e->lcd.cycles, LINE_CYCLES)) {
-        e->lcd.new_line_edge = TRUE;
-        e->lcd.LY++;
-        if (VALUE_WRAPPED(e->lcd.LY, 154)) {
-          new_frame(e);
-          e->lcd.stat.mode = LCD_MODE_USING_OAM;
-          if (e->lcd.stat.using_oam_intr) {
-            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+        break;
+      case LCD_MODE_HBLANK:
+        if (VALUE_WRAPPED(lcd->cycles, HBLANK_CYCLES)) {
+          lcd->LY++;
+          lcd->new_line_edge = TRUE;
+          if (lcd->LY == SCREEN_HEIGHT) {
+            lcd->stat.mode = LCD_MODE_VBLANK;
+            e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
+            if (lcd->stat.vblank_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
+          } else {
+            lcd->stat.mode = LCD_MODE_USING_OAM;
+            if (lcd->stat.using_oam_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
           }
         }
+        break;
+      case LCD_MODE_VBLANK:
+        if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
+          lcd->new_line_edge = TRUE;
+          lcd->LY++;
+          if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+            lcd->win_y = 0;
+            lcd->frame_WY = lcd->WY;
+            lcd->frame++;
+            lcd->new_frame_edge = TRUE;
+            lcd->new_line_edge = TRUE;
+            lcd->stat.mode = LCD_MODE_USING_OAM;
+            if (lcd->stat.using_oam_intr) {
+              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+            }
+          }
+        }
+        break;
+    }
+    if (lcd->new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
+      e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+    }
+  } else {
+    if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
+      lcd->fake_LY++;
+      lcd->new_line_edge = TRUE;
+      if (VALUE_WRAPPED(lcd->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+        lcd->new_frame_edge = TRUE;
+        lcd->frame++;
       }
-      break;
-  }
-  if (e->lcd.new_line_edge && e->lcd.stat.y_compare_intr &&
-      e->lcd.LY == e->lcd.LYC) {
-    e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+      if (lcd->fake_LY < SCREEN_HEIGHT) {
+        render_line(e, lcd->fake_LY);
+      }
+    }
   }
 }
 
@@ -4073,6 +4099,9 @@ int main(int argc, char** argv) {
   uint32_t last_cycles = 0;
   uint32_t last_ticks_ms = SDL_GetTicks();
   while (TRUE) {
+    /* TODO better place for this */
+    e->lcd.new_frame_edge = FALSE;
+    e->lcd.new_line_edge = FALSE;
     print_emulator_info(e);
     execute_instruction(e);
     handle_interrupts(e);
