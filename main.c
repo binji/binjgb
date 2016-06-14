@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <inttypes.h>
+#include <sched.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <time.h>
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_main.h>
@@ -70,6 +72,13 @@ typedef uint32_t RGBA;
 #define RGBA_LIGHT_GRAY 0xffaaaaaau
 #define RGBA_DARK_GRAY 0xff555555u
 #define RGBA_BLACK 0xff000000u
+#define RENDER_SCALE 4
+#define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
+#define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
+#define AUDIO_DESIRED_FREQUENCY 44100
+#define AUDIO_DESIRED_FORMAT AUDIO_S16SYS
+#define AUDIO_DESIRED_CHANNELS 2
+#define AUDIO_DESIRED_SAMPLES 4096
 
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
@@ -112,9 +121,6 @@ typedef uint32_t RGBA;
 #define HIGH_RAM_SIZE 127
 
 #define FRAME_LIMITER 1
-#define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
-#define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
-#define RENDER_SCALE 4
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
@@ -153,14 +159,24 @@ typedef uint32_t RGBA;
 #define NRX1_MAX_LENGTH 64
 #define NR31_MAX_LENGTH 256
 #define SWEEP_MAX_PERIOD 8
-#define SWEEP_MAX_FREQUENCY 2047
-#define WAVE_MAX_FREQUENCY 2047
+#define SOUND_MAX_FREQUENCY 2047
 #define WAVE_SAMPLE_COUNT 32
 #define ENVELOPE_MAX_PERIOD 8
 #define ENVELOPE_MAX_VOLUME 15
+#define DUTY_CYCLE_COUNT 8
+#define SO1_MAX_VOLUME 7
+#define SO2_MAX_VOLUME 7
+#define SOUND_BUFFER_CHANNEL_COUNT 2 /* Output channels. TODO better name? */
+#define SOUND_BUFFER_SAFE_ZONE_SIZE 256
+#define SOUND_SAMPLES_PER_FRAME \
+  ((FRAME_CYCLES / APU_CYCLES) * SOUND_BUFFER_CHANNEL_COUNT)
+#define SOUND_BUFFER_SIZE                                    \
+  ((SOUND_SAMPLES_PER_FRAME + SOUND_BUFFER_SAFE_ZONE_SIZE) * \
+   SOUND_BUFFER_CHANNEL_COUNT)
 
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
+#define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / 2)
 #define DIV_CYCLES 256
 #define TIMA_4096_CYCLES 1024
 #define TIMA_262144_CYCLES 16
@@ -173,11 +189,12 @@ typedef uint32_t RGBA;
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 648
+#define APU_CYCLES 2 /* APU runs at 2MHz */
 
 /* TODO hack to make dmg_sound-2 tests pass. */
-#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 0
-#define WAVE_SAMPLE_READ_OFFSET_CYCLES 2
-#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 2
+#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
+#define WAVE_SAMPLE_READ_OFFSET_CYCLES 0
+#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 0
 
 #define SOUND_FRAME_COUNT 8
 #define SOUND_FRAME_CYCLES 8192 /* 512Hz */
@@ -589,6 +606,7 @@ enum WaveDuty {
   WAVE_DUTY_25 = 1,
   WAVE_DUTY_50 = 2,
   WAVE_DUTY_75 = 3,
+  WAVE_DUTY_COUNT,
 };
 
 enum WaveVolume {
@@ -596,6 +614,7 @@ enum WaveVolume {
   WAVE_VOLUME_100 = 1,
   WAVE_VOLUME_50 = 2,
   WAVE_VOLUME_25 = 3,
+  WAVE_VOLUME_COUNT,
 };
 
 enum CounterStep {
@@ -833,9 +852,22 @@ struct Envelope {
 struct WaveSample {
   uint32_t time;    /* Time (in cycles) the sample was read. */
   uint8_t position; /* Position in Wave RAM when read. */
-  uint8_t data;
+  uint8_t byte;     /* Byte read from the Wave RAM. */
+  uint8_t data;     /* Just the 4-bits of the sample. */
 };
 
+/* Channel 1 and 2 */
+struct SquareWave {
+  enum WaveDuty duty;
+
+  /* Internal state */
+  uint8_t sample;   /* Last sample generated, 0..1 */
+  uint32_t period;  /* Calculated from the frequency. */
+  uint8_t position; /* Position in the duty cycle, 0..7 */
+  uint32_t cycles;  /* 0..period */
+};
+
+/* Channel 3 */
 struct Wave {
   enum WaveVolume volume;
   uint8_t ram[WAVE_RAM_SIZE];
@@ -848,7 +880,7 @@ struct Wave {
 };
 
 struct Channel {
-  enum WaveDuty wave_duty;       /* Channel 1, 2 */
+  struct SquareWave square_wave; /* Channel 1, 2 */
   struct Envelope envelope;      /* Channel 1, 2, 4 */
   uint16_t frequency;            /* Channel 1, 2, 3 */
   uint8_t shift_clock_frequency; /* Channel 4 */
@@ -859,8 +891,12 @@ struct Channel {
 
   /* Internal state */
   enum Bool dac_enabled;
-  uint8_t volume;
   enum Bool status; /* Status bit for NR52 */
+};
+
+struct SoundBuffer {
+  uint16_t buffer[SOUND_BUFFER_SIZE]; /* Unsigned 16-bit samples @ 2MHz */
+  uint32_t position;
 };
 
 struct Sound {
@@ -872,8 +908,13 @@ struct Sound {
   struct Sweep sweep;
   struct Wave wave;
   struct Channel channel[CHANNEL_COUNT];
-  uint8_t frame;   /* 0..SOUND_FRAME_COUNT */
-  uint32_t cycles; /* 0..SOUND_FRAME_CYCLES */
+
+  /* Internal state */
+  uint8_t frame;         /* 0..SOUND_FRAME_COUNT */
+  uint32_t frame_cycles; /* 0..SOUND_FRAME_CYCLES */
+  uint32_t cycles;       /* Raw cycle counter */
+  struct SoundBuffer buffer;
+  enum Bool new_frame_edge;
 };
 
 struct LCDControl {
@@ -913,7 +954,6 @@ struct LCD {
   uint8_t win_y;    /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
   enum Bool new_frame_edge;
-  enum Bool new_line_edge;
 };
 
 struct DMA {
@@ -965,7 +1005,7 @@ static enum Result read_rom_data_from_file(const char* filename,
   CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
             MINIMUM_ROM_SIZE);
   uint8_t* data = malloc(size);
-  CHECK_MSG(data, "allocation failed.");
+  CHECK_MSG(data, "allocation failed.\n");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
   fclose(f);
   out_rom_data->data = data;
@@ -1325,14 +1365,15 @@ static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
   write_apu(e, APU_NR10_ADDR, 0x80);
   write_apu(e, APU_NR11_ADDR, 0xbf);
   write_apu(e, APU_NR12_ADDR, 0xf3);
-  write_apu(e, APU_NR14_ADDR, 0xbf);
+  write_apu(e, APU_NR14_ADDR, 0xff);
   write_apu(e, APU_NR21_ADDR, 0x3f);
   write_apu(e, APU_NR22_ADDR, 0x00);
+  write_apu(e, APU_NR23_ADDR, 0xff);
   write_apu(e, APU_NR24_ADDR, 0xbf);
   write_apu(e, APU_NR30_ADDR, 0x7f);
   write_apu(e, APU_NR31_ADDR, 0xff);
   write_apu(e, APU_NR32_ADDR, 0x9f);
-  write_apu(e, APU_NR33_ADDR, 0xbf);
+  write_apu(e, APU_NR33_ADDR, 0xff);
   write_apu(e, APU_NR41_ADDR, 0xff);
   write_apu(e, APU_NR42_ADDR, 0x00);
   write_apu(e, APU_NR43_ADDR, 0x00);
@@ -1567,7 +1608,7 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
 }
 
 static uint8_t read_nrx1_reg(struct Channel* channel) {
-  return READ_REG(channel->wave_duty, NRX1_WAVE_DUTY);
+  return READ_REG(channel->square_wave.duty, NRX1_WAVE_DUTY);
 }
 
 static uint8_t read_nrx2_reg(struct Channel* channel) {
@@ -1595,92 +1636,98 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   assert(addr < ARRAY_SIZE(mask));
   uint8_t result = mask[addr];
 
+  struct Sound* sound = &e->sound;
+  struct Channel* channel1 = &sound->channel[CHANNEL1];
+  struct Channel* channel2 = &sound->channel[CHANNEL2];
+  struct Channel* channel3 = &sound->channel[CHANNEL3];
+  struct Channel* channel4 = &sound->channel[CHANNEL4];
+  struct Sweep* sweep = &sound->sweep;
+  struct Wave* wave = &sound->wave;
+
   switch (addr) {
     case APU_NR10_ADDR: {
-      result |= READ_REG(e->sound.sweep.period, NR10_SWEEP_PERIOD) |
-                READ_REG(e->sound.sweep.direction, NR10_SWEEP_DIRECTION) |
-                READ_REG(e->sound.sweep.shift, NR10_SWEEP_SHIFT);
+      result |= READ_REG(sweep->period, NR10_SWEEP_PERIOD) |
+                READ_REG(sweep->direction, NR10_SWEEP_DIRECTION) |
+                READ_REG(sweep->shift, NR10_SWEEP_SHIFT);
       break;
     }
     case APU_NR11_ADDR:
-      result |= read_nrx1_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx1_reg(channel1);
       break;
     case APU_NR12_ADDR:
-      result |= read_nrx2_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx2_reg(channel1);
       break;
     case APU_NR13_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR14_ADDR:
-      result |= read_nrx4_reg(&e->sound.channel[CHANNEL1]);
+      result |= read_nrx4_reg(channel1);
       break;
     case APU_NR21_ADDR:
-      result |= read_nrx1_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx1_reg(channel2);
       break;
     case APU_NR22_ADDR:
-      result |= read_nrx2_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx2_reg(channel2);
       break;
     case APU_NR23_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR24_ADDR:
-      result |= read_nrx4_reg(&e->sound.channel[CHANNEL2]);
+      result |= read_nrx4_reg(channel2);
       break;
     case APU_NR30_ADDR:
       result |=
-          READ_REG(e->sound.channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
+          READ_REG(channel3->dac_enabled, NR30_DAC_ENABLED);
       break;
     case APU_NR31_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR32_ADDR:
-      result |= READ_REG(e->sound.wave.volume, NR32_SELECT_WAVE_VOLUME);
+      result |= READ_REG(wave->volume, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR34_ADDR:
-      result |= read_nrx4_reg(&e->sound.channel[CHANNEL3]);
+      result |= read_nrx4_reg(channel3);
       break;
     case APU_NR41_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR42_ADDR:
-      result |= read_nrx2_reg(&e->sound.channel[CHANNEL4]);
+      result |= read_nrx2_reg(channel4);
       break;
-    case APU_NR43_ADDR: {
-      struct Channel* channel = &e->sound.channel[CHANNEL4];
+    case APU_NR43_ADDR:
       result |=
-          READ_REG(channel->shift_clock_frequency, NR43_SHIFT_CLOCK_FREQUENCY) |
-          READ_REG(channel->counter_step, NR43_COUNTER_STEP) |
-          READ_REG(channel->divide_ratio, NR43_DIVIDE_RATIO);
+          READ_REG(channel4->shift_clock_frequency, NR43_SHIFT_CLOCK_FREQUENCY) |
+          READ_REG(channel4->counter_step, NR43_COUNTER_STEP) |
+          READ_REG(channel4->divide_ratio, NR43_DIVIDE_RATIO);
       break;
-    }
     case APU_NR44_ADDR:
-      result |= read_nrx4_reg(&e->sound.channel[CHANNEL4]);
+      result |= read_nrx4_reg(channel4);
       break;
     case APU_NR50_ADDR:
-      result |= READ_REG(e->sound.so2_output[VIN], NR50_VIN_SO2) |
-                READ_REG(e->sound.so2_volume, NR50_SO2_VOLUME) |
-                READ_REG(e->sound.so1_output[VIN], NR50_VIN_SO1) |
-                READ_REG(e->sound.so1_volume, NR50_SO1_VOLUME);
+      result |= READ_REG(sound->so2_output[VIN], NR50_VIN_SO2) |
+                READ_REG(sound->so2_volume, NR50_SO2_VOLUME) |
+                READ_REG(sound->so1_output[VIN], NR50_VIN_SO1) |
+                READ_REG(sound->so1_volume, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      result |= READ_REG(e->sound.so2_output[SOUND4], NR51_SOUND4_SO2) |
-                READ_REG(e->sound.so2_output[SOUND3], NR51_SOUND3_SO2) |
-                READ_REG(e->sound.so2_output[SOUND2], NR51_SOUND2_SO2) |
-                READ_REG(e->sound.so2_output[SOUND1], NR51_SOUND1_SO2) |
-                READ_REG(e->sound.so1_output[SOUND4], NR51_SOUND4_SO1) |
-                READ_REG(e->sound.so1_output[SOUND3], NR51_SOUND3_SO1) |
-                READ_REG(e->sound.so1_output[SOUND2], NR51_SOUND2_SO1) |
-                READ_REG(e->sound.so1_output[SOUND1], NR51_SOUND1_SO1);
+      result |= READ_REG(sound->so2_output[SOUND4], NR51_SOUND4_SO2) |
+                READ_REG(sound->so2_output[SOUND3], NR51_SOUND3_SO2) |
+                READ_REG(sound->so2_output[SOUND2], NR51_SOUND2_SO2) |
+                READ_REG(sound->so2_output[SOUND1], NR51_SOUND1_SO2) |
+                READ_REG(sound->so1_output[SOUND4], NR51_SOUND4_SO1) |
+                READ_REG(sound->so1_output[SOUND3], NR51_SOUND3_SO1) |
+                READ_REG(sound->so1_output[SOUND2], NR51_SOUND2_SO1) |
+                READ_REG(sound->so1_output[SOUND1], NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR:
-      result |= READ_REG(e->sound.enabled, NR52_ALL_SOUND_ENABLED) |
-                READ_REG(e->sound.channel[CHANNEL4].status, NR52_SOUND4_ON) |
-                READ_REG(e->sound.channel[CHANNEL3].status, NR52_SOUND3_ON) |
-                READ_REG(e->sound.channel[CHANNEL2].status, NR52_SOUND2_ON) |
-                READ_REG(e->sound.channel[CHANNEL1].status, NR52_SOUND1_ON);
+      result |= READ_REG(sound->enabled, NR52_ALL_SOUND_ENABLED) |
+                READ_REG(channel4->status, NR52_SOUND4_ON) |
+                READ_REG(channel3->status, NR52_SOUND3_ON) |
+                READ_REG(channel2->status, NR52_SOUND2_ON) |
+                READ_REG(channel1->status, NR52_SOUND1_ON);
       DEBUG_VERBOSE("read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
       break;
     default:
@@ -1695,7 +1742,7 @@ static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
   struct Wave* wave = &e->sound.wave;
   size_t i;
   for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
-    if (wave->sample[i].time + offset_cycles == e->cycles) {
+    if (wave->sample[i].time == e->cycles + offset_cycles) {
       return &wave->sample[i];
     }
   }
@@ -1709,10 +1756,9 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel.  */
     uint8_t result;
-    struct WaveSample* sample =
-        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_READ_OFFSET_CYCLES);
+    struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
-      result = sample->data;
+      result = sample->byte;
       DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n", addr,
             result, e->cycles);
     } else {
@@ -1965,59 +2011,47 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
+#define CHANNEL_INDEX(c) ((c) - e->sound.channel)
+
 static void write_nrx1_reg(struct Emulator* e,
-                           int channel_index,
+                           struct Channel* channel,
                            uint8_t value) {
-  struct Channel* channel = &e->sound.channel[channel_index];
   if (e->sound.enabled) {
-    channel->wave_duty = WRITE_REG(value, NRX1_WAVE_DUTY);
+    channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   }
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
-  DEBUG_VERBOSE("write_nrx1_reg(%u, 0x%02x) length=%u\n", channel_index, value,
-                channel->length);
+  DEBUG_VERBOSE("write_nrx1_reg(%zu, 0x%02x) length=%u\n",
+                CHANNEL_INDEX(channel), value, channel->length);
 }
 
 static void write_nrx2_reg(struct Emulator* e,
-                           int channel_index,
+                           struct Channel* channel,
                            uint8_t value) {
-  struct Channel* channel = &e->sound.channel[channel_index];
   channel->envelope.initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) dac_enabled = false\n",
-                  channel_index, value);
+    DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
+                  CHANNEL_INDEX(channel), value);
   }
   channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
-  DEBUG_VERBOSE("write_nrx2_reg(%u, 0x%02x) initial_volume=%u\n", channel_index,
-                value, channel->initial_volume);
+  DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
+                CHANNEL_INDEX(channel), value, channel->initial_volume);
 }
 
 static void write_nrx3_reg(struct Emulator* e,
-                           int channel_index,
+                           struct Channel* channel,
                            uint8_t value) {
-  struct Channel* channel = &e->sound.channel[channel_index];
   channel->frequency &= ~0xff;
   channel->frequency |= value;
 }
 
-static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
-  uint16_t f = sweep->frequency;
-  if (sweep->direction == SWEEP_DIRECTION_ADDITION) {
-    return f + (f >> sweep->shift);
-  } else {
-    sweep->calculated_subtract = TRUE;
-    return f - (f >> sweep->shift);
-  }
-}
-
 /* Returns TRUE if this channel was triggered. */
 static enum Bool write_nrx4_reg(struct Emulator* e,
-                                int channel_index,
+                                struct Channel* channel,
                                 uint8_t value,
                                 uint16_t max_length) {
-  struct Channel* channel = &e->sound.channel[channel_index];
   enum Bool trigger = WRITE_REG(value, NRX4_INITIAL);
   enum Bool was_length_enabled = channel->length_enabled;
   channel->length_enabled = WRITE_REG(value, NRX4_LENGTH_ENABLED);
@@ -2031,11 +2065,11 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG("write_nrx4_reg(%u, 0x%02x) extra length clock = %u\n", channel_index,
-          value, channel->length);
+    DEBUG("write_nrx4_reg(%zu, 0x%02x) extra length clock = %u\n",
+          CHANNEL_INDEX(channel), value, channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG("write_nrx4_reg(%u, 0x%02x) disabling channel.\n", channel_index,
-            value);
+      DEBUG("write_nrx4_reg(%zu, 0x%02x) disabling channel.\n",
+            CHANNEL_INDEX(channel), value);
       channel->status = FALSE;
     }
   }
@@ -2046,16 +2080,17 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG("write_nrx4_reg(%u, 0x%02x) trigger, new length = %u\n",
-            channel_index, value, channel->length);
+      DEBUG("write_nrx4_reg(%zu, 0x%02x) trigger, new length = %u\n",
+            CHANNEL_INDEX(channel), value, channel->length);
     }
     if (channel->dac_enabled) {
       channel->status = TRUE;
     }
   }
 
-  DEBUG_VERBOSE("write_nrx4_reg(%u, 0x%02x) trigger=%u length_enabled=%u\n",
-                channel_index, value, trigger, channel->length_enabled);
+  DEBUG_VERBOSE("write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
+                CHANNEL_INDEX(channel), value, trigger,
+                channel->length_enabled);
   return trigger;
 }
 
@@ -2073,14 +2108,24 @@ static void trigger_nrx4_envelope(struct Emulator* e,
         envelope->timer);
 }
 
-static void trigger_nr14_reg(struct Emulator* e) {
-  struct Channel* channel = &e->sound.channel[CHANNEL1];
-  struct Sweep* sweep = &e->sound.sweep;
+static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
+  uint16_t f = sweep->frequency;
+  if (sweep->direction == SWEEP_DIRECTION_ADDITION) {
+    return f + (f >> sweep->shift);
+  } else {
+    sweep->calculated_subtract = TRUE;
+    return f - (f >> sweep->shift);
+  }
+}
+
+static void trigger_nr14_reg(struct Emulator* e,
+                             struct Channel* channel,
+                             struct Sweep* sweep) {
   sweep->enabled = sweep->period || sweep->shift;
   sweep->frequency = channel->frequency;
   sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
   sweep->calculated_subtract = FALSE;
-  if (sweep->shift && calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+  if (sweep->shift && calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
     channel->status = FALSE;
     DEBUG("trigger_nr11_reg: disabling, sweep overflow.\n");
   } else {
@@ -2088,20 +2133,21 @@ static void trigger_nr14_reg(struct Emulator* e) {
   }
 }
 
-static void trigger_nr34_reg(struct Emulator* e) {
-  struct Wave* wave = &e->sound.wave;
+static void trigger_nr34_reg(struct Emulator* e,
+                             struct Channel* channel,
+                             struct Wave* wave) {
   wave->position = 0;
   wave->cycles = wave->period;
   /* Triggering the wave channel while it is already playing will corrupt the
    * wave RAM. */
-  if (e->sound.channel[CHANNEL3].status) {
+  if (channel->status) {
     struct WaveSample* sample =
         is_concurrent_wave_ram_access(e, WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES);
     if (sample) {
       assert(sample->position < 32);
       switch (sample->position >> 3) {
         case 0:
-          wave->ram[0] = sample->data;
+          wave->ram[0] = sample->byte;
           break;
         case 1:
         case 2:
@@ -2116,12 +2162,19 @@ static void trigger_nr34_reg(struct Emulator* e) {
   }
 }
 
-static void write_wave_period(struct Emulator* e) {
-  struct Wave* wave = &e->sound.wave;
-  uint16_t frequency = e->sound.channel[CHANNEL3].frequency;
-  wave->period = ((WAVE_MAX_FREQUENCY + 1) - frequency) * 2;
-  DEBUG("write_wave_period: freq: %u cycle: %u period: %u\n", frequency,
-        wave->cycles, wave->period);
+static void write_wave_period(struct Emulator* e,
+                              struct Channel* channel,
+                              struct Wave* wave) {
+  wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
+  DEBUG("write_wave_period: freq: %u cycle: %u period: %u\n",
+        channel->frequency, wave->cycles, wave->period);
+}
+
+static void write_square_wave_period(struct Channel* channel,
+                                     struct SquareWave* wave) {
+  wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
+  DEBUG("write_square_wave_period: freq: %u cycle: %u period: %u\n",
+        channel->frequency, wave->cycles, wave->period);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -2139,11 +2192,18 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     }
   }
 
+  struct Sound* sound = &e->sound;
+  struct Channel* channel1 = &sound->channel[CHANNEL1];
+  struct Channel* channel2 = &sound->channel[CHANNEL2];
+  struct Channel* channel3 = &sound->channel[CHANNEL3];
+  struct Channel* channel4 = &sound->channel[CHANNEL4];
+  struct Sweep* sweep = &sound->sweep;
+  struct Wave* wave = &sound->wave;
+
   DEBUG("write_apu(0x%04x [%s], 0x%02x)\n", addr, get_apu_reg_string(addr),
         value);
   switch (addr) {
     case APU_NR10_ADDR: {
-      struct Sweep* sweep = &e->sound.sweep;
       enum SweepDirection old_direction = sweep->direction;
       sweep->period = WRITE_REG(value, NR10_SWEEP_PERIOD);
       sweep->direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
@@ -2151,100 +2211,109 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       if (old_direction == SWEEP_DIRECTION_SUBTRACTION &&
           sweep->direction == SWEEP_DIRECTION_ADDITION &&
           sweep->calculated_subtract) {
-        e->sound.channel[CHANNEL1].status = FALSE;
+        channel1->status = FALSE;
       }
       break;
     }
     case APU_NR11_ADDR:
-      write_nrx1_reg(e, CHANNEL1, value);
+      write_nrx1_reg(e, channel1, value);
       break;
     case APU_NR12_ADDR:
-      write_nrx2_reg(e, CHANNEL1, value);
+      write_nrx2_reg(e, channel1, value);
       break;
     case APU_NR13_ADDR:
-      write_nrx3_reg(e, CHANNEL1, value);
+      write_nrx3_reg(e, channel1, value);
+      write_square_wave_period(channel1, &channel1->square_wave);
       break;
-    case APU_NR14_ADDR:
-      if (write_nrx4_reg(e, CHANNEL1, value, NRX1_MAX_LENGTH)) {
-        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL1].envelope);
-        trigger_nr14_reg(e);
+    case APU_NR14_ADDR: {
+      enum Bool trigger = write_nrx4_reg(e, channel1, value, NRX1_MAX_LENGTH);
+      write_square_wave_period(channel1, &channel1->square_wave);
+      if (trigger) {
+        trigger_nrx4_envelope(e, &channel1->envelope);
+        trigger_nr14_reg(e, channel1, sweep);
       }
       break;
+    }
     case APU_NR21_ADDR:
-      write_nrx1_reg(e, CHANNEL2, value);
+      write_nrx1_reg(e, channel2, value);
       break;
     case APU_NR22_ADDR:
-      write_nrx2_reg(e, CHANNEL2, value);
+      write_nrx2_reg(e, channel2, value);
       break;
     case APU_NR23_ADDR:
-      write_nrx3_reg(e, CHANNEL2, value);
+      write_nrx3_reg(e, channel2, value);
+      write_square_wave_period(channel2, &channel2->square_wave);
       break;
-    case APU_NR24_ADDR:
-      if (write_nrx4_reg(e, CHANNEL2, value, NRX1_MAX_LENGTH)) {
-        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL2].envelope);
-      }
-      break;
-    case APU_NR30_ADDR: {
-      struct Channel* channel = &e->sound.channel[CHANNEL3];
-      channel->dac_enabled = WRITE_REG(value, NR30_DAC_ENABLED);
-      if (!channel->dac_enabled) {
-        channel->status = FALSE;
+    case APU_NR24_ADDR: {
+      enum Bool trigger = write_nrx4_reg(e, channel2, value, NRX1_MAX_LENGTH);
+      write_square_wave_period(channel2, &channel2->square_wave);
+      if (trigger) {
+        trigger_nrx4_envelope(e, &channel2->envelope);
       }
       break;
     }
+    case APU_NR30_ADDR:
+      channel3->dac_enabled = WRITE_REG(value, NR30_DAC_ENABLED);
+      if (!channel3->dac_enabled) {
+        channel3->status = FALSE;
+      }
+      break;
     case APU_NR31_ADDR:
-      e->sound.channel[CHANNEL3].length = NR31_MAX_LENGTH - value;
+      channel3->length = NR31_MAX_LENGTH - value;
       break;
     case APU_NR32_ADDR:
-      e->sound.wave.volume = WRITE_REG(value, NR32_SELECT_WAVE_VOLUME);
+      wave->volume = WRITE_REG(value, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
-      write_nrx3_reg(e, CHANNEL3, value);
-      write_wave_period(e);
+      write_nrx3_reg(e, channel3, value);
+      write_wave_period(e, channel3, wave);
       break;
-    case APU_NR34_ADDR:
-      if (write_nrx4_reg(e, CHANNEL3, value, NR31_MAX_LENGTH)) {
-        write_wave_period(e);
-        trigger_nr34_reg(e);
+    case APU_NR34_ADDR: {
+      enum Bool trigger = write_nrx4_reg(e, channel3, value, NR31_MAX_LENGTH);
+      write_wave_period(e, channel3, wave);
+      if (trigger) {
+        trigger_nr34_reg(e, channel3, wave);
       }
-      break;
-    case APU_NR41_ADDR:
-      write_nrx1_reg(e, CHANNEL4, value);
-      break;
-    case APU_NR42_ADDR:
-      write_nrx2_reg(e, CHANNEL4, value);
-      break;
-    case APU_NR43_ADDR: {
-      struct Channel* channel = &e->sound.channel[CHANNEL4];
-      channel->shift_clock_frequency =
-          WRITE_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
-      channel->counter_step = WRITE_REG(value, NR43_COUNTER_STEP);
-      channel->divide_ratio = WRITE_REG(value, NR43_DIVIDE_RATIO);
       break;
     }
-    case APU_NR44_ADDR:
-      if (write_nrx4_reg(e, CHANNEL4, value, NRX1_MAX_LENGTH)) {
-        trigger_nrx4_envelope(e, &e->sound.channel[CHANNEL3].envelope);
+    case APU_NR41_ADDR:
+      write_nrx1_reg(e, channel4, value);
+      break;
+    case APU_NR42_ADDR:
+      write_nrx2_reg(e, channel4, value);
+      break;
+    case APU_NR43_ADDR: {
+      channel4->shift_clock_frequency =
+          WRITE_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
+      channel4->counter_step = WRITE_REG(value, NR43_COUNTER_STEP);
+      channel4->divide_ratio = WRITE_REG(value, NR43_DIVIDE_RATIO);
+      break;
+    }
+    case APU_NR44_ADDR: {
+      enum Bool trigger = write_nrx4_reg(e, channel4, value, NRX1_MAX_LENGTH);
+      if (trigger) {
+        trigger_nrx4_envelope(e, &channel4->envelope);
       }
       break;
+    }
     case APU_NR50_ADDR:
-      e->sound.so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
-      e->sound.so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
-      e->sound.so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
-      e->sound.so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
+      sound->so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
+      sound->so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
+      sound->so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
+      sound->so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      e->sound.so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
-      e->sound.so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
-      e->sound.so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
-      e->sound.so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
-      e->sound.so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
-      e->sound.so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
-      e->sound.so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
-      e->sound.so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
+      sound->so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
+      sound->so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
+      sound->so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
+      sound->so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
+      sound->so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
+      sound->so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
+      sound->so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
+      sound->so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
-      enum Bool was_enabled = e->sound.enabled;
+      enum Bool was_enabled = sound->enabled;
       enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
         DEBUG("Powered down APU. Clearing registers.\n");
@@ -2260,9 +2329,9 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
         }
       } else if (!was_enabled && is_enabled) {
         DEBUG("Powered up APU. Resetting frame and sweep timers.\n");
-        e->sound.frame = 7;
+        sound->frame = 7;
       }
-      e->sound.enabled = is_enabled;
+      sound->enabled = is_enabled;
       break;
     }
   }
@@ -2276,8 +2345,7 @@ static void write_wave_ram(struct Emulator* e,
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    struct WaveSample* sample =
-        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_WRITE_OFFSET_CYCLES);
+    struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       wave->ram[sample->position >> 1] = value;
       DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
@@ -2525,6 +2593,7 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
 static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
   struct LCD* lcd = &e->lcd;
   lcd->cycles += cycles;
+  enum Bool new_line_edge = FALSE;
 
   if (lcd->lcdc.display) {
     switch (lcd->stat.mode) {
@@ -2545,7 +2614,7 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       case LCD_MODE_HBLANK:
         if (VALUE_WRAPPED(lcd->cycles, HBLANK_CYCLES)) {
           lcd->LY++;
-          lcd->new_line_edge = TRUE;
+          new_line_edge = TRUE;
           if (lcd->LY == SCREEN_HEIGHT) {
             lcd->stat.mode = LCD_MODE_VBLANK;
             e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
@@ -2562,14 +2631,14 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
         break;
       case LCD_MODE_VBLANK:
         if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-          lcd->new_line_edge = TRUE;
+          new_line_edge = TRUE;
           lcd->LY++;
           if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
             lcd->win_y = 0;
             lcd->frame_WY = lcd->WY;
             lcd->frame++;
             lcd->new_frame_edge = TRUE;
-            lcd->new_line_edge = TRUE;
+            new_line_edge = TRUE;
             lcd->stat.mode = LCD_MODE_USING_OAM;
             if (lcd->stat.using_oam_intr) {
               e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
@@ -2578,13 +2647,12 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
         }
         break;
     }
-    if (lcd->new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
+    if (new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
       e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
     }
   } else {
     if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
       lcd->fake_LY++;
-      lcd->new_line_edge = TRUE;
       if (VALUE_WRAPPED(lcd->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
         lcd->new_frame_edge = TRUE;
         lcd->frame++;
@@ -2629,32 +2697,6 @@ static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_channel_length(struct Channel* channel) {
-  if (--channel->length == 0) {
-    channel->status = FALSE;
-  }
-}
-
-static void update_channel_envelope(struct Channel* channel) {
-  struct Envelope* envelope = &channel->envelope;
-  if (envelope->period) {
-    if (envelope->automatic && --envelope->timer == 0) {
-      if (envelope->direction == ENVELOPE_ATTENUATE) {
-        envelope->volume--;
-      } else {
-        envelope->volume++;
-      }
-      if (envelope->volume > ENVELOPE_MAX_VOLUME) {
-        envelope->volume =
-            envelope->direction == ENVELOPE_ATTENUATE ? 0 : ENVELOPE_MAX_VOLUME;
-        envelope->automatic = FALSE;
-      }
-    }
-  } else {
-    envelope->timer = ENVELOPE_MAX_PERIOD;
-  }
-}
-
 static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
   if (!sweep->enabled) {
     return;
@@ -2665,17 +2707,18 @@ static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
     if (period) {
       sweep->timer = period;
       uint16_t new_frequency = calculate_sweep_frequency(sweep);
-      if (new_frequency > SWEEP_MAX_FREQUENCY) {
+      if (new_frequency > SOUND_MAX_FREQUENCY) {
         DEBUG("channel 1: disabling from sweep overflow\n");
         channel->status = FALSE;
       } else {
         if (sweep->shift) {
           DEBUG("channel 1: updated frequency=%u\n", new_frequency);
           sweep->frequency = channel->frequency = new_frequency;
+          write_square_wave_period(channel, &channel->square_wave);
         }
 
         /* Perform another overflow check */
-        if (calculate_sweep_frequency(sweep) > SWEEP_MAX_FREQUENCY) {
+        if (calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
           DEBUG("channel 1: disabling from 2nd sweep overflow\n");
           channel->status = FALSE;
         }
@@ -2686,69 +2729,229 @@ static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
   }
 }
 
-static void update_wave(struct Emulator* e, uint8_t cycles) {
-  struct Wave* wave = &e->sound.wave;
-  while (wave->cycles < cycles) {
+static uint8_t update_square_wave(struct Channel* channel,
+                                  struct SquareWave* wave) {
+  static uint8_t duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] = {
+    {0, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_12_5 */
+    {1, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_25 */
+    {1, 0, 0, 0, 0, 1, 1, 1}, /* WAVE_DUTY_50 */
+    {0, 1, 1, 1, 1, 1, 1, 0}, /* WAVE_DUTY_75 */
+  };
+
+  if (wave->cycles <= APU_CYCLES) {
+    wave->cycles += wave->period;
+    wave->position++;
+    VALUE_WRAPPED(wave->position, DUTY_CYCLE_COUNT);
+    wave->sample = duty[wave->duty][wave->position];
+  }
+  wave->cycles -= APU_CYCLES;
+  return wave->sample;
+}
+
+static void update_channel_length(struct Channel* channel) {
+  if (channel->length_enabled && channel->length > 0) {
+    if (--channel->length == 0) {
+      channel->status = FALSE;
+    }
+  }
+}
+
+static void update_channel_envelope(struct Channel* channel) {
+  struct Envelope* envelope = &channel->envelope;
+  if (envelope->period) {
+    if (envelope->automatic && --envelope->timer == 0) {
+      if (envelope->direction == ENVELOPE_ATTENUATE) {
+        if (envelope->volume > 0) {
+          envelope->volume--;
+        } else {
+          envelope->volume = 0;
+          envelope->automatic = FALSE;
+        }
+      } else {
+        if (envelope->volume < ENVELOPE_MAX_VOLUME) {
+          envelope->volume++;
+        } else {
+          envelope->volume = ENVELOPE_MAX_VOLUME;
+          envelope->automatic = FALSE;
+        }
+      }
+    }
+  } else {
+    envelope->timer = ENVELOPE_MAX_PERIOD;
+  }
+}
+
+static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
+  if (wave->cycles < APU_CYCLES) {
     wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
     struct WaveSample sample;
-    sample.time = e->cycles + wave->cycles;
+    sample.time = sound->cycles + wave->cycles;
     sample.position = wave->position;
-    sample.data = wave->ram[wave->position >> 1];
-    wave->sample[0] = wave->sample[1];
-    wave->sample[1] = sample;
+    sample.byte = wave->ram[wave->position >> 1];
+    if ((wave->position & 1) == 0) {
+      sample.data = sample.byte >> 4; /* High nybble. */
+    } else {
+      sample.data = sample.byte & 0x0f; /* Low nybble. */
+    }
+    wave->sample[1] = wave->sample[0];
+    wave->sample[0] = sample;
     DEBUG_VERBOSE("update_wave: position: %u => %u (cy: %u)\n", wave->position,
                   sample.data, sample.time);
   }
-  wave->cycles -= cycles;
+  wave->cycles -= APU_CYCLES;
+  return wave->sample[0].data;
+}
+
+static uint16_t channelx_sample(struct Channel* channel, uint8_t sample) {
+  assert(channel->status);
+  assert(sample < 2);
+  assert(channel->envelope.volume < 16);
+  /* Convert from a 4-bit sample to a 16-bit sample. */
+  return (sample * channel->envelope.volume) << 12;
+}
+
+static uint16_t channel3_sample(struct Channel* channel,
+                                struct Wave* wave,
+                                uint8_t sample) {
+  assert(channel->status);
+  assert(sample < 16);
+  assert(wave->volume < WAVE_VOLUME_COUNT);
+  static uint8_t shift[WAVE_VOLUME_COUNT] = {4, 0, 1, 2};
+  /* Convert from a 4-bit sample to a 16-bit sample. */
+  return (sample >> shift[wave->volume]) << 12;
+}
+
+static void write_sample(struct Sound* sound, uint16_t mixed_sample) {
+  assert(sound->buffer.position < SOUND_BUFFER_SIZE);
+  sound->buffer.buffer[sound->buffer.position++] = mixed_sample;
+  if (sound->buffer.position == SOUND_SAMPLES_PER_FRAME) {
+    sound->new_frame_edge = TRUE;
+  }
 }
 
 static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
-  if (!e->sound.enabled) {
+  struct Sound* sound = &e->sound;
+  uint8_t i;
+  if (!sound->enabled) {
+    for (i = 0; i < cycles; i += APU_CYCLES) {
+      write_sample(sound, 0);
+      write_sample(sound, 0);
+    }
     return;
   }
 
-  enum Bool do_length = FALSE;
-  enum Bool do_envelope = FALSE;
-  enum Bool do_sweep = FALSE;
-  e->sound.cycles += cycles;
-  if (VALUE_WRAPPED(e->sound.cycles, SOUND_FRAME_CYCLES)) {
-    e->sound.frame++;
-    VALUE_WRAPPED(e->sound.frame, SOUND_FRAME_COUNT);
+  struct Channel* channel1 = &sound->channel[CHANNEL1];
+  struct Channel* channel2 = &sound->channel[CHANNEL2];
+  struct Channel* channel3 = &sound->channel[CHANNEL3];
+  struct Channel* channel4 = &sound->channel[CHANNEL4];
+  struct Sweep* sweep = &sound->sweep;
+  struct Wave* wave = &sound->wave;
 
-    switch (e->sound.frame) {
-      case 0: do_length = TRUE; break;
-      case 1: break;
-      case 2: do_length = do_sweep = TRUE; break;
-      case 3: break;
-      case 4: do_length = TRUE; break;
-      case 5: break;
-      case 6: do_length = do_sweep = TRUE; break;
-      case 7: do_envelope = TRUE; break;
-    }
+  /* Synchronize with CPU cycle counter. */
+  sound->cycles = e->cycles;
 
-    DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cycle: %u\n",
-                  do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-                  do_sweep ? 'S' : '.', e->sound.frame, e->sound.cycles);
+  for (i = 0; i < cycles; i += APU_CYCLES) {
+    enum Bool do_length = FALSE;
+    enum Bool do_envelope = FALSE;
+    enum Bool do_sweep = FALSE;
+    sound->cycles += APU_CYCLES;
+    sound->frame_cycles += APU_CYCLES;
+    if (VALUE_WRAPPED(sound->frame_cycles, SOUND_FRAME_CYCLES)) {
+      sound->frame++;
+      VALUE_WRAPPED(sound->frame, SOUND_FRAME_COUNT);
 
-    int i;
-    for (i = 0; i < CHANNEL_COUNT; ++i) {
-      struct Channel* channel = &e->sound.channel[i];
-      if (do_length && channel->length_enabled && channel->length > 0) {
-        update_channel_length(channel);
+      switch (sound->frame) {
+        case 0: do_length = TRUE; break;
+        case 1: break;
+        case 2: do_length = do_sweep = TRUE; break;
+        case 3: break;
+        case 4: do_length = TRUE; break;
+        case 5: break;
+        case 6: do_length = do_sweep = TRUE; break;
+        case 7: do_envelope = TRUE; break;
       }
-      if (i != CHANNEL3 && do_envelope) {
-        update_channel_envelope(channel);
+
+      DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cy: %u\n",
+                    do_length ? 'L' : '.', do_envelope ? 'E' : '.',
+                    do_sweep ? 'S' : '.', sound->frame, e->cycles + i);
+    }
+
+    uint16_t sample;
+    uint32_t so1_mixed_sample = 0;
+    uint32_t so2_mixed_sample = 0;
+
+    /* Channel 1 */
+    if (channel1->status) {
+      if (do_sweep) update_channel_sweep(channel1, sweep);
+      sample = update_square_wave(channel1, &channel1->square_wave);
+    }
+    if (do_length) update_channel_length(channel1);
+    if (channel1->status) {
+      if (do_envelope) update_channel_envelope(channel1);
+      sample = channelx_sample(channel1, sample);
+      if (sound->so1_output[CHANNEL1]) {
+        so1_mixed_sample += sample;
+      }
+      if (sound->so2_output[CHANNEL1]) {
+        so2_mixed_sample += sample;
       }
     }
 
-    if (do_sweep) {
-      update_channel_sweep(&e->sound.channel[CHANNEL1], &e->sound.sweep);
+    /* Channel 2 */
+    if (channel2->status) {
+      sample = update_square_wave(channel2, &channel2->square_wave);
     }
+    if (do_length) update_channel_length(channel2);
+    if (channel2->status) {
+      if (do_envelope) update_channel_envelope(channel2);
+      sample = channelx_sample(channel2, sample);
+      if (sound->so1_output[CHANNEL2]) {
+        so1_mixed_sample += sample;
+      }
+      if (sound->so2_output[CHANNEL2]) {
+        so2_mixed_sample += sample;
+      }
+    }
+
+    /* Channel 3 */
+    if (channel3->status) {
+      sample = update_wave(sound, wave);
+    }
+    if (do_length) update_channel_length(channel3);
+    if (channel3->status) {
+      sample = channel3_sample(channel3, wave, sample);
+      if (sound->so1_output[CHANNEL3]) {
+        so1_mixed_sample += sample;
+      }
+      if (sound->so2_output[CHANNEL3]) {
+        so2_mixed_sample += sample;
+      }
+    }
+
+    /* Channel 4 */
+    if (do_length) update_channel_length(channel4);
+    if (channel4->status) {
+      /* TODO implement */
+      sample = 0;
+      if (do_envelope) update_channel_envelope(channel4);
+      sample = channelx_sample(channel4, sample);
+      if (sound->so1_output[CHANNEL4]) {
+        so1_mixed_sample += sample;
+      }
+      if (sound->so2_output[CHANNEL4]) {
+        so2_mixed_sample += sample;
+      }
+    }
+
+    so1_mixed_sample *= (sound->so1_volume + 1);
+    so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
+    so2_mixed_sample *= (sound->so2_volume + 1);
+    so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
+    write_sample(sound, so1_mixed_sample);
+    write_sample(sound, so2_mixed_sample);
   }
-
-  update_wave(e, cycles);
 }
 
 static void update_cycles(struct Emulator* e, uint8_t cycles) {
@@ -4051,11 +4254,154 @@ static void handle_interrupts(struct Emulator* e) {
 }
 
 static void step_emulator(struct Emulator* e) {
-  e->lcd.new_frame_edge = FALSE;
-  e->lcd.new_line_edge = FALSE;
   print_emulator_info(e);
   execute_instruction(e);
   handle_interrupts(e);
+}
+
+union SDLBufferPointer {
+  void* v;
+  int8_t* s8;
+  uint8_t* u8;
+  int16_t* s16;
+  uint16_t* u16;
+};
+
+struct SDLAudio {
+  SDL_AudioSpec spec;
+  union SDLBufferPointer buffer;
+  union SDLBufferPointer buffer_end;
+  union SDLBufferPointer read_pos;
+  union SDLBufferPointer write_pos;
+  size_t buffer_capacity; /* Total capacity in bytes of the buffer. */
+  size_t buffer_size;     /* Number of bytes available for reading. */
+  size_t sample_size;     /* Size of one channel's sample. */
+  enum Bool ready;        /* Set to TRUE when audio is first rendered. */
+};
+
+struct SDL {
+  SDL_Surface* surface;
+  struct SDLAudio audio;
+  double gb_ms;               /* GB CPU time since last frame. */
+  uint32_t last_frame_cycles; /* GB CPU cycle count of last frame. */
+  double last_frame_real_ms;  /* Wall time of last frame. */
+};
+
+static enum Result sdl_init_video(struct SDL* sdl) {
+  CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
+  sdl->surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
+  CHECK_MSG(sdl->surface != NULL, "SDL_SetVideoMode failed.\n");
+  return OK;
+error:
+  if (sdl->surface) {
+    SDL_FreeSurface(sdl->surface);
+    sdl->surface = NULL;
+  }
+  return ERROR;
+}
+
+static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
+  struct SDL* sdl = userdata;
+  struct SDLAudio* audio = &sdl->audio;
+  int underflow_left = 0;
+  if (len > (int)audio->buffer_size) {
+    LOG("sound buffer underflow. requested %u > avail %zd\n", len,
+        audio->buffer_size);
+    underflow_left = len - audio->buffer_size;
+    len = audio->buffer_size;
+  }
+  union SDLBufferPointer src_buf = audio->buffer;
+  union SDLBufferPointer src_buf_end = audio->buffer_end;
+  union SDLBufferPointer* src = &audio->read_pos;
+  if (src->u8 + len > src_buf_end.u8) {
+    size_t len1 = src_buf_end.u8 - src->u8;
+    size_t len2 = len - len1;
+    memcpy(dst, src->u8, len1);
+    memcpy(dst + len1, src_buf.u8, len2);
+    src->v = src_buf.u8 + len2;
+  } else {
+    memcpy(dst, src->u8, len);
+    src->v = src->u8 + len;
+  }
+  audio->buffer_size -= len;
+  if (underflow_left) {
+    memset(dst + len, 0, underflow_left);
+  }
+}
+
+static const char* get_sdl_audio_format_string(uint16_t format) {
+  switch (format) {
+    case AUDIO_U8: return "AUDIO_U8";
+    case AUDIO_S8: return "AUDIO_S8";
+    case AUDIO_U16LSB: return "AUDIO_U16LSB";
+    case AUDIO_S16LSB: return "AUDIO_S16LSB";
+    case AUDIO_U16MSB: return "AUDIO_U16MSB";
+    case AUDIO_S16MSB: return "AUDIO_S16MSB";
+    default: return "unknown";
+  }
+}
+
+static size_t get_sdl_format_sample_size(uint16_t format) {
+  switch (format) {
+    case AUDIO_U8: return 1;
+    case AUDIO_S8: return 1;
+    case AUDIO_U16LSB: return 2;
+    case AUDIO_S16LSB: return 2;
+    case AUDIO_U16MSB: return 2;
+    case AUDIO_S16MSB: return 2;
+    default: UNREACHABLE("Bad format: 0x%04x\n", format);
+  }
+}
+
+static double get_time_ms(void) {
+  struct timespec ts;
+  int result = clock_gettime(CLOCK_MONOTONIC, &ts);
+  assert(result == 0);
+  return (double)ts.tv_sec * 1000 + (double)ts.tv_nsec / 1000000;
+}
+
+static enum Result sdl_init_audio(struct SDL* sdl) {
+  sdl->last_frame_cycles = 0;
+  sdl->last_frame_real_ms = get_time_ms();
+
+  SDL_AudioSpec desired_spec = {
+      .freq = AUDIO_DESIRED_FREQUENCY,
+      .format = AUDIO_DESIRED_FORMAT,
+      .channels = AUDIO_DESIRED_CHANNELS,
+      .samples = AUDIO_DESIRED_SAMPLES,
+      .callback = sdl_audio_callback,
+      .userdata = sdl,
+  };
+  CHECK_MSG(SDL_OpenAudio(&desired_spec, &sdl->audio.spec) == 0,
+            "SDL_OpenAudio failed.\n");
+  LOG("SDL frequency = %u\n", sdl->audio.spec.freq);
+  LOG("SDL format = %s\n", get_sdl_audio_format_string(sdl->audio.spec.format));
+  LOG("SDL channels = %u\n", sdl->audio.spec.channels);
+  LOG("SDL samples = %u\n", sdl->audio.spec.samples);
+  CHECK_MSG(sdl->audio.spec.channels == AUDIO_DESIRED_CHANNELS,
+            "Expcted 2 channels.\n");
+
+  sdl->audio.sample_size = get_sdl_format_sample_size(sdl->audio.spec.format);
+  size_t buffer_capacity =
+      sdl->audio.spec.freq * sdl->audio.sample_size * sdl->audio.spec.channels;
+  sdl->audio.buffer_capacity = buffer_capacity;
+
+  sdl->audio.buffer.v = malloc(buffer_capacity);
+  CHECK_MSG(sdl->audio.buffer.v != NULL, "allocation failed.\n");
+  memset(sdl->audio.buffer.v, 0, buffer_capacity);
+
+  sdl->audio.buffer_end.v = sdl->audio.buffer.u8 + buffer_capacity;
+  sdl->audio.read_pos.v = sdl->audio.write_pos.v = sdl->audio.buffer.v;
+  return OK;
+error:
+  return ERROR;
+}
+
+static void sdl_destroy(struct SDL* sdl) {
+  if (sdl->surface) {
+    SDL_FreeSurface(sdl->surface);
+  }
+  SDL_Quit();
 }
 
 static enum Bool sdl_poll_events(struct Emulator* e) {
@@ -4087,7 +4433,8 @@ static enum Bool sdl_poll_events(struct Emulator* e) {
   return running;
 }
 
-static void sdl_render_surface(struct Emulator* e, SDL_Surface* surface) {
+static void sdl_render_surface(struct SDL* sdl, struct Emulator* e) {
+  SDL_Surface* surface = sdl->surface;
   if (SDL_LockSurface(surface) == 0) {
     uint32_t* pixels = surface->pixels;
     int sx, sy;
@@ -4113,24 +4460,119 @@ static void sdl_render_surface(struct Emulator* e, SDL_Surface* surface) {
   SDL_Flip(surface);
 }
 
-static void sdl_wait_for_frame(struct Emulator* e,
-                               uint32_t* last_cycles,
-                               uint32_t* last_ticks_ms) {
-  uint32_t ticks_ms = SDL_GetTicks();
-  double gb_ms = (double)(e->cycles - *last_cycles) * MILLISECONDS_PER_SECOND /
-                 GB_CYCLES_PER_SECOND;
-  double real_ms = ticks_ms - *last_ticks_ms;
-  while (real_ms < gb_ms) {
-    double delta_ms = gb_ms - real_ms;
-    if (delta_ms > 10) {
-      SDL_Delay(delta_ms);
-    }
-    ticks_ms = SDL_GetTicks();
-    real_ms = ticks_ms - *last_ticks_ms;
-  }
+static void sdl_update_gb_frame_time(struct SDL* sdl, struct Emulator* e) {
+  sdl->gb_ms = (double)(e->cycles - sdl->last_frame_cycles) *
+               MILLISECONDS_PER_SECOND / GB_CYCLES_PER_SECOND;
+}
 
-  *last_cycles = e->cycles;
-  *last_ticks_ms = ticks_ms;
+static void sdl_wait_for_frame(struct SDL* sdl, struct Emulator* e) {
+  sdl_update_gb_frame_time(sdl, e);
+  while (TRUE) {
+    double ticks_ms = get_time_ms();
+    double real_ms = ticks_ms - sdl->last_frame_real_ms;
+    double delta_ms = sdl->gb_ms - real_ms;
+    if (real_ms >= sdl->gb_ms) {
+      break;
+    }
+    if (delta_ms > 1) {
+      SDL_Delay(delta_ms - 0.1);
+      double actual_delay_ms = get_time_ms() - ticks_ms;
+      if (actual_delay_ms > delta_ms) {
+        DEBUG("using SDL_Delay. wanted %.3f, got %.3f\n", delta_ms,
+              actual_delay_ms);
+      }
+    } else {
+      sched_yield();
+    }
+  }
+}
+
+/* Returns TRUE if there was overflow. */
+static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
+                                        union SDLBufferPointer* dst,
+                                        union SDLBufferPointer dst_buf,
+                                        union SDLBufferPointer dst_buf_end,
+                                        uint16_t sample) {
+  if (audio->buffer_size < audio->buffer_capacity) {
+    switch (audio->spec.format) {
+      case AUDIO_U8: *dst->u8 = sample >> 8; break;
+      case AUDIO_S8: *dst->s8 = (sample >> 8) - 128; break;
+      case AUDIO_U16LSB: *dst->u16 = sample; break;
+      case AUDIO_S16LSB: *dst->s16 = sample - 32768; break;
+      /* TODO */
+      case AUDIO_U16MSB: *dst->u16 = sample; break;
+      case AUDIO_S16MSB: *dst->s16 = sample - 32768; break;
+    }
+    audio->buffer_size += audio->sample_size;
+    dst->u8 += audio->sample_size;
+    assert(dst->v <= dst_buf_end.v);
+    if (dst->v == dst_buf_end.v) {
+      dst->v = dst_buf.v;
+    }
+    return FALSE;
+  } else {
+    return TRUE;
+  }
+}
+
+static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
+  uint32_t counter = 0;
+  uint32_t freq = sdl->audio.spec.freq;
+
+  enum Bool overflow = FALSE;
+  struct SDLAudio* audio = &sdl->audio;
+  uint32_t accumulator[SOUND_BUFFER_CHANNEL_COUNT];
+  ZERO_MEMORY(accumulator);
+  uint32_t divisor = 0;
+
+  uint16_t* src = e->sound.buffer.buffer;
+  uint16_t* src_end = src + e->sound.buffer.position;
+  union SDLBufferPointer dst_buf = audio->buffer;
+  union SDLBufferPointer dst_buf_end = audio->buffer_end;
+  union SDLBufferPointer* dst = &audio->write_pos;
+
+  SDL_LockAudio();
+  size_t old_buffer_size = audio->buffer_size;
+  size_t i;
+  for (; src < src_end; src += SOUND_BUFFER_CHANNEL_COUNT) {
+    counter += freq;
+    if (VALUE_WRAPPED(counter, APU_CYCLES_PER_SECOND)) {
+      assert(divisor > 0);
+      for (i = 0; i < SOUND_BUFFER_CHANNEL_COUNT; ++i) {
+        uint16_t sample = accumulator[i] / divisor;
+        if (sdl_write_audio_sample(audio, dst, dst_buf, dst_buf_end, sample)) {
+          overflow = TRUE;
+          break;
+        }
+        accumulator[i] = 0;
+      }
+      if (overflow) {
+        break;
+      }
+      divisor = 0;
+    } else {
+      for (i = 0; i < SOUND_BUFFER_CHANNEL_COUNT; ++i) {
+        accumulator[i] += src[i];
+      }
+      divisor++;
+    }
+  }
+  size_t new_buffer_size = audio->buffer_size;
+  SDL_UnlockAudio();
+
+  e->sound.buffer.position = 0;
+  if (overflow) {
+    LOG("sound buffer overflow (old size = %zu).\n", old_buffer_size);
+  }
+  if (!audio->ready &&
+      new_buffer_size >=
+          audio->spec.samples * audio->sample_size * audio->spec.channels) {
+    audio->ready = TRUE;
+    SDL_PauseAudio(0);
+  }
+  (void)old_buffer_size;
+  DEBUG_VERBOSE("sdl_render_audio: wrote %zd bytes (total = %zd).\n",
+                new_buffer_size - old_buffer_size, new_buffer_size);
 }
 
 int main(int argc, char** argv) {
@@ -4139,41 +4581,51 @@ int main(int argc, char** argv) {
 
   struct RomData rom_data;
   struct Emulator emulator;
-  ZERO_MEMORY(emulator);
   struct Emulator* e = &emulator;
+  struct SDL sdl;
+
+  ZERO_MEMORY(rom_data);
+  ZERO_MEMORY(emulator);
+  ZERO_MEMORY(sdl);
+
+  printf("sizeof(struct Emulator) = %zd\n", sizeof(struct Emulator));
   CHECK_MSG(argc == 1, "no rom file given.\n");
   CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
   CHECK(SUCCESS(init_emulator(e, &rom_data)));
 
-  CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
-  SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
-  CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
+  CHECK(SUCCESS(sdl_init_video(&sdl)));
+  CHECK(SUCCESS(sdl_init_audio(&sdl)));
 
-  uint32_t last_cycles = 0;
-  uint32_t last_ticks_ms = SDL_GetTicks();
   while (TRUE) {
-    step_emulator(e);
-
-    if (e->lcd.new_line_edge && !sdl_poll_events(e)) {
+    if (!sdl_poll_events(e)) {
       break;
     }
 
+    e->lcd.new_frame_edge = FALSE;
+    e->sound.new_frame_edge = FALSE;
+
+    while (!(e->lcd.new_frame_edge || e->sound.new_frame_edge)) {
+      step_emulator(e);
+    }
+
     if (e->lcd.new_frame_edge) {
+      sdl_render_surface(&sdl, e);
+    }
+
+    if (e->sound.new_frame_edge) {
+      sdl_render_audio(&sdl, e);
+
 #if FRAME_LIMITER
-      sdl_wait_for_frame(e, &last_cycles, &last_ticks_ms);
-#else
-      (void)last_cycles;
-      (void)last_ticks_ms;
+      sdl_wait_for_frame(&sdl, e);
 #endif
-      sdl_render_surface(e, surface);
+
+      sdl.last_frame_real_ms = get_time_ms();
+      sdl.last_frame_cycles = e->cycles;
     }
   }
 
   result = 0;
 error:
-  if (surface) {
-    SDL_FreeSurface(surface);
-  }
-  SDL_Quit();
+  sdl_destroy(&sdl);
   return result;
 }
