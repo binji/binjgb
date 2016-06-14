@@ -162,6 +162,7 @@ typedef uint32_t RGBA;
 #define SWEEP_MAX_PERIOD 8
 #define SOUND_MAX_FREQUENCY 2047
 #define WAVE_SAMPLE_COUNT 32
+#define NOISE_MAX_CLOCK_SHIFT 13
 #define ENVELOPE_MAX_PERIOD 8
 #define ENVELOPE_MAX_VOLUME 15
 #define DUTY_CYCLE_COUNT 8
@@ -330,9 +331,9 @@ typedef uint32_t RGBA;
 
 #define NR32_SELECT_WAVE_VOLUME(X, OP) BITS(X, OP, 6, 5)
 
-#define NR43_SHIFT_CLOCK_FREQUENCY(X, OP) BITS(X, OP, 7, 4)
-#define NR43_COUNTER_STEP(X, OP) BIT(X, OP, 3)
-#define NR43_DIVIDE_RATIO(X, OP) BITS(X, OP, 2, 0)
+#define NR43_CLOCK_SHIFT(X, OP) BITS(X, OP, 7, 4)
+#define NR43_LFSR_WIDTH(X, OP) BIT(X, OP, 3)
+#define NR43_DIVISOR(X, OP) BITS(X, OP, 2, 0)
 
 #define OBJ_PRIORITY(X, OP) BIT(X, OP, 7)
 #define OBJ_YFLIP(X, OP) BIT(X, OP, 6)
@@ -617,9 +618,21 @@ enum WaveVolume {
   WAVE_VOLUME_COUNT,
 };
 
-enum CounterStep {
-  COUNTER_STEP_15 = 0,
-  COUNTER_STEP_7 = 1,
+enum LFSRWidth {
+  LFSR_WIDTH_15 = 0, /* 15-bit LFSR */
+  LFSR_WIDTH_7 = 1,  /* 7-bit LFSR */
+};
+
+enum NoiseDivisor {
+  NOISE_DIVISOR_8 = 0,
+  NOISE_DIVISOR_16 = 1,
+  NOISE_DIVISOR_32 = 2,
+  NOISE_DIVISOR_48 = 3,
+  NOISE_DIVISOR_64 = 4,
+  NOISE_DIVISOR_80 = 5,
+  NOISE_DIVISOR_96 = 6,
+  NOISE_DIVISOR_112 = 7,
+  NOISE_DIVISOR_COUNT,
 };
 
 enum TileMapSelect {
@@ -879,13 +892,23 @@ struct Wave {
   uint32_t cycles;             /* 0..period */
 };
 
+/* Channel 4 */
+struct Noise {
+  uint8_t clock_shift;
+  enum LFSRWidth lfsr_width;
+  enum NoiseDivisor divisor;
+
+  /* Internal state */
+  uint8_t sample;  /* Last sample generated, 0..1 */
+  uint16_t lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
+  uint32_t period; /* Calculated from the clock_shift and divisor. */
+  uint32_t cycles; /* 0..period */
+};
+
 struct Channel {
   struct SquareWave square_wave; /* Channel 1, 2 */
   struct Envelope envelope;      /* Channel 1, 2, 4 */
   uint16_t frequency;            /* Channel 1, 2, 3 */
-  uint8_t shift_clock_frequency; /* Channel 4 */
-  enum CounterStep counter_step; /* Channel 4 */
-  uint8_t divide_ratio;          /* Channel 4 */
   uint16_t length;               /* All channels */
   enum Bool length_enabled;      /* All channels */
 
@@ -908,6 +931,7 @@ struct Sound {
   enum Bool enabled;
   struct Sweep sweep;
   struct Wave wave;
+  struct Noise noise;
   struct Channel channel[CHANNEL_COUNT];
 
   /* Internal state */
@@ -1654,6 +1678,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   struct Channel* channel4 = &sound->channel[CHANNEL4];
   struct Sweep* sweep = &sound->sweep;
   struct Wave* wave = &sound->wave;
+  struct Noise* noise = &sound->noise;
 
   switch (addr) {
     case APU_NR10_ADDR: {
@@ -1710,9 +1735,9 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
       break;
     case APU_NR43_ADDR:
       result |=
-          READ_REG(channel4->shift_clock_frequency, NR43_SHIFT_CLOCK_FREQUENCY) |
-          READ_REG(channel4->counter_step, NR43_COUNTER_STEP) |
-          READ_REG(channel4->divide_ratio, NR43_DIVIDE_RATIO);
+          READ_REG(noise->clock_shift, NR43_CLOCK_SHIFT) |
+          READ_REG(noise->lfsr_width, NR43_LFSR_WIDTH) |
+          READ_REG(noise->divisor, NR43_DIVISOR);
       break;
     case APU_NR44_ADDR:
       result |= read_nrx4_reg(channel4);
@@ -2177,6 +2202,12 @@ static void trigger_nr34_reg(struct Emulator* e,
   }
 }
 
+static void trigger_nr44_reg(struct Emulator* e,
+                             struct Channel* channel,
+                             struct Noise* noise) {
+  noise->lfsr = 0x7fff;
+}
+
 static void write_wave_period(struct Emulator* e,
                               struct Channel* channel,
                               struct Wave* wave) {
@@ -2190,6 +2221,16 @@ static void write_square_wave_period(struct Channel* channel,
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
   DEBUG("write_square_wave_period: freq: %u cycle: %u period: %u\n",
         channel->frequency, wave->cycles, wave->period);
+}
+
+static void write_noise_period(struct Channel* channel, struct Noise* noise) {
+  static const uint8_t s_divisors[NOISE_DIVISOR_COUNT] = {8,  16, 32, 48,
+                                                          64, 80, 96, 112};
+  uint8_t divisor = s_divisors[noise->divisor];
+  assert(noise->divisor < NOISE_DIVISOR_COUNT);
+  noise->period = divisor << noise->clock_shift;
+  DEBUG("write_noise_period: divisor: %u clock shift: %u period: %u\n", divisor,
+        noise->clock_shift, noise->period);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -2214,6 +2255,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   struct Channel* channel4 = &sound->channel[CHANNEL4];
   struct Sweep* sweep = &sound->sweep;
   struct Wave* wave = &sound->wave;
+  struct Noise* noise = &sound->noise;
 
   DEBUG("write_apu(0x%04x [%s], 0x%02x)\n", addr, get_apu_reg_string(addr),
         value);
@@ -2298,16 +2340,18 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_nrx2_reg(e, channel4, value);
       break;
     case APU_NR43_ADDR: {
-      channel4->shift_clock_frequency =
-          WRITE_REG(value, NR43_SHIFT_CLOCK_FREQUENCY);
-      channel4->counter_step = WRITE_REG(value, NR43_COUNTER_STEP);
-      channel4->divide_ratio = WRITE_REG(value, NR43_DIVIDE_RATIO);
+      noise->clock_shift = WRITE_REG(value, NR43_CLOCK_SHIFT);
+      noise->lfsr_width = WRITE_REG(value, NR43_LFSR_WIDTH);
+      noise->divisor = WRITE_REG(value, NR43_DIVISOR);
+      write_noise_period(channel4, noise);
       break;
     }
     case APU_NR44_ADDR: {
       enum Bool trigger = write_nrx4_reg(e, channel4, value, NRX1_MAX_LENGTH);
       if (trigger) {
+        write_noise_period(channel4, noise);
         trigger_nrx4_envelope(e, &channel4->envelope);
+        trigger_nr44_reg(e, channel4, noise);
       }
       break;
     }
@@ -2795,7 +2839,7 @@ static void update_channel_envelope(struct Emulator* e,
 }
 
 static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
-  if (wave->cycles < APU_CYCLES) {
+  if (wave->cycles <= APU_CYCLES) {
     wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
@@ -2815,6 +2859,22 @@ static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
   }
   wave->cycles -= APU_CYCLES;
   return wave->sample[0].data;
+}
+
+static uint8_t update_noise(struct Sound* sound, struct Noise* noise) {
+  if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT &&
+      noise->cycles <= APU_CYCLES) {
+    noise->cycles += noise->period;
+    uint16_t bit = (noise->lfsr ^ (noise->lfsr >> 1)) & 1;
+    if (noise->lfsr_width == LFSR_WIDTH_7) {
+      noise->lfsr = ((noise->lfsr >> 1) & ~0x40) | (bit << 6);
+    } else {
+      noise->lfsr = ((noise->lfsr >> 1) & ~0x4000) | (bit << 14);
+    }
+    noise->sample = ~noise->lfsr & 1;
+  }
+  noise->cycles -= APU_CYCLES;
+  return noise->sample;
 }
 
 static uint16_t channelx_sample(struct Channel* channel, uint8_t sample) {
@@ -2859,6 +2919,7 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
   struct Channel* channel4 = &sound->channel[CHANNEL4];
   struct Sweep* sweep = &sound->sweep;
   struct Wave* wave = &sound->wave;
+  struct Noise* noise = &sound->noise;
 
   /* Synchronize with CPU cycle counter. */
   sound->cycles = e->cycles;
@@ -2950,8 +3011,7 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     /* Channel 4 */
     if (do_length) update_channel_length(channel4);
     if (channel4->status) {
-      /* TODO implement */
-      sample = 0;
+      sample = update_noise(sound, noise);
       if (do_envelope) update_channel_envelope(e, channel4);
       sample = channelx_sample(channel4, sample);
       if (!e->config.disable_sound[CHANNEL4]) {
