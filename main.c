@@ -310,7 +310,6 @@ typedef uint32_t RGBA;
 #define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
 #define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
-/* TODO better names for all sound stuff */
 #define NR10_SWEEP_PERIOD(X, OP) BITS(X, OP, 6, 4)
 #define NR10_SWEEP_DIRECTION(X, OP) BIT(X, OP, 3)
 #define NR10_SWEEP_SHIFT(X, OP) BITS(X, OP, 2, 0)
@@ -890,6 +889,8 @@ struct Wave {
   uint32_t period;             /* Calculated from the frequency. */
   uint8_t position;            /* 0..31 */
   uint32_t cycles;             /* 0..period */
+  enum Bool playing; /* TRUE if the channel has been triggered but the DAC not
+                        disabled. */
 };
 
 /* Channel 4 */
@@ -2180,7 +2181,7 @@ static void trigger_nr34_reg(struct Emulator* e,
   wave->cycles = wave->period;
   /* Triggering the wave channel while it is already playing will corrupt the
    * wave RAM. */
-  if (channel->status) {
+  if (wave->playing) {
     struct WaveSample* sample =
         is_concurrent_wave_ram_access(e, WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES);
     if (sample) {
@@ -2200,6 +2201,7 @@ static void trigger_nr34_reg(struct Emulator* e,
       DEBUG("trigger_nr34_reg: ignoring write (cy: %u)\n", e->cycles);
     }
   }
+  wave->playing = TRUE;
 }
 
 static void trigger_nr44_reg(struct Emulator* e,
@@ -2313,6 +2315,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       channel3->dac_enabled = WRITE_REG(value, NR30_DAC_ENABLED);
       if (!channel3->dac_enabled) {
         channel3->status = FALSE;
+        wave->playing = FALSE;
       }
       break;
     case APU_NR31_ADDR:
