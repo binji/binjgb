@@ -196,9 +196,9 @@ typedef uint32_t RGBA;
 #define WAVE_SAMPLE_READ_OFFSET_CYCLES 0
 #define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 0
 
-#define SOUND_FRAME_COUNT 8
-#define SOUND_FRAME_CYCLES 8192 /* 512Hz */
-#define SOUND_FRAME_UPDATE_ENVELOPE 7
+#define FRAME_SEQUENCER_COUNT 8
+#define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
+#define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
 #define ADDR_MASK_1K 0x03ff
 #define ADDR_MASK_4K 0x0fff
@@ -911,8 +911,8 @@ struct Sound {
   struct Channel channel[CHANNEL_COUNT];
 
   /* Internal state */
-  uint8_t frame;         /* 0..SOUND_FRAME_COUNT */
-  uint32_t frame_cycles; /* 0..SOUND_FRAME_CYCLES */
+  uint8_t frame;         /* 0..FRAME_SEQUENCER_COUNT */
+  uint32_t frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
   uint32_t cycles;       /* Raw cycle counter */
   struct SoundBuffer* buffer;
 };
@@ -966,7 +966,15 @@ struct DMA {
 
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 
+struct EmulatorConfig {
+  enum Bool disable_sound[CHANNEL_COUNT];
+  enum Bool disable_bg;
+  enum Bool disable_window;
+  enum Bool disable_obj;
+};
+
 struct Emulator {
+  struct EmulatorConfig config;
   struct RomData rom_data;
   struct RomInfo rom_info;
   struct MemoryMap memory_map;
@@ -2107,7 +2115,7 @@ static void trigger_nrx4_envelope(struct Emulator* e,
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = TRUE;
   /* If the next APU frame will update the envelope, increment the timer. */
-  if (e->sound.frame + 1 == SOUND_FRAME_UPDATE_ENVELOPE) {
+  if (e->sound.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
   }
   /* TODO zombie mode */
@@ -2469,19 +2477,17 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
 
   uint8_t bg_obj_mask[SCREEN_WIDTH];
 
-  if (!e->lcd.lcdc.display || !e->lcd.lcdc.bg_display) {
-    uint8_t sx;
-    for (sx = 0; sx < SCREEN_WIDTH; ++sx) {
-      bg_obj_mask[sx] = s_color_to_obj_mask[COLOR_WHITE];
-      line_data[sx] = RGBA_WHITE;
-    }
-
-    if (!e->lcd.lcdc.display) {
-      return;
-    }
+  uint8_t sx;
+  for (sx = 0; sx < SCREEN_WIDTH; ++sx) {
+    bg_obj_mask[sx] = s_color_to_obj_mask[COLOR_WHITE];
+    line_data[sx] = RGBA_WHITE;
   }
 
-  if (e->lcd.lcdc.bg_display) {
+  if (!e->lcd.lcdc.display) {
+    return;
+  }
+
+  if (e->lcd.lcdc.bg_display && !e->config.disable_bg) {
     TileMap* map = get_tile_map(e, e->lcd.lcdc.bg_tile_map_select);
     Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
     struct Palette* palette = &e->lcd.bgp;
@@ -2497,7 +2503,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   }
 
   if (e->lcd.lcdc.window_display && e->lcd.WX <= WINDOW_MAX_X &&
-      line_y >= e->lcd.frame_WY) {
+      line_y >= e->lcd.frame_WY && !e->config.disable_window) {
     TileMap* map = get_tile_map(e, e->lcd.lcdc.window_tile_map_select);
     Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
     struct Palette* palette = &e->lcd.bgp;
@@ -2519,7 +2525,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
     e->lcd.win_y++;
   }
 
-  if (e->lcd.lcdc.obj_display) {
+  if (e->lcd.lcdc.obj_display && !e->config.disable_obj) {
     int n;
     struct Obj line_objs[OBJ_COUNT];
     memcpy(line_objs, e->oam.objs, sizeof(line_objs));
@@ -2863,9 +2869,9 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     enum Bool do_sweep = FALSE;
     sound->cycles += APU_CYCLES;
     sound->frame_cycles += APU_CYCLES;
-    if (VALUE_WRAPPED(sound->frame_cycles, SOUND_FRAME_CYCLES)) {
+    if (VALUE_WRAPPED(sound->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
       sound->frame++;
-      VALUE_WRAPPED(sound->frame, SOUND_FRAME_COUNT);
+      VALUE_WRAPPED(sound->frame, FRAME_SEQUENCER_COUNT);
 
       switch (sound->frame) {
         case 0: do_length = TRUE; break;
@@ -2894,13 +2900,15 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     }
     if (do_length) update_channel_length(channel1);
     if (channel1->status) {
-      if (do_envelope) update_channel_envelope(channel1);
-      sample = channelx_sample(channel1, sample);
-      if (sound->so1_output[CHANNEL1]) {
-        so1_mixed_sample += sample;
-      }
-      if (sound->so2_output[CHANNEL1]) {
-        so2_mixed_sample += sample;
+      if (do_envelope) update_channel_envelope(e, channel1);
+      if (!e->config.disable_sound[CHANNEL1]) {
+        sample = channelx_sample(channel1, sample);
+        if (sound->so1_output[CHANNEL1]) {
+          so1_mixed_sample += sample;
+        }
+        if (sound->so2_output[CHANNEL1]) {
+          so2_mixed_sample += sample;
+        }
       }
     }
 
@@ -2910,13 +2918,15 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     }
     if (do_length) update_channel_length(channel2);
     if (channel2->status) {
-      if (do_envelope) update_channel_envelope(channel2);
+      if (do_envelope) update_channel_envelope(e, channel2);
       sample = channelx_sample(channel2, sample);
-      if (sound->so1_output[CHANNEL2]) {
-        so1_mixed_sample += sample;
-      }
-      if (sound->so2_output[CHANNEL2]) {
-        so2_mixed_sample += sample;
+      if (!e->config.disable_sound[CHANNEL2]) {
+        if (sound->so1_output[CHANNEL2]) {
+          so1_mixed_sample += sample;
+        }
+        if (sound->so2_output[CHANNEL2]) {
+          so2_mixed_sample += sample;
+        }
       }
     }
 
@@ -2927,11 +2937,13 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     if (do_length) update_channel_length(channel3);
     if (channel3->status) {
       sample = channel3_sample(channel3, wave, sample);
-      if (sound->so1_output[CHANNEL3]) {
-        so1_mixed_sample += sample;
-      }
-      if (sound->so2_output[CHANNEL3]) {
-        so2_mixed_sample += sample;
+      if (!e->config.disable_sound[CHANNEL3]) {
+        if (sound->so1_output[CHANNEL3]) {
+          so1_mixed_sample += sample;
+        }
+        if (sound->so2_output[CHANNEL3]) {
+          so2_mixed_sample += sample;
+        }
       }
     }
 
@@ -2940,13 +2952,15 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     if (channel4->status) {
       /* TODO implement */
       sample = 0;
-      if (do_envelope) update_channel_envelope(channel4);
+      if (do_envelope) update_channel_envelope(e, channel4);
       sample = channelx_sample(channel4, sample);
-      if (sound->so1_output[CHANNEL4]) {
-        so1_mixed_sample += sample;
-      }
-      if (sound->so2_output[CHANNEL4]) {
-        so2_mixed_sample += sample;
+      if (!e->config.disable_sound[CHANNEL4]) {
+        if (sound->so1_output[CHANNEL4]) {
+          so1_mixed_sample += sample;
+        }
+        if (sound->so2_output[CHANNEL4]) {
+          so2_mixed_sample += sample;
+        }
       }
     }
 
@@ -4474,6 +4488,13 @@ static enum Bool sdl_poll_events(struct Emulator* e) {
       case SDL_KEYUP: {
         enum Bool set = event.type == SDL_KEYDOWN;
         switch (event.key.keysym.sym) {
+          case SDLK_1: if (set) e->config.disable_sound[CHANNEL1] ^= 1; break;
+          case SDLK_2: if (set) e->config.disable_sound[CHANNEL2] ^= 1; break;
+          case SDLK_3: if (set) e->config.disable_sound[CHANNEL3] ^= 1; break;
+          case SDLK_4: if (set) e->config.disable_sound[CHANNEL4] ^= 1; break;
+          case SDLK_b: if (set) e->config.disable_bg ^= 1; break;
+          case SDLK_w: if (set) e->config.disable_window ^= 1; break;
+          case SDLK_o: if (set) e->config.disable_obj ^= 1; break;
           case SDLK_UP: e->joypad.up = set; break;
           case SDLK_DOWN: e->joypad.down = set; break;
           case SDLK_LEFT: e->joypad.left = set; break;
