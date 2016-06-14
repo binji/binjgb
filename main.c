@@ -2113,7 +2113,7 @@ static void trigger_nrx4_envelope(struct Emulator* e,
                                   struct Envelope* envelope) {
   envelope->volume = envelope->initial_volume;
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
-  envelope->automatic = TRUE;
+  envelope->automatic = envelope->period != 0;
   /* If the next APU frame will update the envelope, increment the timer. */
   if (e->sound.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
@@ -2769,22 +2769,22 @@ static void update_channel_length(struct Channel* channel) {
   }
 }
 
-static void update_channel_envelope(struct Channel* channel) {
+static void update_channel_envelope(struct Emulator* e,
+                                    struct Channel* channel) {
   struct Envelope* envelope = &channel->envelope;
   if (envelope->period) {
     if (envelope->automatic && --envelope->timer == 0) {
+      envelope->timer = envelope->period;
       if (envelope->direction == ENVELOPE_ATTENUATE) {
         if (envelope->volume > 0) {
           envelope->volume--;
         } else {
-          envelope->volume = 0;
           envelope->automatic = FALSE;
         }
       } else {
         if (envelope->volume < ENVELOPE_MAX_VOLUME) {
           envelope->volume++;
         } else {
-          envelope->volume = ENVELOPE_MAX_VOLUME;
           envelope->automatic = FALSE;
         }
       }
