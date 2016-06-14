@@ -79,6 +79,7 @@ typedef uint32_t RGBA;
 #define AUDIO_DESIRED_FORMAT AUDIO_S16SYS
 #define AUDIO_DESIRED_CHANNELS 2
 #define AUDIO_DESIRED_SAMPLES 4096
+#define AUDIO_MAX_CHANNELS 2
 
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
@@ -164,24 +165,23 @@ typedef uint32_t RGBA;
 #define ENVELOPE_MAX_PERIOD 8
 #define ENVELOPE_MAX_VOLUME 15
 #define DUTY_CYCLE_COUNT 8
+#define SOUND_OUTPUT_COUNT 2
 #define SO1_MAX_VOLUME 7
 #define SO2_MAX_VOLUME 7
-#define SOUND_BUFFER_CHANNEL_COUNT 2 /* Output channels. TODO better name? */
-#define SOUND_BUFFER_SAFE_ZONE_SIZE 256
-#define SOUND_SAMPLES_PER_FRAME \
-  ((FRAME_CYCLES / APU_CYCLES) * SOUND_BUFFER_CHANNEL_COUNT)
-#define SOUND_BUFFER_SIZE                                    \
-  ((SOUND_SAMPLES_PER_FRAME + SOUND_BUFFER_SAFE_ZONE_SIZE) * \
-   SOUND_BUFFER_CHANNEL_COUNT)
+/* Additional samples so the SoundBuffer doesn't overflow. This could happen
+ * because the sound buffer is updated at the granularity of an instruction, so
+ * the most extra samples that could be added is equal to the APU cycle count
+ * of the slowest instruction. */
+#define SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES 256
 
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
-#define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / 2)
-#define DIV_CYCLES 256
-#define TIMA_4096_CYCLES 1024
-#define TIMA_262144_CYCLES 16
-#define TIMA_65536_CYCLES 64
-#define TIMA_16384_CYCLES 256
+#define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / APU_CYCLES)
+#define DIV_CYCLES (GB_CYCLES_PER_SECOND / 16384)
+#define TIMA_4096_CYCLES (GB_CYCLES_PER_SECOND / 4096)
+#define TIMA_262144_CYCLES (GB_CYCLES_PER_SECOND / 262144)
+#define TIMA_65536_CYCLES (GB_CYCLES_PER_SECOND / 65536)
+#define TIMA_16384_CYCLES (GB_CYCLES_PER_SECOND / 16384)
 #define FRAME_CYCLES 70224
 #define LINE_CYCLES 456
 #define HBLANK_CYCLES 204         /* LCD STAT mode 0 */
@@ -895,8 +895,9 @@ struct Channel {
 };
 
 struct SoundBuffer {
-  uint16_t buffer[SOUND_BUFFER_SIZE]; /* Unsigned 16-bit samples @ 2MHz */
-  uint32_t position;
+  uint16_t* data; /* Unsigned 16-bit 2-channel samples @ 2MHz */
+  uint16_t* end;
+  uint16_t* position;
 };
 
 struct Sound {
@@ -913,8 +914,7 @@ struct Sound {
   uint8_t frame;         /* 0..SOUND_FRAME_COUNT */
   uint32_t frame_cycles; /* 0..SOUND_FRAME_CYCLES */
   uint32_t cycles;       /* Raw cycle counter */
-  struct SoundBuffer buffer;
-  enum Bool new_frame_edge;
+  struct SoundBuffer* buffer;
 };
 
 struct LCDControl {
@@ -1344,9 +1344,12 @@ static void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->flags.C = WRITE_REG(af, CPU_FLAG_C);
 }
 
-static enum Result init_emulator(struct Emulator* e, struct RomData* rom_data) {
+static enum Result init_emulator(struct Emulator* e,
+                                 struct RomData* rom_data,
+                                 struct SoundBuffer* sound_buffer) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
+  e->sound.buffer = sound_buffer;
   CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
 #if 1
   print_rom_info(&e->rom_info);
@@ -2032,6 +2035,10 @@ static void write_nrx2_reg(struct Emulator* e,
   if (!channel->dac_enabled) {
     channel->status = FALSE;
     DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
+                  CHANNEL_INDEX(channel), value);
+  }
+  if (channel->status) {
+    DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
                   CHANNEL_INDEX(channel), value);
   }
   channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
@@ -2823,12 +2830,11 @@ static uint16_t channel3_sample(struct Channel* channel,
   return (sample >> shift[wave->volume]) << 12;
 }
 
-static void write_sample(struct Sound* sound, uint16_t mixed_sample) {
-  assert(sound->buffer.position < SOUND_BUFFER_SIZE);
-  sound->buffer.buffer[sound->buffer.position++] = mixed_sample;
-  if (sound->buffer.position == SOUND_SAMPLES_PER_FRAME) {
-    sound->new_frame_edge = TRUE;
-  }
+static void write_sample(struct Sound* sound, uint16_t so1, uint16_t so2) {
+  struct SoundBuffer* buffer = sound->buffer;
+  assert(buffer->position + 2 <= buffer->end);
+  *buffer->position++ = so1;
+  *buffer->position++ = so2;
 }
 
 static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
@@ -2836,8 +2842,7 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
   uint8_t i;
   if (!sound->enabled) {
     for (i = 0; i < cycles; i += APU_CYCLES) {
-      write_sample(sound, 0);
-      write_sample(sound, 0);
+      write_sample(sound, 0, 0);
     }
     return;
   }
@@ -2949,8 +2954,7 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
     so2_mixed_sample *= (sound->so2_volume + 1);
     so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    write_sample(sound, so1_mixed_sample);
-    write_sample(sound, so2_mixed_sample);
+    write_sample(sound, so1_mixed_sample, so2_mixed_sample);
   }
 }
 
@@ -4259,6 +4263,42 @@ static void step_emulator(struct Emulator* e) {
   handle_interrupts(e);
 }
 
+typedef uint32_t EmulatorEvent;
+enum {
+  EMULATOR_EVENT_NEW_FRAME = 0x1,
+  EMULATOR_EVENT_SOUND_BUFFER_FULL = 0x2,
+};
+
+static EmulatorEvent run_emulator_until_event(struct Emulator* e,
+                                              EmulatorEvent last_event,
+                                              uint32_t requested_samples) {
+  if (last_event & EMULATOR_EVENT_NEW_FRAME) {
+    e->lcd.new_frame_edge = FALSE;
+  }
+  if (last_event & EMULATOR_EVENT_SOUND_BUFFER_FULL) {
+    e->sound.buffer->position = e->sound.buffer->data;
+  }
+
+  struct SoundBuffer* buffer = e->sound.buffer;
+  assert(requested_samples <= buffer->end - buffer->data);
+
+  EmulatorEvent result = 0;
+  enum Bool running = TRUE;
+  while (running) {
+    if (e->lcd.new_frame_edge) {
+      result |= EMULATOR_EVENT_NEW_FRAME;
+      running = FALSE;
+    }
+    size_t samples = buffer->position - buffer->data;
+    if (samples >= requested_samples) {
+      result |= EMULATOR_EVENT_SOUND_BUFFER_FULL;
+      running = FALSE;
+    }
+    step_emulator(e);
+  }
+  return result;
+}
+
 union SDLBufferPointer {
   void* v;
   int8_t* s8;
@@ -4282,10 +4322,16 @@ struct SDLAudio {
 struct SDL {
   SDL_Surface* surface;
   struct SDLAudio audio;
-  double gb_ms;               /* GB CPU time since last frame. */
   uint32_t last_frame_cycles; /* GB CPU cycle count of last frame. */
-  double last_frame_real_ms;  /* Wall time of last frame. */
+  double last_frame_real_ms;  /* Wall clock time of last frame. */
 };
+
+static double get_time_ms(void) {
+  struct timespec ts;
+  int result = clock_gettime(CLOCK_MONOTONIC, &ts);
+  assert(result == 0);
+  return (double)ts.tv_sec * 1000 + (double)ts.tv_nsec / 1000000;
+}
 
 static enum Result sdl_init_video(struct SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
@@ -4353,13 +4399,6 @@ static size_t get_sdl_format_sample_size(uint16_t format) {
   }
 }
 
-static double get_time_ms(void) {
-  struct timespec ts;
-  int result = clock_gettime(CLOCK_MONOTONIC, &ts);
-  assert(result == 0);
-  return (double)ts.tv_sec * 1000 + (double)ts.tv_nsec / 1000000;
-}
-
 static enum Result sdl_init_audio(struct SDL* sdl) {
   sdl->last_frame_cycles = 0;
   sdl->last_frame_real_ms = get_time_ms();
@@ -4382,16 +4421,38 @@ static enum Result sdl_init_audio(struct SDL* sdl) {
             "Expcted 2 channels.\n");
 
   sdl->audio.sample_size = get_sdl_format_sample_size(sdl->audio.spec.format);
+  /* Enough for 1 second of audio. */
   size_t buffer_capacity =
       sdl->audio.spec.freq * sdl->audio.sample_size * sdl->audio.spec.channels;
   sdl->audio.buffer_capacity = buffer_capacity;
 
   sdl->audio.buffer.v = malloc(buffer_capacity);
-  CHECK_MSG(sdl->audio.buffer.v != NULL, "allocation failed.\n");
+  CHECK_MSG(sdl->audio.buffer.v != NULL,
+            "SDL audio buffer allocation failed.\n");
   memset(sdl->audio.buffer.v, 0, buffer_capacity);
 
   sdl->audio.buffer_end.v = sdl->audio.buffer.u8 + buffer_capacity;
   sdl->audio.read_pos.v = sdl->audio.write_pos.v = sdl->audio.buffer.v;
+  return OK;
+error:
+  return ERROR;
+}
+
+static uint32_t get_gb_channel_samples(struct SDL* sdl) {
+  return (uint32_t)((double)sdl->audio.spec.samples * APU_CYCLES_PER_SECOND /
+                    sdl->audio.spec.freq) *
+         SOUND_OUTPUT_COUNT;
+}
+
+static enum Result sdl_init_sound_buffer(struct SDL* sdl,
+                                         struct SoundBuffer* sound_buffer) {
+  uint32_t gb_channel_samples =
+      get_gb_channel_samples(sdl) + SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES;
+  size_t buffer_size = gb_channel_samples * sizeof(sound_buffer->data[0]);
+  sound_buffer->data = malloc(buffer_size);
+  CHECK_MSG(sound_buffer->data != NULL, "Sound buffer allocation failed.\n");
+  sound_buffer->end = sound_buffer->data + gb_channel_samples;
+  sound_buffer->position = sound_buffer->data;
   return OK;
 error:
   return ERROR;
@@ -4460,20 +4521,16 @@ static void sdl_render_surface(struct SDL* sdl, struct Emulator* e) {
   SDL_Flip(surface);
 }
 
-static void sdl_update_gb_frame_time(struct SDL* sdl, struct Emulator* e) {
-  sdl->gb_ms = (double)(e->cycles - sdl->last_frame_cycles) *
-               MILLISECONDS_PER_SECOND / GB_CYCLES_PER_SECOND;
-}
-
 static void sdl_wait_for_frame(struct SDL* sdl, struct Emulator* e) {
-  sdl_update_gb_frame_time(sdl, e);
+  double gb_ms = (double)(e->cycles - sdl->last_frame_cycles) *
+                 MILLISECONDS_PER_SECOND / GB_CYCLES_PER_SECOND;
   while (TRUE) {
     double ticks_ms = get_time_ms();
     double real_ms = ticks_ms - sdl->last_frame_real_ms;
-    double delta_ms = sdl->gb_ms - real_ms;
-    if (real_ms >= sdl->gb_ms) {
+    if (real_ms >= gb_ms) {
       break;
     }
+    double delta_ms = gb_ms - real_ms;
     if (delta_ms > 1) {
       SDL_Delay(delta_ms - 0.1);
       double actual_delay_ms = get_time_ms() - ticks_ms;
@@ -4517,16 +4574,19 @@ static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
 
 static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   uint32_t counter = 0;
-  uint32_t freq = sdl->audio.spec.freq;
+  const uint32_t freq = sdl->audio.spec.freq;
+  const uint32_t channels = sdl->audio.spec.channels;
+  /* TODO support audio spec with different output channel count. */
+  assert(channels == SOUND_OUTPUT_COUNT);
 
   enum Bool overflow = FALSE;
   struct SDLAudio* audio = &sdl->audio;
-  uint32_t accumulator[SOUND_BUFFER_CHANNEL_COUNT];
+  uint32_t accumulator[AUDIO_MAX_CHANNELS];
   ZERO_MEMORY(accumulator);
   uint32_t divisor = 0;
 
-  uint16_t* src = e->sound.buffer.buffer;
-  uint16_t* src_end = src + e->sound.buffer.position;
+  uint16_t* src = e->sound.buffer->data;
+  uint16_t* src_end = e->sound.buffer->position;
   union SDLBufferPointer dst_buf = audio->buffer;
   union SDLBufferPointer dst_buf_end = audio->buffer_end;
   union SDLBufferPointer* dst = &audio->write_pos;
@@ -4534,11 +4594,11 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   SDL_LockAudio();
   size_t old_buffer_size = audio->buffer_size;
   size_t i;
-  for (; src < src_end; src += SOUND_BUFFER_CHANNEL_COUNT) {
+  for (; src < src_end; src += channels) {
     counter += freq;
     if (VALUE_WRAPPED(counter, APU_CYCLES_PER_SECOND)) {
       assert(divisor > 0);
-      for (i = 0; i < SOUND_BUFFER_CHANNEL_COUNT; ++i) {
+      for (i = 0; i < channels; ++i) {
         uint16_t sample = accumulator[i] / divisor;
         if (sdl_write_audio_sample(audio, dst, dst_buf, dst_buf_end, sample)) {
           overflow = TRUE;
@@ -4551,7 +4611,7 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
       }
       divisor = 0;
     } else {
-      for (i = 0; i < SOUND_BUFFER_CHANNEL_COUNT; ++i) {
+      for (i = 0; i < channels; ++i) {
         accumulator[i] += src[i];
       }
       divisor++;
@@ -4560,19 +4620,15 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   size_t new_buffer_size = audio->buffer_size;
   SDL_UnlockAudio();
 
-  e->sound.buffer.position = 0;
   if (overflow) {
     LOG("sound buffer overflow (old size = %zu).\n", old_buffer_size);
   }
-  if (!audio->ready &&
-      new_buffer_size >=
-          audio->spec.samples * audio->sample_size * audio->spec.channels) {
+  if (!audio->ready) {
+    /* TODO this should wait until the buffer has enough data for a few
+     * callbacks. */
     audio->ready = TRUE;
     SDL_PauseAudio(0);
   }
-  (void)old_buffer_size;
-  DEBUG_VERBOSE("sdl_render_audio: wrote %zd bytes (total = %zd).\n",
-                new_buffer_size - old_buffer_size, new_buffer_size);
 }
 
 int main(int argc, char** argv) {
@@ -4583,36 +4639,34 @@ int main(int argc, char** argv) {
   struct Emulator emulator;
   struct Emulator* e = &emulator;
   struct SDL sdl;
+  struct SoundBuffer sound_buffer;
 
   ZERO_MEMORY(rom_data);
   ZERO_MEMORY(emulator);
   ZERO_MEMORY(sdl);
+  ZERO_MEMORY(sound_buffer);
 
-  printf("sizeof(struct Emulator) = %zd\n", sizeof(struct Emulator));
   CHECK_MSG(argc == 1, "no rom file given.\n");
   CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
-  CHECK(SUCCESS(init_emulator(e, &rom_data)));
 
   CHECK(SUCCESS(sdl_init_video(&sdl)));
   CHECK(SUCCESS(sdl_init_audio(&sdl)));
+  CHECK(SUCCESS(sdl_init_sound_buffer(&sdl, &sound_buffer)));
+  uint32_t requested_samples = get_gb_channel_samples(&sdl);
 
+  CHECK(SUCCESS(init_emulator(e, &rom_data, &sound_buffer)));
+
+  EmulatorEvent event;
   while (TRUE) {
     if (!sdl_poll_events(e)) {
       break;
     }
 
-    e->lcd.new_frame_edge = FALSE;
-    e->sound.new_frame_edge = FALSE;
-
-    while (!(e->lcd.new_frame_edge || e->sound.new_frame_edge)) {
-      step_emulator(e);
-    }
-
-    if (e->lcd.new_frame_edge) {
+    event = run_emulator_until_event(e, event, requested_samples);
+    if (event & EMULATOR_EVENT_NEW_FRAME) {
       sdl_render_surface(&sdl, e);
     }
-
-    if (e->sound.new_frame_edge) {
+    if (event & EMULATOR_EVENT_SOUND_BUFFER_FULL) {
       sdl_render_audio(&sdl, e);
 
 #if FRAME_LIMITER

@@ -3,6 +3,7 @@ find_package(SDL)
 add_definitions(
   -Wall -Wextra -Werror -Wpointer-arith -Wno-unused-parameter -g
   -Wno-unused-function
+  -Wno-unused-variable
   -D_GNU_SOURCE # for qsort_r
 )
 include_directories(${SDL_INCLUDE_DIR})
