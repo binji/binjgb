@@ -1,3 +1,7 @@
+# Copyright (C) 2016 Ben Smith
+#
+# This software may be modified and distributed under the terms
+# of the MIT license.  See the LICENSE file for details.
 cmake_minimum_required(VERSION 2.8)
 find_package(SDL)
 add_definitions(
