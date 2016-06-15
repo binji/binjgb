@@ -202,13 +202,15 @@ typedef uint32_t RGBA;
 
 #define MBC_RAM_ENABLED_MASK 0xf
 #define MBC_RAM_ENABLED_VALUE 0xa
-#define MBC1_ROM_BANK_LO_MASK 0x1f
-#define MBC1_BANK_HI_MASK 0x3
+#define MBC1_ROM_BANK_LO_SELECT_MASK 0x1f
+#define MBC1_BANK_HI_SELECT_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
 #define MBC2_RAM_ADDR_MASK 0x1ff
 #define MBC2_RAM_VALUE_MASK 0xf
 #define MBC2_ADDR_SELECT_BIT_MASK 0x100
 #define MBC2_ROM_BANK_SELECT_MASK 0xf
+#define MBC3_ROM_BANK_SELECT_MASK 0x7f
+#define MBC3_RAM_BANK_SELECT_MASK 0x7
 
 #define OAM_START_ADDR 0xfe00
 #define OAM_END_ADDR 0xfe9f
@@ -1231,17 +1233,17 @@ static void mbc1_write_rom(struct Emulator* e,
       break;
   }
 
-  memory_map->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_MASK;
+  memory_map->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_SELECT_MASK;
   if (memory_map->rom_bank == 0) {
     memory_map->rom_bank++;
   }
 
   if (mbc1->bank_mode == BANK_MODE_ROM) {
-    memory_map->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK)
+    memory_map->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK)
                             << MBC1_BANK_HI_SHIFT;
     memory_map->ext_ram_bank = 0;
   } else {
-    memory_map->ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK;
+    memory_map->ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
   }
 
   VERBOSE(memory,
@@ -1310,15 +1312,14 @@ static void mbc2_write_rom(struct Emulator* e,
     case 1: /* 2000-3fff */
       if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
         memory_map->rom_bank = value & MBC2_ROM_BANK_SELECT_MASK;
+        VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
+                __func__, addr, value, memory_map->rom_bank,
+                memory_map->rom_bank << ROM_BANK_SHIFT);
       }
       break;
     default:
       break;
   }
-
-  VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", __func__,
-          addr, value, memory_map->rom_bank,
-          memory_map->rom_bank << ROM_BANK_SHIFT);
 }
 
 static uint8_t mbc2_read_ram(struct Emulator* e, MaskedAddress addr) {
@@ -1338,6 +1339,29 @@ static void mbc2_write_ram(struct Emulator* e,
         value & MBC2_RAM_VALUE_MASK;
   } else {
     INFO_WRITE_RAM_DISABLED;
+  }
+}
+
+static void mbc3_write_rom(struct Emulator* e,
+                           MaskedAddress addr,
+                           uint8_t value) {
+  struct MemoryMap* memory_map = &e->memory_map;
+  switch (addr >> 13) {
+    case 0: /* 0000-1fff */
+      e->memory_map.ext_ram_enabled =
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+      break;
+    case 1: /* 2000-3fff */
+      memory_map->rom_bank = value & MBC3_ROM_BANK_SELECT_MASK;
+      VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
+              __func__, addr, value, memory_map->rom_bank,
+              memory_map->rom_bank << ROM_BANK_SHIFT);
+      break;
+    case 2: /* 4000-5fff */
+      memory_map->ext_ram_bank = value & MBC3_RAM_BANK_SELECT_MASK;
+      break;
+    default:
+      break;
   }
 }
 
@@ -1373,6 +1397,10 @@ static enum Result init_memory_map(struct RomInfo* rom_info,
        * maps to the same address space. */
       out_memory_map->read_external_ram = mbc2_read_ram;
       out_memory_map->write_external_ram = mbc2_write_ram;
+      break;
+    case MBC3:
+      out_memory_map->write_rom = mbc3_write_rom;
+      /* TODO handle MBC3 RTC */
       break;
     default:
       PRINT_ERROR("memory map for %s not implemented.\n",
