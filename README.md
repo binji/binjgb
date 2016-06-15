@@ -15,6 +15,9 @@ $ out/binjgb <filename>
 ```
 
 Keys:
+
+| Action | Key |
+| --- | --- |
 | DPAD-UP | up |
 | DPAD-DOWN | down |
 | DPAD-LEFT | left |
@@ -33,7 +36,8 @@ Keys:
 
 Blaarg's tests:
 
-| Test | result |
+| Test | Result |
+| --- | --- |
 | cpu\_instrs | :ok: |
 | dmg\_sound-2 | :ok: |
 | instr\_timing | :ok: |
