@@ -73,6 +73,7 @@ typedef uint32_t RGBA;
 #define AUDIO_DESIRED_CHANNELS 2
 #define AUDIO_DESIRED_SAMPLES 4096
 #define AUDIO_MAX_CHANNELS 2
+#define SAVE_EXTENSION ".sav"
 
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
@@ -205,6 +206,9 @@ typedef uint32_t RGBA;
 #define MBC1_ROM_BANK_LO_SELECT_MASK 0x1f
 #define MBC1_BANK_HI_SELECT_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
+/* MBC2 has built-in RAM, 512 4-bit values. It's not external, but it maps to
+ * the same address space. */
+#define MBC2_RAM_SIZE 0x200
 #define MBC2_RAM_ADDR_MASK 0x1ff
 #define MBC2_RAM_VALUE_MASK 0xf
 #define MBC2_ADDR_SELECT_BIT_MASK 0x100
@@ -691,6 +695,7 @@ struct RomData {
 struct ExternalRam {
   uint8_t data[EXTERNAL_RAM_SIZE];
   size_t size;
+  enum BatteryType battery_type;
 };
 
 struct WorkRam {
@@ -1308,6 +1313,8 @@ static void mbc2_write_rom(struct Emulator* e,
         e->memory_map.ext_ram_enabled =
             (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       }
+      VERBOSE(memory, "%s(0x%04x, 0x%02x): enabled = %u\n", __func__, addr,
+              value, e->memory_map.ext_ram_enabled);
       break;
     case 1: /* 2000-3fff */
       if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
@@ -1365,41 +1372,43 @@ static void mbc3_write_rom(struct Emulator* e,
   }
 }
 
-static enum Result init_memory_map(struct RomInfo* rom_info,
-                                   struct MemoryMap* out_memory_map) {
-  ZERO_MEMORY(*out_memory_map);
-  out_memory_map->rom_bank = 1;
-  out_memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
-  out_memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
+static enum Result init_memory_map(struct Emulator* e,
+                                   struct RomInfo* rom_info) {
+  struct MemoryMap* memory_map = &e->memory_map;
+  ZERO_MEMORY(*memory_map);
+  memory_map->rom_bank = 1;
+  memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
+  memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
 
   switch (s_external_ram_type[rom_info->cartridge_type]) {
     case WITH_RAM:
-      out_memory_map->read_external_ram = gb_read_external_ram;
-      out_memory_map->write_external_ram = gb_write_external_ram;
+      memory_map->read_external_ram = gb_read_external_ram;
+      memory_map->write_external_ram = gb_write_external_ram;
+      e->external_ram.size = s_ram_bank_size[rom_info->ram_size];
       break;
     default:
     case NO_RAM:
-      out_memory_map->read_external_ram = dummy_read_external_ram;
-      out_memory_map->write_external_ram = dummy_write_external_ram;
+      memory_map->read_external_ram = dummy_read_external_ram;
+      memory_map->write_external_ram = dummy_write_external_ram;
+      e->external_ram.size = 0;
       break;
   }
 
   switch (s_mbc_type[rom_info->cartridge_type]) {
     case NO_MBC:
-      out_memory_map->write_rom = rom_only_write_rom;
+      memory_map->write_rom = rom_only_write_rom;
       break;
     case MBC1:
-      out_memory_map->write_rom = mbc1_write_rom;
+      memory_map->write_rom = mbc1_write_rom;
       break;
     case MBC2:
-      out_memory_map->write_rom = mbc2_write_rom;
-      /* MBC2 has built-in RAM, 512 4-bit values. It's not external, but it
-       * maps to the same address space. */
-      out_memory_map->read_external_ram = mbc2_read_ram;
-      out_memory_map->write_external_ram = mbc2_write_ram;
+      memory_map->write_rom = mbc2_write_rom;
+      memory_map->read_external_ram = mbc2_read_ram;
+      memory_map->write_external_ram = mbc2_write_ram;
+      e->external_ram.size = MBC2_RAM_SIZE;
       break;
     case MBC3:
-      out_memory_map->write_rom = mbc3_write_rom;
+      memory_map->write_rom = mbc3_write_rom;
       /* TODO handle MBC3 RTC */
       break;
     default:
@@ -1408,8 +1417,7 @@ static enum Result init_memory_map(struct RomInfo* rom_info,
       return ERROR;
   }
 
-  /* TODO */
-  (void)s_battery_type;
+  e->external_ram.battery_type = s_battery_type[rom_info->cartridge_type];
   return OK;
 }
 
@@ -1441,8 +1449,7 @@ static enum Result init_emulator(struct Emulator* e,
   struct RomInfo rom_info;
   CHECK(SUCCESS(get_rom_info(rom_data, &rom_info)));
   print_rom_info(&rom_info);
-  CHECK(SUCCESS(init_memory_map(&rom_info, &e->memory_map)));
-  e->external_ram.size = s_ram_bank_size[rom_info.ram_size];
+  CHECK(SUCCESS(init_memory_map(e, &rom_info)));
   set_af_reg(&e->reg, 0x01b0);
   e->reg.BC = 0x0013;
   e->reg.DE = 0x00d8;
@@ -4783,6 +4790,56 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   }
 }
 
+static void get_save_filename(const char* rom_filename,
+                              char* out,
+                              size_t out_size) {
+  char* last_dot = strrchr(rom_filename, '.');
+  if (last_dot == NULL) {
+    snprintf(out, out_size, "%s" SAVE_EXTENSION, rom_filename);
+  } else {
+    snprintf(out, out_size, "%.*s" SAVE_EXTENSION,
+             (int)(last_dot - rom_filename), rom_filename);
+  }
+}
+
+static enum Result read_external_ram_from_file(struct Emulator* e,
+                                               const char* filename) {
+  FILE* f = NULL;
+  if (e->external_ram.battery_type == WITH_BATTERY) {
+    f = fopen(filename, "rb");
+    CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+    uint8_t* data = e->external_ram.data;
+    size_t size = e->external_ram.size;
+    CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
+    fclose(f);
+  }
+  return OK;
+error:
+  if (f) {
+    fclose(f);
+  }
+  return ERROR;
+}
+
+static enum Result write_external_ram_to_file(struct Emulator* e,
+                                              const char* filename) {
+  FILE* f = NULL;
+  if (e->external_ram.battery_type == WITH_BATTERY) {
+    f = fopen(filename, "wb");
+    CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+    uint8_t* data = e->external_ram.data;
+    size_t size = e->external_ram.size;
+    CHECK_MSG(fwrite(data, size, 1, f) == 1, "fwrite failed.\n");
+    fclose(f);
+  }
+  return OK;
+error:
+  if (f) {
+    fclose(f);
+  }
+  return ERROR;
+}
+
 int main(int argc, char** argv) {
   --argc; ++argv;
   int result = 1;
@@ -4799,7 +4856,12 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(sound_buffer);
 
   CHECK_MSG(argc == 1, "no rom file given.\n");
-  CHECK(SUCCESS(read_rom_data_from_file(argv[0], &rom_data)));
+  const char* rom_filename = argv[0];
+  CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &rom_data)));
+  size_t save_filename_length =
+      strlen(rom_filename) + strlen(SAVE_EXTENSION) + 1;
+  char* save_filename = alloca(save_filename_length);
+  get_save_filename(rom_filename, save_filename, save_filename_length);
 
   CHECK(SUCCESS(sdl_init_video(&sdl)));
   CHECK(SUCCESS(sdl_init_audio(&sdl)));
@@ -4807,6 +4869,7 @@ int main(int argc, char** argv) {
   uint32_t requested_samples = get_gb_channel_samples(&sdl);
 
   CHECK(SUCCESS(init_emulator(e, &rom_data, &sound_buffer)));
+  read_external_ram_from_file(e, save_filename);
 
   EmulatorEvent event;
   while (TRUE) {
@@ -4830,6 +4893,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  write_external_ram_to_file(e, save_filename);
   result = 0;
 error:
   sdl_destroy(&sdl);
