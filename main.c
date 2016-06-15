@@ -53,20 +53,14 @@
     exit(1);                  \
   } while (0)
 
-#define NOT_IMPLEMENTED(...)  \
-  do {                        \
-    s_trace = TRUE;           \
-    printf("\n\n");           \
-    print_emulator_info(e);   \
-    UNREACHABLE(__VA_ARGS__); \
-  } while (0)
-
 #define VALUE_WRAPPED(X, MAX) ((X) >= (MAX) ? ((X) -= (MAX), TRUE) : FALSE)
 
 typedef uint16_t Address;
 typedef uint16_t MaskedAddress;
 typedef uint32_t RGBA;
 
+/* Configurable constants */
+#define FRAME_LIMITER 1
 #define RGBA_WHITE 0xffffffffu
 #define RGBA_LIGHT_GRAY 0xffaaaaaau
 #define RGBA_DARK_GRAY 0xff555555u
@@ -81,6 +75,7 @@ typedef uint32_t RGBA;
 #define AUDIO_MAX_CHANNELS 2
 #define SAVE_EXTENSION ".sav"
 
+/* ROM header stuff */
 #define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
 #define ROM_U16_BE(addr) \
   ((uint16_t)((ROM_U8(uint16_t, addr) << 8) | ROM_U8(uint16_t, addr + 1)))
@@ -91,90 +86,29 @@ typedef uint32_t RGBA;
 #define LOGO_END_ADDR 0x133
 #define TITLE_START_ADDR 0x134
 #define TITLE_END_ADDR 0x143
-#define MANUFACTURERS_CODE_START_ADDR 0x13F
-#define MANUFACTURERS_CODE_END_ADDR 0x142
 #define CGB_FLAG_ADDR 0x143
-#define NEW_LINCENSEE_CODE_START_ADDR 0x144
-#define NEW_LINCENSEE_CODE_END_ADDR 0x145
 #define SGB_FLAG_ADDR 0x146
 #define CARTRIDGE_TYPE_ADDR 0x147
 #define ROM_SIZE_ADDR 0x148
 #define RAM_SIZE_ADDR 0x149
-#define DESTINATATION_CODE_ADDR 0x14a
-#define OLD_LICENSEE_CODE_ADDR 0x14b
-#define MASK_ROM_VERSION_NUMBER_ADDR 0x14c
 #define HEADER_CHECKSUM_ADDR 0x14d
 #define GLOBAL_CHECKSUM_START_ADDR 0x14e
 #define GLOBAL_CHECKSUM_END_ADDR 0x14f
 
-#define NEW_LICENSEE_CODE 0x33
 #define HEADER_CHECKSUM_RANGE_START 0x134
 #define HEADER_CHECKSUM_RANGE_END 0x14c
 
+/* Sizes */
 #define MINIMUM_ROM_SIZE 32768
-#define ROM_BANK_SHIFT 14
-#define EXTERNAL_RAM_BANK_SHIFT 13
-#define ROM_BANK_BYTE_SIZE (1 << ROM_BANK_SHIFT)
 #define VIDEO_RAM_SIZE 8192
-#define WORK_RAM_SIZE 32768
-#define EXTERNAL_RAM_SIZE 32768
+#define WORK_RAM_MAX_SIZE 32768
+#define EXTERNAL_RAM_MAX_SIZE 32768
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
+#define ROM_BANK_SHIFT 14
+#define EXTERNAL_RAM_BANK_SHIFT 13
 
-#define FRAME_LIMITER 1
-#define SCREEN_WIDTH 160
-#define SCREEN_HEIGHT 144
-#define SCREEN_HEIGHT_WITH_VBLANK 154
-#define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
-#define TILE_WIDTH 8
-#define TILE_HEIGHT 8
-#define MAP_COUNT 2
-#define TILE_MAP_WIDTH 32
-#define TILE_MAP_HEIGHT 32
-
-#define WINDOW_MAX_X 166
-#define WINDOW_MAX_Y 143
-#define WINDOW_X_OFFSET 7
-
-#define OBJ_COUNT 40
-#define OBJ_PER_LINE_COUNT 10
-#define OBJ_PALETTE_COUNT 2
-#define OBJ_Y_OFFSET 16
-#define OBJ_X_OFFSET 8
-
-#define PALETTE_COLOR_COUNT 4
-
-#define CHANNEL_COUNT 4
-#define CHANNEL1 0
-#define CHANNEL2 1
-#define CHANNEL3 2
-#define CHANNEL4 3
-
-#define SOUND_COUNT 5
-#define SOUND1 0
-#define SOUND2 1
-#define SOUND3 2
-#define SOUND4 3
-#define VIN 4
-
-#define NRX1_MAX_LENGTH 64
-#define NR31_MAX_LENGTH 256
-#define SWEEP_MAX_PERIOD 8
-#define SOUND_MAX_FREQUENCY 2047
-#define WAVE_SAMPLE_COUNT 32
-#define NOISE_MAX_CLOCK_SHIFT 13
-#define ENVELOPE_MAX_PERIOD 8
-#define ENVELOPE_MAX_VOLUME 15
-#define DUTY_CYCLE_COUNT 8
-#define SOUND_OUTPUT_COUNT 2
-#define SO1_MAX_VOLUME 7
-#define SO2_MAX_VOLUME 7
-/* Additional samples so the SoundBuffer doesn't overflow. This could happen
- * because the sound buffer is updated at the granularity of an instruction, so
- * the most extra samples that could be added is equal to the APU cycle count
- * of the slowest instruction. */
-#define SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES 256
-
+/* Cycle counts */
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
 #define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / APU_CYCLES)
@@ -192,15 +126,7 @@ typedef uint32_t RGBA;
 #define DMA_CYCLES 648
 #define APU_CYCLES 2 /* APU runs at 2MHz */
 
-/* TODO hack to make dmg_sound-2 tests pass. */
-#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
-#define WAVE_SAMPLE_READ_OFFSET_CYCLES 0
-#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 0
-
-#define FRAME_SEQUENCER_COUNT 8
-#define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
-#define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
-
+/* Memory map */
 #define ADDR_MASK_1K 0x03ff
 #define ADDR_MASK_4K 0x0fff
 #define ADDR_MASK_8K 0x1fff
@@ -236,6 +162,57 @@ typedef uint32_t RGBA;
 #define HIGH_RAM_END_ADDR 0xfffe
 
 #define OAM_TRANSFER_SIZE (OAM_END_ADDR - OAM_START_ADDR + 1)
+
+/* Video */
+#define SCREEN_WIDTH 160
+#define SCREEN_HEIGHT 144
+#define SCREEN_HEIGHT_WITH_VBLANK 154
+#define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
+#define TILE_WIDTH 8
+#define TILE_HEIGHT 8
+#define TILE_MAP_COUNT 2
+#define TILE_MAP_WIDTH 32
+#define TILE_MAP_HEIGHT 32
+
+#define WINDOW_MAX_X 166
+#define WINDOW_MAX_Y 143
+#define WINDOW_X_OFFSET 7
+
+#define OBJ_COUNT 40
+#define OBJ_PER_LINE_COUNT 10
+#define OBJ_PALETTE_COUNT 2
+#define OBJ_Y_OFFSET 16
+#define OBJ_X_OFFSET 8
+
+#define PALETTE_COLOR_COUNT 4
+
+/* Audio */
+#define NRX1_MAX_LENGTH 64
+#define NR31_MAX_LENGTH 256
+#define SWEEP_MAX_PERIOD 8
+#define SOUND_MAX_FREQUENCY 2047
+#define WAVE_SAMPLE_COUNT 32
+#define NOISE_MAX_CLOCK_SHIFT 13
+#define ENVELOPE_MAX_PERIOD 8
+#define ENVELOPE_MAX_VOLUME 15
+#define DUTY_CYCLE_COUNT 8
+#define SOUND_OUTPUT_COUNT 2
+#define SO1_MAX_VOLUME 7
+#define SO2_MAX_VOLUME 7
+/* Additional samples so the SoundBuffer doesn't overflow. This could happen
+ * because the sound buffer is updated at the granularity of an instruction, so
+ * the most extra samples that could be added is equal to the APU cycle count
+ * of the slowest instruction. */
+#define SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES 256
+
+/* TODO hack to make dmg_sound-2 tests pass. */
+#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
+#define WAVE_SAMPLE_READ_OFFSET_CYCLES 0
+#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 0
+
+#define FRAME_SEQUENCER_COUNT 8
+#define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
+#define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
 /* Addresses are relative to IO_START_ADDR. */
 #define FOREACH_IO_REG(V)                     \
@@ -285,11 +262,7 @@ typedef uint32_t RGBA;
   V(NR51, 0x15) /* Sound output select */                    \
   V(NR52, 0x16) /* Sound enabled */
 
-#define INTERRUPT_VBLANK_MASK 0x01
-#define INTERRUPT_LCD_STAT_MASK 0x02
-#define INTERRUPT_TIMER_MASK 0x04
-#define INTERRUPT_SERIAL_MASK 0x08
-#define INTERRUPT_JOYPAD_MASK 0x10
+#define INVALID_READ_BYTE 0xff
 
 #define WRITE_REG(X, MACRO) MACRO(X, DECODE)
 #define READ_REG(X, MACRO) MACRO(X, ENCODE)
@@ -304,8 +277,6 @@ typedef uint32_t RGBA;
 #define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
 #define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
 
-#define INVALID_READ_BYTE 0xff
-
 #define JOYP_JOYPAD_SELECT(X, OP) BITS(X, OP, 5, 4)
 #define JOYP_DPAD_DOWN(X, OP) BIT(X, OP, 3)
 #define JOYP_DPAD_UP(X, OP) BIT(X, OP, 2)
@@ -316,8 +287,39 @@ typedef uint32_t RGBA;
 #define JOYP_BUTTON_B(X, OP) BIT(X, OP, 1)
 #define JOYP_BUTTON_A(X, OP) BIT(X, OP, 0)
 
+#define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
+#define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
+#define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
+
 #define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
 #define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
+
+#define INTERRUPT_VBLANK_MASK 0x01
+#define INTERRUPT_LCD_STAT_MASK 0x02
+#define INTERRUPT_TIMER_MASK 0x04
+#define INTERRUPT_SERIAL_MASK 0x08
+#define INTERRUPT_JOYPAD_MASK 0x10
+
+#define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
+#define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
+#define LCDC_WINDOW_DISPLAY(X, OP) BIT(X, OP, 5)
+#define LCDC_BG_TILE_DATA_SELECT(X, OP) BIT(X, OP, 4)
+#define LCDC_BG_TILE_MAP_SELECT(X, OP) BIT(X, OP, 3)
+#define LCDC_OBJ_SIZE(X, OP) BIT(X, OP, 2)
+#define LCDC_OBJ_DISPLAY(X, OP) BIT(X, OP, 1)
+#define LCDC_BG_DISPLAY(X, OP) BIT(X, OP, 0)
+
+#define STAT_YCOMPARE_INTR(X, OP) BIT(X, OP, 6)
+#define STAT_USING_OAM_INTR(X, OP) BIT(X, OP, 5)
+#define STAT_VBLANK_INTR(X, OP) BIT(X, OP, 4)
+#define STAT_HBLANK_INTR(X, OP) BIT(X, OP, 3)
+#define STAT_YCOMPARE(X, OP) BIT(X, OP, 2)
+#define STAT_MODE(X, OP) BITS(X, OP, 1, 0)
+
+#define PALETTE_COLOR3(X, OP) BITS(X, OP, 7, 6)
+#define PALETTE_COLOR2(X, OP) BITS(X, OP, 5, 4)
+#define PALETTE_COLOR1(X, OP) BITS(X, OP, 3, 2)
+#define PALETTE_COLOR0(X, OP) BITS(X, OP, 1, 0)
 
 #define NR10_SWEEP_PERIOD(X, OP) BITS(X, OP, 6, 4)
 #define NR10_SWEEP_DIRECTION(X, OP) BIT(X, OP, 3)
@@ -348,10 +350,6 @@ typedef uint32_t RGBA;
 #define OBJ_XFLIP(X, OP) BIT(X, OP, 5)
 #define OBJ_PALETTE(X, OP) BIT(X, OP, 4)
 
-#define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
-#define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
-#define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
-
 #define NR50_VIN_SO2(X, OP) BIT(X, OP, 7)
 #define NR50_SO2_VOLUME(X, OP) BITS(X, OP, 6, 4)
 #define NR50_VIN_SO1(X, OP) BIT(X, OP, 3)
@@ -371,27 +369,6 @@ typedef uint32_t RGBA;
 #define NR52_SOUND3_ON(X, OP) BIT(X, OP, 2)
 #define NR52_SOUND2_ON(X, OP) BIT(X, OP, 1)
 #define NR52_SOUND1_ON(X, OP) BIT(X, OP, 0)
-
-#define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
-#define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
-#define LCDC_WINDOW_DISPLAY(X, OP) BIT(X, OP, 5)
-#define LCDC_BG_TILE_DATA_SELECT(X, OP) BIT(X, OP, 4)
-#define LCDC_BG_TILE_MAP_SELECT(X, OP) BIT(X, OP, 3)
-#define LCDC_OBJ_SIZE(X, OP) BIT(X, OP, 2)
-#define LCDC_OBJ_DISPLAY(X, OP) BIT(X, OP, 1)
-#define LCDC_BG_DISPLAY(X, OP) BIT(X, OP, 0)
-
-#define STAT_YCOMPARE_INTR(X, OP) BIT(X, OP, 6)
-#define STAT_USING_OAM_INTR(X, OP) BIT(X, OP, 5)
-#define STAT_VBLANK_INTR(X, OP) BIT(X, OP, 4)
-#define STAT_HBLANK_INTR(X, OP) BIT(X, OP, 3)
-#define STAT_YCOMPARE(X, OP) BIT(X, OP, 2)
-#define STAT_MODE(X, OP) BITS(X, OP, 1, 0)
-
-#define PALETTE_COLOR3(X, OP) BITS(X, OP, 7, 6)
-#define PALETTE_COLOR2(X, OP) BITS(X, OP, 5, 4)
-#define PALETTE_COLOR1(X, OP) BITS(X, OP, 3, 2)
-#define PALETTE_COLOR0(X, OP) BITS(X, OP, 1, 0)
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -461,10 +438,6 @@ typedef uint32_t RGBA;
   V(RAM_SIZE_8K, 2, 8192)   \
   V(RAM_SIZE_32K, 3, 32768)
 
-#define FOREACH_DESTINATION_CODE(V) \
-  V(DESTINATION_CODE_JAPANESE, 0)   \
-  V(DESTINATION_CODE_NON_JAPANESE, 1)
-
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_STRING(name, code, ...) [code] = #name,
 
@@ -495,10 +468,6 @@ DEFINE_NAMED_ENUM(CARTRIDGE_TYPE,
                   FOREACH_CARTRIDGE_TYPE)
 DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE)
 DEFINE_NAMED_ENUM(RAM_SIZE, RamSize, ram_size, FOREACH_RAM_SIZE)
-DEFINE_NAMED_ENUM(DESTINATION_CODE,
-                  DestinationCode,
-                  destination_code,
-                  FOREACH_DESTINATION_CODE)
 
 #define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
 #define DEFINE_APU_REG_ENUM(name, code, ...) APU_##name##_ADDR = code,
@@ -600,6 +569,23 @@ enum TimerClock {
   TIMER_CLOCK_16384_HZ = 3,
 };
 
+enum {
+  CHANNEL1,
+  CHANNEL2,
+  CHANNEL3,
+  CHANNEL4,
+  CHANNEL_COUNT,
+};
+
+enum {
+  SOUND1,
+  SOUND2,
+  SOUND3,
+  SOUND4,
+  VIN,
+  SOUND_COUNT,
+};
+
 enum SweepDirection {
   SWEEP_DIRECTION_ADDITION = 0,
   SWEEP_DIRECTION_SUBTRACTION = 1,
@@ -699,13 +685,13 @@ struct RomData {
 };
 
 struct ExternalRam {
-  uint8_t data[EXTERNAL_RAM_SIZE];
+  uint8_t data[EXTERNAL_RAM_MAX_SIZE];
   size_t size;
   enum BatteryType battery_type;
 };
 
 struct WorkRam {
-  uint8_t data[WORK_RAM_SIZE];
+  uint8_t data[WORK_RAM_MAX_SIZE];
   size_t size; /* normally 8k, 32k in CGB mode */
 };
 
@@ -716,16 +702,12 @@ struct StringSlice {
 
 struct RomInfo {
   struct StringSlice title;
-  struct StringSlice manufacturer;
   enum CgbFlag cgb_flag;
-  struct StringSlice new_licensee;
-  uint8_t old_licensee_code;
   enum SgbFlag sgb_flag;
   enum CartridgeType cartridge_type;
   enum RomSize rom_size;
   uint32_t rom_banks;
   enum RamSize ram_size;
-  enum DestinationCode destination_code;
   uint8_t header_checksum;
   uint16_t global_checksum;
   enum Result header_checksum_valid;
@@ -781,7 +763,7 @@ struct Registers {
     enum Bool N;
     enum Bool H;
     enum Bool C;
-  } flags;
+  } F;
 };
 
 typedef uint8_t Tile[TILE_WIDTH * TILE_HEIGHT];
@@ -789,7 +771,7 @@ typedef uint8_t TileMap[TILE_MAP_WIDTH * TILE_MAP_HEIGHT];
 
 struct VideoRam {
   Tile tile[TILE_COUNT];
-  TileMap map[MAP_COUNT];
+  TileMap map[TILE_MAP_COUNT];
   uint8_t data[VIDEO_RAM_SIZE];
 };
 
@@ -1077,42 +1059,6 @@ static void get_rom_title(struct RomData* rom_data,
   out_title->length = length;
 }
 
-static void get_manufacturer_code(struct RomData* rom_data,
-                                  struct StringSlice* out_manufacturer) {
-  const char* start = (char*)rom_data->data + MANUFACTURERS_CODE_START_ADDR;
-  const char* end = start + MANUFACTURERS_CODE_END_ADDR;
-  if (*(start - 1) != 0) {
-    /* The title is too long, so this must be a ROM without a manufacturer's
-     * code */
-    out_manufacturer->start = "";
-    out_manufacturer->length = 0;
-    return;
-  }
-
-  const char* p = start;
-  size_t length = 0;
-  while (p <= end && *p != 0) {
-    length++;
-    p++;
-  }
-  out_manufacturer->start = start;
-  out_manufacturer->length = length;
-}
-
-static void get_new_licensee(struct RomData* rom_data,
-                             uint8_t old_licensee_code,
-                             struct StringSlice* out_licensee) {
-  if (old_licensee_code == NEW_LICENSEE_CODE) {
-    out_licensee->start =
-        (const char*)rom_data->data + NEW_LINCENSEE_CODE_START_ADDR;
-    out_licensee->length =
-        NEW_LINCENSEE_CODE_END_ADDR - NEW_LINCENSEE_CODE_START_ADDR + 1;
-  } else {
-    out_licensee->start = "";
-    out_licensee->length = 0;
-  }
-}
-
 static enum Result validate_header_checksum(struct RomData* rom_data) {
   uint8_t expected_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
   uint8_t checksum = 0;
@@ -1140,7 +1086,7 @@ static uint32_t get_rom_bank_count(enum RomSize rom_size) {
 }
 
 static uint32_t get_rom_byte_size(enum RomSize rom_size) {
-  return get_rom_bank_count(rom_size) * ROM_BANK_BYTE_SIZE;
+  return get_rom_bank_count(rom_size) << ROM_BANK_SHIFT;
 }
 
 static enum Result get_rom_info(struct RomData* rom_data,
@@ -1157,16 +1103,10 @@ static enum Result get_rom_info(struct RomData* rom_data,
   rom_info.rom_banks = get_rom_bank_count(rom_info.rom_size);
 
   get_rom_title(rom_data, &rom_info.title);
-  get_manufacturer_code(rom_data, &rom_info.manufacturer);
   rom_info.cgb_flag = ROM_U8(enum CgbFlag, CGB_FLAG_ADDR);
   rom_info.sgb_flag = ROM_U8(enum SgbFlag, SGB_FLAG_ADDR);
   rom_info.cartridge_type = ROM_U8(enum CartridgeType, CARTRIDGE_TYPE_ADDR);
   rom_info.ram_size = ROM_U8(enum RamSize, RAM_SIZE_ADDR);
-  rom_info.destination_code =
-      ROM_U8(enum DestinationCode, DESTINATATION_CODE_ADDR);
-  rom_info.old_licensee_code = ROM_U8(uint8_t, OLD_LICENSEE_CODE_ADDR);
-  get_new_licensee(rom_data, rom_info.old_licensee_code,
-                   &rom_info.new_licensee);
   rom_info.header_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
   rom_info.header_checksum_valid = validate_header_checksum(rom_data);
   rom_info.global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
@@ -1181,19 +1121,12 @@ error:
 static void print_rom_info(struct RomInfo* rom_info) {
   printf("title: \"%.*s\"\n", (int)rom_info->title.length,
          rom_info->title.start);
-  printf("manufacturer: \"%.*s\"\n", (int)rom_info->manufacturer.length,
-         rom_info->manufacturer.start);
   printf("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
   printf("sgb flag: %s\n", get_sgb_flag_string(rom_info->sgb_flag));
   printf("cartridge type: %s\n",
          get_cartridge_type_string(rom_info->cartridge_type));
   printf("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
   printf("ram size: %s\n", get_ram_size_string(rom_info->ram_size));
-  printf("destination code: %s\n",
-         get_destination_code_string(rom_info->destination_code));
-  printf("old licensee code: %u\n", rom_info->old_licensee_code);
-  printf("new licensee: %.*s\n", (int)rom_info->new_licensee.length,
-         rom_info->new_licensee.start);
 
   printf("header checksum: 0x%02x [%s]\n", rom_info->header_checksum,
          get_result_string(rom_info->header_checksum_valid));
@@ -1428,10 +1361,10 @@ static enum Result init_memory_map(struct Emulator* e,
 }
 
 static uint8_t get_f_reg(struct Registers* reg) {
-  return READ_REG(reg->flags.Z, CPU_FLAG_Z) |
-         READ_REG(reg->flags.N, CPU_FLAG_N) |
-         READ_REG(reg->flags.H, CPU_FLAG_H) |
-         READ_REG(reg->flags.C, CPU_FLAG_C);
+  return READ_REG(reg->F.Z, CPU_FLAG_Z) |
+         READ_REG(reg->F.N, CPU_FLAG_N) |
+         READ_REG(reg->F.H, CPU_FLAG_H) |
+         READ_REG(reg->F.C, CPU_FLAG_C);
 }
 
 static uint16_t get_af_reg(struct Registers* reg) {
@@ -1440,10 +1373,10 @@ static uint16_t get_af_reg(struct Registers* reg) {
 
 static void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->A = af >> 8;
-  reg->flags.Z = WRITE_REG(af, CPU_FLAG_Z);
-  reg->flags.N = WRITE_REG(af, CPU_FLAG_N);
-  reg->flags.H = WRITE_REG(af, CPU_FLAG_H);
-  reg->flags.C = WRITE_REG(af, CPU_FLAG_C);
+  reg->F.Z = WRITE_REG(af, CPU_FLAG_Z);
+  reg->F.N = WRITE_REG(af, CPU_FLAG_N);
+  reg->F.H = WRITE_REG(af, CPU_FLAG_H);
+  reg->F.C = WRITE_REG(af, CPU_FLAG_C);
 }
 
 static enum Result init_emulator(struct Emulator* e,
@@ -1984,7 +1917,7 @@ static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     /* 0x9800-0x9fff: Tile map data */
     addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
     uint32_t map_index = addr >> 10;
-    assert(map_index < MAP_COUNT);
+    assert(map_index < TILE_MAP_COUNT);
     e->vram.map[map_index][addr & ADDR_MASK_1K] = value;
   }
 }
@@ -2807,6 +2740,11 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
+  static const uint32_t s_tima_cycles[] = {
+      TIMA_4096_CYCLES, TIMA_262144_CYCLES, TIMA_65536_CYCLES,
+      TIMA_16384_CYCLES,
+  };
+
   e->timer.div_cycles += cycles;
   if (VALUE_WRAPPED(e->timer.div_cycles, DIV_CYCLES)) {
     e->timer.DIV++;
@@ -2814,21 +2752,8 @@ static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
 
   if (e->timer.on) {
     e->timer.tima_cycles += cycles;
-    uint32_t tima_max_cycles = 0;
-    switch (e->timer.input_clock_select) {
-      case TIMER_CLOCK_4096_HZ:
-        tima_max_cycles = TIMA_4096_CYCLES;
-        break;
-      case TIMER_CLOCK_262144_HZ:
-        tima_max_cycles = TIMA_262144_CYCLES;
-        break;
-      case TIMER_CLOCK_65536_HZ:
-        tima_max_cycles = TIMA_65536_CYCLES;
-        break;
-      case TIMER_CLOCK_16384_HZ:
-        tima_max_cycles = TIMA_16384_CYCLES;
-        break;
-    }
+    assert(e->timer.input_clock_select < ARRAY_SIZE(s_tima_cycles));
+    uint32_t tima_max_cycles = s_tima_cycles[e->timer.input_clock_select];
     while (VALUE_WRAPPED(e->timer.tima_cycles, tima_max_cycles)) {
       e->timer.TIMA++;
       if (e->timer.TIMA == 0) {
@@ -3145,340 +3070,91 @@ static uint8_t s_opcode_bytes[] = {
     /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
 };
 
-static const char* s_opcode_mnemonic[] = {
-        [0x00] = "NOP",
-        [0x01] = "LD BC,%hu",
-        [0x02] = "LD (BC),A",
-        [0x03] = "INC BC",
-        [0x04] = "INC B",
-        [0x05] = "DEC B",
-        [0x06] = "LD B,%hhu",
-        [0x07] = "RLCA",
-        [0x08] = "LD (%04hXH),SP",
-        [0x09] = "ADD HL,BC",
-        [0x0A] = "LD A,(BC)",
-        [0x0B] = "DEC BC",
-        [0x0C] = "INC C",
-        [0x0D] = "DEC C",
-        [0x0E] = "LD C,%hhu",
-        [0x0F] = "RRCA",
-        [0x10] = "STOP",
-        [0x11] = "LD DE,%hu",
-        [0x12] = "LD (DE),A",
-        [0x13] = "INC DE",
-        [0x14] = "INC D",
-        [0x15] = "DEC D",
-        [0x16] = "LD D,%hhu",
-        [0x17] = "RLA",
-        [0x18] = "JR %+hhd",
-        [0x19] = "ADD HL,DE",
-        [0x1A] = "LD A,(DE)",
-        [0x1B] = "DEC DE",
-        [0x1C] = "INC E",
-        [0x1D] = "DEC E",
-        [0x1E] = "LD E,%hhu",
-        [0x1F] = "RRA",
-        [0x20] = "JR NZ,%+hhd",
-        [0x21] = "LD HL,%hu",
-        [0x22] = "LDI (HL),A",
-        [0x23] = "INC HL",
-        [0x24] = "INC H",
-        [0x25] = "DEC H",
-        [0x26] = "LD H,%hhu",
-        [0x27] = "DAA",
-        [0x28] = "JR Z,%+hhd",
-        [0x29] = "ADD HL,HL",
-        [0x2A] = "LDI A,(HL)",
-        [0x2B] = "DEC HL",
-        [0x2C] = "INC L",
-        [0x2D] = "DEC L",
-        [0x2E] = "LD L,%hhu",
-        [0x2F] = "CPL",
-        [0x30] = "JR NC,%+hhd",
-        [0x31] = "LD SP,%hu",
-        [0x32] = "LDD (HL),A",
-        [0x33] = "INC SP",
-        [0x34] = "INC (HL)",
-        [0x35] = "DEC (HL)",
-        [0x36] = "LD (HL),%hhu",
-        [0x37] = "SCF",
-        [0x38] = "JR C,%+hhd",
-        [0x39] = "ADD HL,SP",
-        [0x3A] = "LDD A,(HL)",
-        [0x3B] = "DEC SP",
-        [0x3C] = "INC A",
-        [0x3D] = "DEC A",
-        [0x3E] = "LD A,%hhu",
-        [0x3F] = "CCF",
-        [0x40] = "LD B,B",
-        [0x41] = "LD B,C",
-        [0x42] = "LD B,D",
-        [0x43] = "LD B,E",
-        [0x44] = "LD B,H",
-        [0x45] = "LD B,L",
-        [0x46] = "LD B,(HL)",
-        [0x47] = "LD B,A",
-        [0x48] = "LD C,B",
-        [0x49] = "LD C,C",
-        [0x4A] = "LD C,D",
-        [0x4B] = "LD C,E",
-        [0x4C] = "LD C,H",
-        [0x4D] = "LD C,L",
-        [0x4E] = "LD C,(HL)",
-        [0x4F] = "LD C,A",
-        [0x50] = "LD D,B",
-        [0x51] = "LD D,C",
-        [0x52] = "LD D,D",
-        [0x53] = "LD D,E",
-        [0x54] = "LD D,H",
-        [0x55] = "LD D,L",
-        [0x56] = "LD D,(HL)",
-        [0x57] = "LD D,A",
-        [0x58] = "LD E,B",
-        [0x59] = "LD E,C",
-        [0x5A] = "LD E,D",
-        [0x5B] = "LD E,E",
-        [0x5C] = "LD E,H",
-        [0x5D] = "LD E,L",
-        [0x5E] = "LD E,(HL)",
-        [0x5F] = "LD E,A",
-        [0x60] = "LD H,B",
-        [0x61] = "LD H,C",
-        [0x62] = "LD H,D",
-        [0x63] = "LD H,E",
-        [0x64] = "LD H,H",
-        [0x65] = "LD H,L",
-        [0x66] = "LD H,(HL)",
-        [0x67] = "LD H,A",
-        [0x68] = "LD L,B",
-        [0x69] = "LD L,C",
-        [0x6A] = "LD L,D",
-        [0x6B] = "LD L,E",
-        [0x6C] = "LD L,H",
-        [0x6D] = "LD L,L",
-        [0x6E] = "LD L,(HL)",
-        [0x6F] = "LD L,A",
-        [0x70] = "LD (HL),B",
-        [0x71] = "LD (HL),C",
-        [0x72] = "LD (HL),D",
-        [0x73] = "LD (HL),E",
-        [0x74] = "LD (HL),H",
-        [0x75] = "LD (HL),L",
-        [0x76] = "HALT",
-        [0x77] = "LD (HL),A",
-        [0x78] = "LD A,B",
-        [0x79] = "LD A,C",
-        [0x7A] = "LD A,D",
-        [0x7B] = "LD A,E",
-        [0x7C] = "LD A,H",
-        [0x7D] = "LD A,L",
-        [0x7E] = "LD A,(HL)",
-        [0x7F] = "LD A,A",
-        [0x80] = "ADD A,B",
-        [0x81] = "ADD A,C",
-        [0x82] = "ADD A,D",
-        [0x83] = "ADD A,E",
-        [0x84] = "ADD A,H",
-        [0x85] = "ADD A,L",
-        [0x86] = "ADD A,(HL)",
-        [0x87] = "ADD A,A",
-        [0x88] = "ADC A,B",
-        [0x89] = "ADC A,C",
-        [0x8A] = "ADC A,D",
-        [0x8B] = "ADC A,E",
-        [0x8C] = "ADC A,H",
-        [0x8D] = "ADC A,L",
-        [0x8E] = "ADC A,(HL)",
-        [0x8F] = "ADC A,A",
-        [0x90] = "SUB B",
-        [0x91] = "SUB C",
-        [0x92] = "SUB D",
-        [0x93] = "SUB E",
-        [0x94] = "SUB H",
-        [0x95] = "SUB L",
-        [0x96] = "SUB (HL)",
-        [0x97] = "SUB A",
-        [0x98] = "SBC B",
-        [0x99] = "SBC C",
-        [0x9A] = "SBC D",
-        [0x9B] = "SBC E",
-        [0x9C] = "SBC H",
-        [0x9D] = "SBC L",
-        [0x9E] = "SBC (HL)",
-        [0x9F] = "SBC A",
-        [0xA0] = "AND B",
-        [0xA1] = "AND C",
-        [0xA2] = "AND D",
-        [0xA3] = "AND E",
-        [0xA4] = "AND H",
-        [0xA5] = "AND L",
-        [0xA6] = "AND (HL)",
-        [0xA7] = "AND A",
-        [0xA8] = "XOR B",
-        [0xA9] = "XOR C",
-        [0xAA] = "XOR D",
-        [0xAB] = "XOR E",
-        [0xAC] = "XOR H",
-        [0xAD] = "XOR L",
-        [0xAE] = "XOR (HL)",
-        [0xAF] = "XOR A",
-        [0xB0] = "OR B",
-        [0xB1] = "OR C",
-        [0xB2] = "OR D",
-        [0xB3] = "OR E",
-        [0xB4] = "OR H",
-        [0xB5] = "OR L",
-        [0xB6] = "OR (HL)",
-        [0xB7] = "OR A",
-        [0xB8] = "CP B",
-        [0xB9] = "CP C",
-        [0xBA] = "CP D",
-        [0xBB] = "CP E",
-        [0xBC] = "CP H",
-        [0xBD] = "CP L",
-        [0xBE] = "CP (HL)",
-        [0xBF] = "CP A",
-        [0xC0] = "RET NZ",
-        [0xC1] = "POP BC",
-        [0xC2] = "JP NZ,%04hXH",
-        [0xC3] = "JP %04hXH",
-        [0xC4] = "CALL NZ,%04hXH",
-        [0xC5] = "PUSH BC",
-        [0xC6] = "ADD A,%hhu",
-        [0xC7] = "RST 0",
-        [0xC8] = "RET Z",
-        [0xC9] = "RET",
-        [0xCA] = "JP Z,%04hXH",
-        [0xCC] = "CALL Z,%04hXH",
-        [0xCD] = "CALL %04hXH",
-        [0xCE] = "ADC A,%hhu",
-        [0xCF] = "RST 8H",
-        [0xD0] = "RET NC",
-        [0xD1] = "POP DE",
-        [0xD2] = "JP NC,%04hXH",
-        [0xD4] = "CALL NC,%04hXH",
-        [0xD5] = "PUSH DE",
-        [0xD6] = "SUB %hhu",
-        [0xD7] = "RST 10H",
-        [0xD8] = "RET C",
-        [0xD9] = "RETI",
-        [0xDA] = "JP C,%04hXH",
-        [0xDC] = "CALL C,%04hXH",
-        [0xDE] = "SBC A,%hhu",
-        [0xDF] = "RST 18H",
-        [0xE0] = "LD (FF%02hhXH),A",
-        [0xE1] = "POP HL",
-        [0xE2] = "LD (FF00H+C),A",
-        [0xE5] = "PUSH HL",
-        [0xE6] = "AND %hhu",
-        [0xE7] = "RST 20H",
-        [0xE8] = "ADD SP,%hhd",
-        [0xE9] = "JP HL",
-        [0xEA] = "LD (%04hXH),A",
-        [0xEE] = "XOR %hhu",
-        [0xEF] = "RST 28H",
-        [0xF0] = "LD A,(FF%02hhXH)",
-        [0xF1] = "POP AF",
-        [0xF2] = "LD A,(FF00H+C)",
-        [0xF3] = "DI",
-        [0xF5] = "PUSH AF",
-        [0xF6] = "OR %hhu",
-        [0xF7] = "RST 30H",
-        [0xF8] = "LD HL,SP%+hhd",
-        [0xF9] = "LD SP,HL",
-        [0xFA] = "LD A,(%04hXH)",
-        [0xFB] = "EI",
-        [0xFE] = "CP %hhu",
-        [0xFF] = "RST 38H",
+static const char* s_opcode_mnemonic[256] = {
+    "NOP", "LD BC,%hu", "LD (BC),A", "INC BC", "INC B", "DEC B", "LD B,%hhu",
+    "RLCA", "LD (%04hXH),SP", "ADD HL,BC", "LD A,(BC)", "DEC BC", "INC C",
+    "DEC C", "LD C,%hhu", "RRCA", "STOP", "LD DE,%hu", "LD (DE),A", "INC DE",
+    "INC D", "DEC D", "LD D,%hhu", "RLA", "JR %+hhd", "ADD HL,DE", "LD A,(DE)",
+    "DEC DE", "INC E", "DEC E", "LD E,%hhu", "RRA", "JR NZ,%+hhd", "LD HL,%hu",
+    "LDI (HL),A", "INC HL", "INC H", "DEC H", "LD H,%hhu", "DAA", "JR Z,%+hhd",
+    "ADD HL,HL", "LDI A,(HL)", "DEC HL", "INC L", "DEC L", "LD L,%hhu", "CPL",
+    "JR NC,%+hhd", "LD SP,%hu", "LDD (HL),A", "INC SP", "INC (HL)", "DEC (HL)",
+    "LD (HL),%hhu", "SCF", "JR C,%+hhd", "ADD HL,SP", "LDD A,(HL)", "DEC SP",
+    "INC A", "DEC A", "LD A,%hhu", "CCF", "LD B,B", "LD B,C", "LD B,D",
+    "LD B,E", "LD B,H", "LD B,L", "LD B,(HL)", "LD B,A", "LD C,B", "LD C,C",
+    "LD C,D", "LD C,E", "LD C,H", "LD C,L", "LD C,(HL)", "LD C,A", "LD D,B",
+    "LD D,C", "LD D,D", "LD D,E", "LD D,H", "LD D,L", "LD D,(HL)", "LD D,A",
+    "LD E,B", "LD E,C", "LD E,D", "LD E,E", "LD E,H", "LD E,L", "LD E,(HL)",
+    "LD E,A", "LD H,B", "LD H,C", "LD H,D", "LD H,E", "LD H,H", "LD H,L",
+    "LD H,(HL)", "LD H,A", "LD L,B", "LD L,C", "LD L,D", "LD L,E", "LD L,H",
+    "LD L,L", "LD L,(HL)", "LD L,A", "LD (HL),B", "LD (HL),C", "LD (HL),D",
+    "LD (HL),E", "LD (HL),H", "LD (HL),L", "HALT", "LD (HL),A", "LD A,B",
+    "LD A,C", "LD A,D", "LD A,E", "LD A,H", "LD A,L", "LD A,(HL)", "LD A,A",
+    "ADD A,B", "ADD A,C", "ADD A,D", "ADD A,E", "ADD A,H", "ADD A,L",
+    "ADD A,(HL)", "ADD A,A", "ADC A,B", "ADC A,C", "ADC A,D", "ADC A,E",
+    "ADC A,H", "ADC A,L", "ADC A,(HL)", "ADC A,A", "SUB B", "SUB C", "SUB D",
+    "SUB E", "SUB H", "SUB L", "SUB (HL)", "SUB A", "SBC B", "SBC C", "SBC D",
+    "SBC E", "SBC H", "SBC L", "SBC (HL)", "SBC A", "AND B", "AND C", "AND D",
+    "AND E", "AND H", "AND L", "AND (HL)", "AND A", "XOR B", "XOR C", "XOR D",
+    "XOR E", "XOR H", "XOR L", "XOR (HL)", "XOR A", "OR B", "OR C", "OR D",
+    "OR E", "OR H", "OR L", "OR (HL)", "OR A", "CP B", "CP C", "CP D", "CP E",
+    "CP H", "CP L", "CP (HL)", "CP A", "RET NZ", "POP BC", "JP NZ,%04hXH",
+    "JP %04hXH", "CALL NZ,%04hXH", "PUSH BC", "ADD A,%hhu", "RST 0", "RET Z",
+    "RET", "JP Z,%04hXH", NULL, "CALL Z,%04hXH", "CALL %04hXH", "ADC A,%hhu",
+    "RST 8H", "RET NC", "POP DE", "JP NC,%04hXH", NULL, "CALL NC,%04hXH",
+    "PUSH DE", "SUB %hhu", "RST 10H", "RET C", "RETI", "JP C,%04hXH", NULL,
+    "CALL C,%04hXH", NULL, "SBC A,%hhu", "RST 18H", "LD (FF%02hhXH),A",
+    "POP HL", "LD (FF00H+C),A", NULL, NULL, "PUSH HL", "AND %hhu", "RST 20H",
+    "ADD SP,%hhd", "JP HL", "LD (%04hXH),A", NULL, NULL, NULL, "XOR %hhu",
+    "RST 28H", "LD A,(FF%02hhXH)", "POP AF", "LD A,(FF00H+C)", "DI", NULL,
+    "PUSH AF", "OR %hhu", "RST 30H", "LD HL,SP%+hhd", "LD SP,HL",
+    "LD A,(%04hXH)", "EI", NULL, NULL, "CP %hhu", "RST 38H",
 };
 
-static const char* s_cb_opcode_mnemonic[] = {
-        [0x00] = "RLC B",      [0x01] = "RLC C",      [0x02] = "RLC D",
-        [0x03] = "RLC E",      [0x04] = "RLC H",      [0x05] = "RLC L",
-        [0x06] = "RLC (HL)",   [0x07] = "RLC A",      [0x08] = "RRC B",
-        [0x09] = "RRC C",      [0x0A] = "RRC D",      [0x0B] = "RRC E",
-        [0x0C] = "RRC H",      [0x0D] = "RRC L",      [0x0E] = "RRC (HL)",
-        [0x0F] = "RRC A",      [0x10] = "RL B",       [0x11] = "RL C",
-        [0x12] = "RL D",       [0x13] = "RL E",       [0x14] = "RL H",
-        [0x15] = "RL L",       [0x16] = "RL (HL)",    [0x17] = "RL A",
-        [0x18] = "RR B",       [0x19] = "RR C",       [0x1A] = "RR D",
-        [0x1B] = "RR E",       [0x1C] = "RR H",       [0x1D] = "RR L",
-        [0x1E] = "RR (HL)",    [0x1F] = "RR A",       [0x20] = "SLA B",
-        [0x21] = "SLA C",      [0x22] = "SLA D",      [0x23] = "SLA E",
-        [0x24] = "SLA H",      [0x25] = "SLA L",      [0x26] = "SLA (HL)",
-        [0x27] = "SLA A",      [0x28] = "SRA B",      [0x29] = "SRA C",
-        [0x2A] = "SRA D",      [0x2B] = "SRA E",      [0x2C] = "SRA H",
-        [0x2D] = "SRA L",      [0x2E] = "SRA (HL)",   [0x2F] = "SRA A",
-        [0x30] = "SWAP B",     [0x31] = "SWAP C",     [0x32] = "SWAP D",
-        [0x33] = "SWAP E",     [0x34] = "SWAP H",     [0x35] = "SWAP L",
-        [0x36] = "SWAP (HL)",  [0x37] = "SWAP A",     [0x38] = "SRL B",
-        [0x39] = "SRL C",      [0x3A] = "SRL D",      [0x3B] = "SRL E",
-        [0x3C] = "SRL H",      [0x3D] = "SRL L",      [0x3E] = "SRL (HL)",
-        [0x3F] = "SRL A",      [0x40] = "BIT 0,B",    [0x41] = "BIT 0,C",
-        [0x42] = "BIT 0,D",    [0x43] = "BIT 0,E",    [0x44] = "BIT 0,H",
-        [0x45] = "BIT 0,L",    [0x46] = "BIT 0,(HL)", [0x47] = "BIT 0,A",
-        [0x48] = "BIT 1,B",    [0x49] = "BIT 1,C",    [0x4A] = "BIT 1,D",
-        [0x4B] = "BIT 1,E",    [0x4C] = "BIT 1,H",    [0x4D] = "BIT 1,L",
-        [0x4E] = "BIT 1,(HL)", [0x4F] = "BIT 1,A",    [0x50] = "BIT 2,B",
-        [0x51] = "BIT 2,C",    [0x52] = "BIT 2,D",    [0x53] = "BIT 2,E",
-        [0x54] = "BIT 2,H",    [0x55] = "BIT 2,L",    [0x56] = "BIT 2,(HL)",
-        [0x57] = "BIT 2,A",    [0x58] = "BIT 3,B",    [0x59] = "BIT 3,C",
-        [0x5A] = "BIT 3,D",    [0x5B] = "BIT 3,E",    [0x5C] = "BIT 3,H",
-        [0x5D] = "BIT 3,L",    [0x5E] = "BIT 3,(HL)", [0x5F] = "BIT 3,A",
-        [0x60] = "BIT 4,B",    [0x61] = "BIT 4,C",    [0x62] = "BIT 4,D",
-        [0x63] = "BIT 4,E",    [0x64] = "BIT 4,H",    [0x65] = "BIT 4,L",
-        [0x66] = "BIT 4,(HL)", [0x67] = "BIT 4,A",    [0x68] = "BIT 5,B",
-        [0x69] = "BIT 5,C",    [0x6A] = "BIT 5,D",    [0x6B] = "BIT 5,E",
-        [0x6C] = "BIT 5,H",    [0x6D] = "BIT 5,L",    [0x6E] = "BIT 5,(HL)",
-        [0x6F] = "BIT 5,A",    [0x70] = "BIT 6,B",    [0x71] = "BIT 6,C",
-        [0x72] = "BIT 6,D",    [0x73] = "BIT 6,E",    [0x74] = "BIT 6,H",
-        [0x75] = "BIT 6,L",    [0x76] = "BIT 6,(HL)", [0x77] = "BIT 6,A",
-        [0x78] = "BIT 7,B",    [0x79] = "BIT 7,C",    [0x7A] = "BIT 7,D",
-        [0x7B] = "BIT 7,E",    [0x7C] = "BIT 7,H",    [0x7D] = "BIT 7,L",
-        [0x7E] = "BIT 7,(HL)", [0x7F] = "BIT 7,A",    [0x80] = "RES 0,B",
-        [0x81] = "RES 0,C",    [0x82] = "RES 0,D",    [0x83] = "RES 0,E",
-        [0x84] = "RES 0,H",    [0x85] = "RES 0,L",    [0x86] = "RES 0,(HL)",
-        [0x87] = "RES 0,A",    [0x88] = "RES 1,B",    [0x89] = "RES 1,C",
-        [0x8A] = "RES 1,D",    [0x8B] = "RES 1,E",    [0x8C] = "RES 1,H",
-        [0x8D] = "RES 1,L",    [0x8E] = "RES 1,(HL)", [0x8F] = "RES 1,A",
-        [0x90] = "RES 2,B",    [0x91] = "RES 2,C",    [0x92] = "RES 2,D",
-        [0x93] = "RES 2,E",    [0x94] = "RES 2,H",    [0x95] = "RES 2,L",
-        [0x96] = "RES 2,(HL)", [0x97] = "RES 2,A",    [0x98] = "RES 3,B",
-        [0x99] = "RES 3,C",    [0x9A] = "RES 3,D",    [0x9B] = "RES 3,E",
-        [0x9C] = "RES 3,H",    [0x9D] = "RES 3,L",    [0x9E] = "RES 3,(HL)",
-        [0x9F] = "RES 3,A",    [0xA0] = "RES 4,B",    [0xA1] = "RES 4,C",
-        [0xA2] = "RES 4,D",    [0xA3] = "RES 4,E",    [0xA4] = "RES 4,H",
-        [0xA5] = "RES 4,L",    [0xA6] = "RES 4,(HL)", [0xA7] = "RES 4,A",
-        [0xA8] = "RES 5,B",    [0xA9] = "RES 5,C",    [0xAA] = "RES 5,D",
-        [0xAB] = "RES 5,E",    [0xAC] = "RES 5,H",    [0xAD] = "RES 5,L",
-        [0xAE] = "RES 5,(HL)", [0xAF] = "RES 5,A",    [0xB0] = "RES 6,B",
-        [0xB1] = "RES 6,C",    [0xB2] = "RES 6,D",    [0xB3] = "RES 6,E",
-        [0xB4] = "RES 6,H",    [0xB5] = "RES 6,L",    [0xB6] = "RES 6,(HL)",
-        [0xB7] = "RES 6,A",    [0xB8] = "RES 7,B",    [0xB9] = "RES 7,C",
-        [0xBA] = "RES 7,D",    [0xBB] = "RES 7,E",    [0xBC] = "RES 7,H",
-        [0xBD] = "RES 7,L",    [0xBE] = "RES 7,(HL)", [0xBF] = "RES 7,A",
-        [0xC0] = "SET 0,B",    [0xC1] = "SET 0,C",    [0xC2] = "SET 0,D",
-        [0xC3] = "SET 0,E",    [0xC4] = "SET 0,H",    [0xC5] = "SET 0,L",
-        [0xC6] = "SET 0,(HL)", [0xC7] = "SET 0,A",    [0xC8] = "SET 1,B",
-        [0xC9] = "SET 1,C",    [0xCA] = "SET 1,D",    [0xCB] = "SET 1,E",
-        [0xCC] = "SET 1,H",    [0xCD] = "SET 1,L",    [0xCE] = "SET 1,(HL)",
-        [0xCF] = "SET 1,A",    [0xD0] = "SET 2,B",    [0xD1] = "SET 2,C",
-        [0xD2] = "SET 2,D",    [0xD3] = "SET 2,E",    [0xD4] = "SET 2,H",
-        [0xD5] = "SET 2,L",    [0xD6] = "SET 2,(HL)", [0xD7] = "SET 2,A",
-        [0xD8] = "SET 3,B",    [0xD9] = "SET 3,C",    [0xDA] = "SET 3,D",
-        [0xDB] = "SET 3,E",    [0xDC] = "SET 3,H",    [0xDD] = "SET 3,L",
-        [0xDE] = "SET 3,(HL)", [0xDF] = "SET 3,A",    [0xE0] = "SET 4,B",
-        [0xE1] = "SET 4,C",    [0xE2] = "SET 4,D",    [0xE3] = "SET 4,E",
-        [0xE4] = "SET 4,H",    [0xE5] = "SET 4,L",    [0xE6] = "SET 4,(HL)",
-        [0xE7] = "SET 4,A",    [0xE8] = "SET 5,B",    [0xE9] = "SET 5,C",
-        [0xEA] = "SET 5,D",    [0xEB] = "SET 5,E",    [0xEC] = "SET 5,H",
-        [0xED] = "SET 5,L",    [0xEE] = "SET 5,(HL)", [0xEF] = "SET 5,A",
-        [0xF0] = "SET 6,B",    [0xF1] = "SET 6,C",    [0xF2] = "SET 6,D",
-        [0xF3] = "SET 6,E",    [0xF4] = "SET 6,H",    [0xF5] = "SET 6,L",
-        [0xF6] = "SET 6,(HL)", [0xF7] = "SET 6,A",    [0xF8] = "SET 7,B",
-        [0xF9] = "SET 7,C",    [0xFA] = "SET 7,D",    [0xFB] = "SET 7,E",
-        [0xFC] = "SET 7,H",    [0xFD] = "SET 7,L",    [0xFE] = "SET 7,(HL)",
-        [0xFF] = "SET 7,A",
+static const char* s_cb_opcode_mnemonic[256] = {
+    "RLC B",      "RLC C",   "RLC D",      "RLC E",   "RLC H",      "RLC L",
+    "RLC (HL)",   "RLC A",   "RRC B",      "RRC C",   "RRC D",      "RRC E",
+    "RRC H",      "RRC L",   "RRC (HL)",   "RRC A",   "RL B",       "RL C",
+    "RL D",       "RL E",    "RL H",       "RL L",    "RL (HL)",    "RL A",
+    "RR B",       "RR C",    "RR D",       "RR E",    "RR H",       "RR L",
+    "RR (HL)",    "RR A",    "SLA B",      "SLA C",   "SLA D",      "SLA E",
+    "SLA H",      "SLA L",   "SLA (HL)",   "SLA A",   "SRA B",      "SRA C",
+    "SRA D",      "SRA E",   "SRA H",      "SRA L",   "SRA (HL)",   "SRA A",
+    "SWAP B",     "SWAP C",  "SWAP D",     "SWAP E",  "SWAP H",     "SWAP L",
+    "SWAP (HL)",  "SWAP A",  "SRL B",      "SRL C",   "SRL D",      "SRL E",
+    "SRL H",      "SRL L",   "SRL (HL)",   "SRL A",   "BIT 0,B",    "BIT 0,C",
+    "BIT 0,D",    "BIT 0,E", "BIT 0,H",    "BIT 0,L", "BIT 0,(HL)", "BIT 0,A",
+    "BIT 1,B",    "BIT 1,C", "BIT 1,D",    "BIT 1,E", "BIT 1,H",    "BIT 1,L",
+    "BIT 1,(HL)", "BIT 1,A", "BIT 2,B",    "BIT 2,C", "BIT 2,D",    "BIT 2,E",
+    "BIT 2,H",    "BIT 2,L", "BIT 2,(HL)", "BIT 2,A", "BIT 3,B",    "BIT 3,C",
+    "BIT 3,D",    "BIT 3,E", "BIT 3,H",    "BIT 3,L", "BIT 3,(HL)", "BIT 3,A",
+    "BIT 4,B",    "BIT 4,C", "BIT 4,D",    "BIT 4,E", "BIT 4,H",    "BIT 4,L",
+    "BIT 4,(HL)", "BIT 4,A", "BIT 5,B",    "BIT 5,C", "BIT 5,D",    "BIT 5,E",
+    "BIT 5,H",    "BIT 5,L", "BIT 5,(HL)", "BIT 5,A", "BIT 6,B",    "BIT 6,C",
+    "BIT 6,D",    "BIT 6,E", "BIT 6,H",    "BIT 6,L", "BIT 6,(HL)", "BIT 6,A",
+    "BIT 7,B",    "BIT 7,C", "BIT 7,D",    "BIT 7,E", "BIT 7,H",    "BIT 7,L",
+    "BIT 7,(HL)", "BIT 7,A", "RES 0,B",    "RES 0,C", "RES 0,D",    "RES 0,E",
+    "RES 0,H",    "RES 0,L", "RES 0,(HL)", "RES 0,A", "RES 1,B",    "RES 1,C",
+    "RES 1,D",    "RES 1,E", "RES 1,H",    "RES 1,L", "RES 1,(HL)", "RES 1,A",
+    "RES 2,B",    "RES 2,C", "RES 2,D",    "RES 2,E", "RES 2,H",    "RES 2,L",
+    "RES 2,(HL)", "RES 2,A", "RES 3,B",    "RES 3,C", "RES 3,D",    "RES 3,E",
+    "RES 3,H",    "RES 3,L", "RES 3,(HL)", "RES 3,A", "RES 4,B",    "RES 4,C",
+    "RES 4,D",    "RES 4,E", "RES 4,H",    "RES 4,L", "RES 4,(HL)", "RES 4,A",
+    "RES 5,B",    "RES 5,C", "RES 5,D",    "RES 5,E", "RES 5,H",    "RES 5,L",
+    "RES 5,(HL)", "RES 5,A", "RES 6,B",    "RES 6,C", "RES 6,D",    "RES 6,E",
+    "RES 6,H",    "RES 6,L", "RES 6,(HL)", "RES 6,A", "RES 7,B",    "RES 7,C",
+    "RES 7,D",    "RES 7,E", "RES 7,H",    "RES 7,L", "RES 7,(HL)", "RES 7,A",
+    "SET 0,B",    "SET 0,C", "SET 0,D",    "SET 0,E", "SET 0,H",    "SET 0,L",
+    "SET 0,(HL)", "SET 0,A", "SET 1,B",    "SET 1,C", "SET 1,D",    "SET 1,E",
+    "SET 1,H",    "SET 1,L", "SET 1,(HL)", "SET 1,A", "SET 2,B",    "SET 2,C",
+    "SET 2,D",    "SET 2,E", "SET 2,H",    "SET 2,L", "SET 2,(HL)", "SET 2,A",
+    "SET 3,B",    "SET 3,C", "SET 3,D",    "SET 3,E", "SET 3,H",    "SET 3,L",
+    "SET 3,(HL)", "SET 3,A", "SET 4,B",    "SET 4,C", "SET 4,D",    "SET 4,E",
+    "SET 4,H",    "SET 4,L", "SET 4,(HL)", "SET 4,A", "SET 5,B",    "SET 5,C",
+    "SET 5,D",    "SET 5,E", "SET 5,H",    "SET 5,L", "SET 5,(HL)", "SET 5,A",
+    "SET 6,B",    "SET 6,C", "SET 6,D",    "SET 6,E", "SET 6,H",    "SET 6,L",
+    "SET 6,(HL)", "SET 6,A", "SET 7,B",    "SET 7,C", "SET 7,D",    "SET 7,E",
+    "SET 7,H",    "SET 7,L", "SET 7,(HL)", "SET 7,A",
 };
 
 static void print_instruction(struct Emulator* e, Address addr) {
@@ -3522,8 +3198,8 @@ static void print_instruction(struct Emulator* e, Address addr) {
 
 static void print_registers(struct Registers* reg) {
   printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
-         reg->flags.Z ? 'Z' : '-', reg->flags.N ? 'N' : '-',
-         reg->flags.H ? 'H' : '-', reg->flags.C ? 'C' : '-', reg->BC, reg->DE,
+         reg->F.Z ? 'Z' : '-', reg->F.N ? 'N' : '-',
+         reg->F.H ? 'H' : '-', reg->F.C ? 'C' : '-', reg->BC, reg->DE,
          reg->HL, reg->SP, reg->PC);
 }
 
@@ -3582,11 +3258,11 @@ static uint8_t s_cb_opcode_cycles[] = {
     /* f0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
 };
 
-#define NI NOT_IMPLEMENTED("opcode not implemented!\n")
-#define INVALID NI
+#define NI UNREACHABLE("opcode not implemented!\n")
+#define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
 #define REG(R) e->reg.R
-#define FLAG(F) e->reg.flags.F
+#define FLAG(x) e->reg.F.x
 #define INTR(m) e->interrupts.m
 #define CYCLES(X) update_cycles(e, X)
 
@@ -4382,7 +4058,11 @@ static void handle_interrupts(struct Emulator* e) {
     vector = 0x40;
     mask = INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
-    DEBUG(interrupt, ">> LCD_STAT interrupt\n");
+    DEBUG(interrupt, ">> LCD_STAT interrupt [%c%c%c%c]\n",
+          e->lcd.stat.y_compare_intr ? 'Y' : '.',
+          e->lcd.stat.using_oam_intr ? 'O' : '.',
+          e->lcd.stat.vblank_intr ? 'V' : '.',
+          e->lcd.stat.hblank_intr ? 'H' : '.');
     vector = 0x48;
     mask = INTERRUPT_LCD_STAT_MASK;
   } else if (interrupts & INTERRUPT_TIMER_MASK) {
