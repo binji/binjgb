@@ -10,31 +10,24 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_main.h>
 
-#define LOG_LEVEL 1
-
 #define SUCCESS(x) ((x) == OK)
 #define FAIL(x) ((x) != OK)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 
-#if LOG_LEVEL > 0
+#ifndef NDEBUG
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
+#define LOG_IF(cond, ...) do if (cond) LOG(__VA_ARGS__); while(0)
 #else
 #define LOG(...)
+#define LOG_IF(cond, ...)
 #endif
 
-#if LOG_LEVEL > 1
-#define DEBUG(...) LOG(__VA_ARGS__)
-#else
-#define DEBUG(...)
-#endif
-
-#if LOG_LEVEL > 2
-#define DEBUG_VERBOSE(...) LOG(__VA_ARGS__)
-#else
-#define DEBUG_VERBOSE(...)
-#endif
+#define LOG_LEVEL_IS(system, value) (s_log_level_##system >= (value))
+#define INFO(system, ...) LOG_IF(LOG_LEVEL_IS(system, 1), __VA_ARGS__)
+#define DEBUG(system, ...) LOG_IF(LOG_LEVEL_IS(system, 2), __VA_ARGS__)
+#define VERBOSE(system, ...) LOG_IF(LOG_LEVEL_IS(system, 3), __VA_ARGS__)
 
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define CHECK_MSG(x, ...)                       \
@@ -1021,6 +1014,12 @@ struct Emulator {
 };
 
 static enum Bool s_trace = FALSE;
+static int s_log_level_memory = 1;
+static int s_log_level_video = 1;
+static int s_log_level_sound = 1;
+static int s_log_level_io = 1;
+static int s_log_level_interrupt = 1;
+static int s_log_level_sdl = 1;
 static uint32_t s_trace_counter = 0;
 
 static void print_emulator_info(struct Emulator*);
@@ -1217,8 +1216,8 @@ static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
   if (rom_addr < e->rom_data.size) {
     return e->rom_data.data[rom_addr];
   } else {
-    LOG("mbc1_read_rom_bank_switch(0x%04x): bad address (bank = %u)!\n", addr,
-        rom_bank);
+    INFO(memory, "%s(0x%04x): bad address (bank = %u)!\n", __func__, addr,
+         rom_bank);
     return 0;
   }
 }
@@ -1259,8 +1258,9 @@ static void mbc1_write_rom(struct Emulator* e,
     mbc1->ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK;
   }
 
-  DEBUG_VERBOSE("mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
-                addr, value, mbc1->rom_bank, mbc1->rom_bank << ROM_BANK_SHIFT);
+  VERBOSE(memory,
+          "mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
+          value, mbc1->rom_bank, mbc1->rom_bank << ROM_BANK_SHIFT);
 }
 
 static void gb_write_work_ram_bank_switch(struct Emulator* e,
@@ -1286,8 +1286,8 @@ static uint32_t get_external_ram_address(struct Emulator* e,
   if (ram_addr < e->external_ram.size) {
     return ram_addr;
   } else {
-    LOG("get_external_ram_address(0x%04x): bad address (bank = %u)!\n", addr,
-        ram_bank);
+    INFO(memory, "%s(0x%04x): bad address (bank = %u)!\n", __func__, addr,
+         ram_bank);
     return 0;
   }
 }
@@ -1302,8 +1302,8 @@ static void gb_write_external_ram(struct Emulator* e,
   if (e->memory_map.state.mbc1.ram_enabled) {
     e->external_ram.data[get_external_ram_address(e, addr)] = value;
   } else {
-    LOG("gb_write_external_ram(0x%04x, 0x%02x) ignored, ram disabled.\n", addr,
-        value);
+    INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr,
+         value);
   }
 }
 
@@ -1516,7 +1516,7 @@ static struct MemoryTypeAddressPair map_address(Address addr) {
 
 static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    DEBUG("read_vram(0x%04x): returning 0xff because in use.\n", addr);
+    DEBUG(video, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
@@ -1531,7 +1531,7 @@ static enum Bool is_using_oam(struct Emulator* e) {
 
 static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   if (is_using_oam(e)) {
-    DEBUG("read_oam(0x%04x): returning 0xff because in use.\n", addr);
+    DEBUG(video, "read_oam(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   }
 
@@ -1638,7 +1638,8 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
-      LOG("read_io(0x%04x [%s]) ignored.\n", addr, get_io_reg_string(addr));
+      INFO(io, "%s(0x%04x [%s]) ignored.\n", __func__, addr,
+           get_io_reg_string(addr));
       return INVALID_READ_BYTE;
   }
 }
@@ -1765,7 +1766,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
                 READ_REG(channel3->status, NR52_SOUND3_ON) |
                 READ_REG(channel2->status, NR52_SOUND2_ON) |
                 READ_REG(channel1->status, NR52_SOUND1_ON);
-      DEBUG_VERBOSE("read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
+      VERBOSE(sound, "read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
       break;
     default:
       break;
@@ -1796,13 +1797,12 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
     struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       result = sample->byte;
-      DEBUG("read_wave_ram(0x%02x) while playing => 0x%02x (cycle: %u)\n", addr,
-            result, e->cycles);
+      DEBUG(sound, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
+            addr, result, e->cycles);
     } else {
       result = INVALID_READ_BYTE;
-      DEBUG(
-          "read_wave_ram(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
-          addr, e->cycles);
+      DEBUG(sound, "%s(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
+            __func__, addr, e->cycles);
     }
     return result;
   } else {
@@ -1818,7 +1818,7 @@ static enum Bool is_dma_access_ok(struct Emulator* e,
 static uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
-    LOG("read_u8(0x%04x) during DMA.\n", addr);
+    INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
     return 0;
   }
 
@@ -1841,7 +1841,7 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
       return 0;
     case MEMORY_MAP_IO: {
       uint8_t value = read_io(e, pair.addr);
-      DEBUG_VERBOSE("read_io(0x%04x) = 0x%02x\n", pair.addr, value);
+      VERBOSE(io, "read_io(0x%04x) = 0x%02x\n", pair.addr, value);
       return value;
     }
     case MEMORY_MAP_APU:
@@ -1863,8 +1863,8 @@ static void write_vram_tile_data(struct Emulator* e,
                                  uint32_t plane,
                                  uint32_t y,
                                  uint8_t value) {
-  DEBUG_VERBOSE("write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
-                value);
+  VERBOSE(video, "write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
+          value);
   assert(index < TILE_COUNT);
   Tile* tile = &e->vram.tile[index];
   uint32_t data_index = y * TILE_WIDTH;
@@ -1880,7 +1880,8 @@ static void write_vram_tile_data(struct Emulator* e,
 
 static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    DEBUG("write_vram(0x%04x, 0x%02x) ignored, using vram.\n", addr, value);
+    DEBUG(video, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
+          value);
     return;
   }
 
@@ -1914,7 +1915,8 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
    * write to OAM while the video hardware is reading it. But without it, the
    * rendering is incorrect. */
   if (!e->dma.copying && is_using_oam(e)) {
-    DEBUG("write_oam(0x%04x, 0x%02x): ignored because in use.\n", addr, value);
+    INFO(video, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
+         value);
     return;
   }
 
@@ -1939,8 +1941,8 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  DEBUG("write_io(0x%04x [%s], 0x%02x)\n", addr, get_io_reg_string(addr),
-        value);
+  DEBUG(io, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
+        get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
       e->joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
@@ -1985,12 +1987,12 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
         e->lcd.LY = 0;
         e->lcd.fake_LY = 0;
         e->lcd.stat.mode = LCD_MODE_VBLANK;
-        DEBUG("Disabling display.\n");
+        DEBUG(video, "Disabling display.\n");
       } else if (!was_enabled && lcdc->display) {
         e->lcd.cycles = 0;
         e->lcd.LY = 0;
         e->lcd.stat.mode = LCD_MODE_USING_OAM;
-        DEBUG("Enabling display.\n");
+        DEBUG(video, "Enabling display.\n");
       }
       break;
     }
@@ -2043,7 +2045,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->interrupts.IE = value;
       break;
     default:
-      LOG("write_io(0x%04x, 0x%02x) ignored.\n", addr, value);
+      INFO(memory, "%s(0x%04x, 0x%02x) ignored.\n", __func__, addr, value);
       break;
   }
 }
@@ -2057,8 +2059,8 @@ static void write_nrx1_reg(struct Emulator* e,
     channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   }
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
-  DEBUG_VERBOSE("write_nrx1_reg(%zu, 0x%02x) length=%u\n",
-                CHANNEL_INDEX(channel), value, channel->length);
+  VERBOSE(sound, "write_nrx1_reg(%zu, 0x%02x) length=%u\n",
+          CHANNEL_INDEX(channel), value, channel->length);
 }
 
 static void write_nrx2_reg(struct Emulator* e,
@@ -2068,17 +2070,17 @@ static void write_nrx2_reg(struct Emulator* e,
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
-                  CHANNEL_INDEX(channel), value);
+    VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
+            CHANNEL_INDEX(channel), value);
   }
   if (channel->status) {
-    DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
-                  CHANNEL_INDEX(channel), value);
+    VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
+            CHANNEL_INDEX(channel), value);
   }
   channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
-  DEBUG_VERBOSE("write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
-                CHANNEL_INDEX(channel), value, channel->initial_volume);
+  VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
+          CHANNEL_INDEX(channel), value, channel->envelope.initial_volume);
 }
 
 static void write_nrx3_reg(struct Emulator* e,
@@ -2106,10 +2108,10 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG("write_nrx4_reg(%zu, 0x%02x) extra length clock = %u\n",
+    DEBUG(sound, "%s(%zu, 0x%02x) extra length clock = %u\n", __func__,
           CHANNEL_INDEX(channel), value, channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG("write_nrx4_reg(%zu, 0x%02x) disabling channel.\n",
+      DEBUG(sound, "%s(%zu, 0x%02x) disabling channel.\n", __func__,
             CHANNEL_INDEX(channel), value);
       channel->status = FALSE;
     }
@@ -2121,7 +2123,7 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG("write_nrx4_reg(%zu, 0x%02x) trigger, new length = %u\n",
+      DEBUG(sound, "%s(%zu, 0x%02x) trigger, new length = %u\n", __func__,
             CHANNEL_INDEX(channel), value, channel->length);
     }
     if (channel->dac_enabled) {
@@ -2129,9 +2131,8 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
     }
   }
 
-  DEBUG_VERBOSE("write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
-                CHANNEL_INDEX(channel), value, trigger,
-                channel->length_enabled);
+  VERBOSE(sound, "write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
+          CHANNEL_INDEX(channel), value, trigger, channel->length_enabled);
   return trigger;
 }
 
@@ -2144,8 +2145,7 @@ static void trigger_nrx4_envelope(struct Emulator* e,
   if (e->sound.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
   }
-  /* TODO zombie mode */
-  DEBUG("trigger_nrx4_envelope: volume=%u, timer=%u\n", envelope->volume,
+  DEBUG(sound, "%s: volume=%u, timer=%u\n", __func__, envelope->volume,
         envelope->timer);
 }
 
@@ -2168,9 +2168,9 @@ static void trigger_nr14_reg(struct Emulator* e,
   sweep->calculated_subtract = FALSE;
   if (sweep->shift && calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
     channel->status = FALSE;
-    DEBUG("trigger_nr11_reg: disabling, sweep overflow.\n");
+    DEBUG(sound, "%s: disabling, sweep overflow.\n", __func__);
   } else {
-    DEBUG("trigger_nr11_reg: sweep frequency=%u\n", sweep->frequency);
+    DEBUG(sound, "%s: sweep frequency=%u\n", __func__, sweep->frequency);
   }
 }
 
@@ -2196,9 +2196,9 @@ static void trigger_nr34_reg(struct Emulator* e,
           memcpy(&wave->ram[0], &wave->ram[(sample->position >> 1) & 12], 4);
           break;
       }
-      DEBUG("trigger_nr34_reg: corrupting wave ram. (cy: %u)\n", e->cycles);
+      DEBUG(sound, "%s: corrupting wave ram. (cy: %u)\n", __func__, e->cycles);
     } else {
-      DEBUG("trigger_nr34_reg: ignoring write (cy: %u)\n", e->cycles);
+      DEBUG(sound, "%s: ignoring write (cy: %u)\n", __func__, e->cycles);
     }
   }
   wave->playing = TRUE;
@@ -2214,14 +2214,14 @@ static void write_wave_period(struct Emulator* e,
                               struct Channel* channel,
                               struct Wave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
-  DEBUG("write_wave_period: freq: %u cycle: %u period: %u\n",
+  DEBUG(sound, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
 static void write_square_wave_period(struct Channel* channel,
                                      struct SquareWave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
-  DEBUG("write_square_wave_period: freq: %u cycle: %u period: %u\n",
+  DEBUG(sound, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
@@ -2231,8 +2231,8 @@ static void write_noise_period(struct Channel* channel, struct Noise* noise) {
   uint8_t divisor = s_divisors[noise->divisor];
   assert(noise->divisor < NOISE_DIVISOR_COUNT);
   noise->period = divisor << noise->clock_shift;
-  DEBUG("write_noise_period: divisor: %u clock shift: %u period: %u\n", divisor,
-        noise->clock_shift, noise->period);
+  DEBUG(sound, "%s: divisor: %u clock shift: %u period: %u\n", __func__,
+        divisor, noise->clock_shift, noise->period);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
@@ -2244,7 +2244,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       /* Always can write to NR52; it's necessary to re-enable power. */
     } else {
       /* Ignore all other writes. */
-      DEBUG("write_apu(0x%04x [%s], 0x%02x) ignored.\n", addr,
+      DEBUG(sound, "%s(0x%04x [%s], 0x%02x) ignored.\n", __func__, addr,
             get_apu_reg_string(addr), value);
       return;
     }
@@ -2259,8 +2259,8 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   struct Wave* wave = &sound->wave;
   struct Noise* noise = &sound->noise;
 
-  DEBUG("write_apu(0x%04x [%s], 0x%02x)\n", addr, get_apu_reg_string(addr),
-        value);
+  DEBUG(sound, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
+        get_apu_reg_string(addr), value);
   switch (addr) {
     case APU_NR10_ADDR: {
       enum SweepDirection old_direction = sweep->direction;
@@ -2378,7 +2378,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       enum Bool was_enabled = sound->enabled;
       enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
-        DEBUG("Powered down APU. Clearing registers.\n");
+        DEBUG(sound, "Powered down APU. Clearing registers.\n");
         int i;
         for (i = 0; i < APU_REG_COUNT; ++i) {
           switch (i) {
@@ -2390,7 +2390,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
           }
         }
       } else if (!was_enabled && is_enabled) {
-        DEBUG("Powered up APU. Resetting frame and sweep timers.\n");
+        DEBUG(sound, "Powered up APU. Resetting frame and sweep timers.\n");
         sound->frame = 7;
       }
       sound->enabled = is_enabled;
@@ -2410,18 +2410,19 @@ static void write_wave_ram(struct Emulator* e,
     struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       wave->ram[sample->position >> 1] = value;
-      DEBUG("write_wave_ram(0x%02x, 0x%02x) while playing.\n", addr, value);
+      DEBUG(sound, "%s(0x%02x, 0x%02x) while playing.\n", __func__,
+            addr, value);
     }
   } else {
     e->sound.wave.ram[addr] = value;
-    DEBUG("write_wave_ram(0x%02x, 0x%02x)\n", addr, value);
+    DEBUG(sound, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
   }
 }
 
 static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
-    LOG("write_u8(0x%04x, 0x%02x) during DMA.\n", addr, value);
+    INFO(memory, "%s(0x%04x, 0x%02x) during DMA.\n", __func__, addr, value);
     return;
   }
 
@@ -2459,7 +2460,7 @@ static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
       write_wave_ram(e, pair.addr, value);
       break;
     case MEMORY_MAP_HIGH_RAM:
-      DEBUG_VERBOSE("write_hram(0x%04x, 0x%02x)\n", addr, value);
+      VERBOSE(memory, "write_hram(0x%04x, 0x%02x)\n", addr, value);
       e->hram[pair.addr] = value;
       break;
   }
@@ -2768,18 +2769,18 @@ static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
       sweep->timer = period;
       uint16_t new_frequency = calculate_sweep_frequency(sweep);
       if (new_frequency > SOUND_MAX_FREQUENCY) {
-        DEBUG("channel 1: disabling from sweep overflow\n");
+        DEBUG(sound, "%s: disabling from sweep overflow\n", __func__);
         channel->status = FALSE;
       } else {
         if (sweep->shift) {
-          DEBUG("channel 1: updated frequency=%u\n", new_frequency);
+          DEBUG(sound, "%s: updated frequency=%u\n", __func__, new_frequency);
           sweep->frequency = channel->frequency = new_frequency;
           write_square_wave_period(channel, &channel->square_wave);
         }
 
         /* Perform another overflow check */
         if (calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
-          DEBUG("channel 1: disabling from 2nd sweep overflow\n");
+          DEBUG(sound, "%s: disabling from 2nd sweep overflow\n", __func__);
           channel->status = FALSE;
         }
       }
@@ -2857,8 +2858,8 @@ static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
     }
     wave->sample[1] = wave->sample[0];
     wave->sample[0] = sample;
-    DEBUG_VERBOSE("update_wave: position: %u => %u (cy: %u)\n", wave->position,
-                  sample.data, sample.time);
+    VERBOSE(sound, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
+            sample.data, sample.time);
   }
   wave->cycles -= APU_CYCLES;
   return wave->sample[0].data;
@@ -2948,9 +2949,9 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
         case 7: do_envelope = TRUE; break;
       }
 
-      DEBUG_VERBOSE("update_sound_cycles: %c%c%c frame: %u cy: %u\n",
-                    do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-                    do_sweep ? 'S' : '.', sound->frame, e->cycles + i);
+      VERBOSE(sound, "update_sound_cycles: %c%c%c frame: %u cy: %u\n",
+              do_length ? 'L' : '.', do_envelope ? 'E' : '.',
+              do_sweep ? 'S' : '.', sound->frame, e->cycles + i);
     }
 
     uint16_t sample;
@@ -4298,32 +4299,32 @@ static void handle_interrupts(struct Emulator* e) {
   uint8_t mask = 0;
   Address vector;
   if (interrupts & INTERRUPT_VBLANK_MASK) {
-    DEBUG(">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
+    DEBUG(interrupt, ">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
     vector = 0x40;
     mask = INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
-    DEBUG(">> LCD_STAT interrupt\n");
+    DEBUG(interrupt, ">> LCD_STAT interrupt\n");
     vector = 0x48;
     mask = INTERRUPT_LCD_STAT_MASK;
   } else if (interrupts & INTERRUPT_TIMER_MASK) {
-    DEBUG(">> TIMER interrupt\n");
+    DEBUG(interrupt, ">> TIMER interrupt\n");
     vector = 0x50;
     mask = INTERRUPT_TIMER_MASK;
   } else if (interrupts & INTERRUPT_SERIAL_MASK) {
-    DEBUG(">> SERIAL interrupt\n");
+    DEBUG(interrupt, ">> SERIAL interrupt\n");
     vector = 0x58;
     mask = INTERRUPT_SERIAL_MASK;
   } else if (interrupts & INTERRUPT_JOYPAD_MASK) {
-    DEBUG(">> JOYPAD interrupt\n");
+    DEBUG(interrupt, ">> JOYPAD interrupt\n");
     vector = 0x60;
     mask = INTERRUPT_JOYPAD_MASK;
   } else {
-    LOG("handle_interrupts: Unhandled interrupt!\n");
+    INFO(interrupt, "handle_interrupts: Unhandled interrupt!\n");
     return;
   }
 
   if (e->interrupts.halt_DI) {
-    LOG("Interrupt fired during HALT w/ disabled interrupts.\n");
+    DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupts.\n");
   } else {
     e->interrupts.IF &= ~mask;
     Address new_pc = REG(PC);
@@ -4428,8 +4429,8 @@ static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
   struct SDLAudio* audio = &sdl->audio;
   int underflow_left = 0;
   if (len > (int)audio->buffer_size) {
-    LOG("sound buffer underflow. requested %u > avail %zd\n", len,
-        audio->buffer_size);
+    INFO(sound, "sound buffer underflow. requested %u > avail %zd\n", len,
+         audio->buffer_size);
     underflow_left = len - audio->buffer_size;
     len = audio->buffer_size;
   }
@@ -4490,10 +4491,11 @@ static enum Result sdl_init_audio(struct SDL* sdl) {
   };
   CHECK_MSG(SDL_OpenAudio(&desired_spec, &sdl->audio.spec) == 0,
             "SDL_OpenAudio failed.\n");
-  LOG("SDL frequency = %u\n", sdl->audio.spec.freq);
-  LOG("SDL format = %s\n", get_sdl_audio_format_string(sdl->audio.spec.format));
-  LOG("SDL channels = %u\n", sdl->audio.spec.channels);
-  LOG("SDL samples = %u\n", sdl->audio.spec.samples);
+  INFO(sound, "SDL frequency = %u\n", sdl->audio.spec.freq);
+  INFO(sound, "SDL format = %s\n",
+       get_sdl_audio_format_string(sdl->audio.spec.format));
+  INFO(sound, "SDL channels = %u\n", sdl->audio.spec.channels);
+  INFO(sound, "SDL samples = %u\n", sdl->audio.spec.samples);
   CHECK_MSG(sdl->audio.spec.channels == AUDIO_DESIRED_CHANNELS,
             "Expcted 2 channels.\n");
 
@@ -4619,7 +4621,7 @@ static void sdl_wait_for_frame(struct SDL* sdl, struct Emulator* e) {
       SDL_Delay(delta_ms - 0.1);
       double actual_delay_ms = get_time_ms() - ticks_ms;
       if (actual_delay_ms > delta_ms) {
-        DEBUG("using SDL_Delay. wanted %.3f, got %.3f\n", delta_ms,
+        DEBUG(sdl, "using SDL_Delay. wanted %.3f, got %.3f\n", delta_ms,
               actual_delay_ms);
       }
     } else {
@@ -4705,7 +4707,7 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   SDL_UnlockAudio();
 
   if (overflow) {
-    LOG("sound buffer overflow (old size = %zu).\n", old_buffer_size);
+    INFO(sound, "sound buffer overflow (old size = %zu).\n", old_buffer_size);
   }
   if (!audio->ready) {
     /* TODO this should wait until the buffer has enough data for a few
