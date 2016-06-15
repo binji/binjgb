@@ -200,11 +200,15 @@ typedef uint32_t RGBA;
 #define ADDR_MASK_16K 0x3fff
 #define ADDR_MASK_32K 0x7fff
 
-#define MBC1_RAM_ENABLED_MASK 0xf
-#define MBC1_RAM_ENABLED_VALUE 0xa
+#define MBC_RAM_ENABLED_MASK 0xf
+#define MBC_RAM_ENABLED_VALUE 0xa
 #define MBC1_ROM_BANK_LO_MASK 0x1f
 #define MBC1_BANK_HI_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
+#define MBC2_RAM_ADDR_MASK 0x1ff
+#define MBC2_RAM_VALUE_MASK 0xf
+#define MBC2_ADDR_SELECT_BIT_MASK 0x100
+#define MBC2_ROM_BANK_SELECT_MASK 0xf
 
 #define OAM_START_ADDR 0xfe00
 #define OAM_END_ADDR 0xfe9f
@@ -1211,7 +1215,7 @@ static void mbc1_write_rom(struct Emulator* e,
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ext_ram_enabled =
-          (value & MBC1_RAM_ENABLED_MASK) == MBC1_RAM_ENABLED_VALUE;
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: /* 2000-3fff */
       mbc1->byte_2000_3fff = value;
@@ -1267,11 +1271,17 @@ static uint32_t get_external_ram_address(struct Emulator* e,
   }
 }
 
+#define INFO_READ_RAM_DISABLED \
+  INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr)
+#define INFO_WRITE_RAM_DISABLED                                               \
+  INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr, \
+       value);
+
 static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
   if (e->memory_map.ext_ram_enabled) {
     return e->external_ram.data[get_external_ram_address(e, addr)];
   } else {
-    INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr);
+    INFO_READ_RAM_DISABLED;
     return INVALID_READ_BYTE;
   }
 }
@@ -1282,8 +1292,52 @@ static void gb_write_external_ram(struct Emulator* e,
   if (e->memory_map.ext_ram_enabled) {
     e->external_ram.data[get_external_ram_address(e, addr)] = value;
   } else {
-    INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr,
-         value);
+    INFO_WRITE_RAM_DISABLED;
+  }
+}
+
+static void mbc2_write_rom(struct Emulator* e,
+                           MaskedAddress addr,
+                           uint8_t value) {
+  struct MemoryMap* memory_map = &e->memory_map;
+  switch (addr >> 13) {
+    case 0: /* 0000-1fff */
+      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) == 0) {
+        e->memory_map.ext_ram_enabled =
+            (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+      }
+      break;
+    case 1: /* 2000-3fff */
+      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
+        memory_map->rom_bank = value & MBC2_ROM_BANK_SELECT_MASK;
+      }
+      break;
+    default:
+      break;
+  }
+
+  VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", __func__,
+          addr, value, memory_map->rom_bank,
+          memory_map->rom_bank << ROM_BANK_SHIFT);
+}
+
+static uint8_t mbc2_read_ram(struct Emulator* e, MaskedAddress addr) {
+  if (e->memory_map.ext_ram_enabled) {
+    return e->external_ram.data[addr & MBC2_RAM_ADDR_MASK];
+  } else {
+    INFO_READ_RAM_DISABLED;
+    return INVALID_READ_BYTE;
+  }
+}
+
+static void mbc2_write_ram(struct Emulator* e,
+                           MaskedAddress addr,
+                           uint8_t value) {
+  if (e->memory_map.ext_ram_enabled) {
+    e->external_ram.data[addr & MBC2_RAM_ADDR_MASK] =
+        value & MBC2_RAM_VALUE_MASK;
+  } else {
+    INFO_WRITE_RAM_DISABLED;
   }
 }
 
@@ -1293,19 +1347,6 @@ static enum Result init_memory_map(struct RomInfo* rom_info,
   out_memory_map->rom_bank = 1;
   out_memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
   out_memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
-
-  switch (s_mbc_type[rom_info->cartridge_type]) {
-    case NO_MBC:
-      out_memory_map->write_rom = rom_only_write_rom;
-      break;
-    case MBC1:
-      out_memory_map->write_rom = mbc1_write_rom;
-      break;
-    default:
-      PRINT_ERROR("memory map for %s not implemented.\n",
-                  get_cartridge_type_string(rom_info->cartridge_type));
-      return ERROR;
-  }
 
   switch (s_external_ram_type[rom_info->cartridge_type]) {
     case WITH_RAM:
@@ -1317,6 +1358,26 @@ static enum Result init_memory_map(struct RomInfo* rom_info,
       out_memory_map->read_external_ram = dummy_read_external_ram;
       out_memory_map->write_external_ram = dummy_write_external_ram;
       break;
+  }
+
+  switch (s_mbc_type[rom_info->cartridge_type]) {
+    case NO_MBC:
+      out_memory_map->write_rom = rom_only_write_rom;
+      break;
+    case MBC1:
+      out_memory_map->write_rom = mbc1_write_rom;
+      break;
+    case MBC2:
+      out_memory_map->write_rom = mbc2_write_rom;
+      /* MBC2 has built-in RAM, 512 4-bit values. It's not external, but it
+       * maps to the same address space. */
+      out_memory_map->read_external_ram = mbc2_read_ram;
+      out_memory_map->write_external_ram = mbc2_write_ram;
+      break;
+    default:
+      PRINT_ERROR("memory map for %s not implemented.\n",
+                  get_cartridge_type_string(rom_info->cartridge_type));
+      return ERROR;
   }
 
   /* TODO */
