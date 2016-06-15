@@ -1014,13 +1014,13 @@ struct Emulator {
 };
 
 static enum Bool s_trace = FALSE;
+static uint32_t s_trace_counter = 0;
 static int s_log_level_memory = 1;
 static int s_log_level_video = 1;
 static int s_log_level_sound = 1;
 static int s_log_level_io = 1;
 static int s_log_level_interrupt = 1;
 static int s_log_level_sdl = 1;
-static uint32_t s_trace_counter = 0;
 
 static void print_emulator_info(struct Emulator*);
 static void write_apu(struct Emulator*, Address, uint8_t);
@@ -1626,11 +1626,13 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_OBP0_ADDR:
       return READ_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
              READ_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
-             READ_REG(e->oam.obp[0].color[1], PALETTE_COLOR1);
+             READ_REG(e->oam.obp[0].color[1], PALETTE_COLOR1) |
+             READ_REG(e->oam.obp[0].color[0], PALETTE_COLOR0);
     case IO_OBP1_ADDR:
       return READ_REG(e->oam.obp[1].color[3], PALETTE_COLOR3) |
              READ_REG(e->oam.obp[1].color[2], PALETTE_COLOR2) |
-             READ_REG(e->oam.obp[1].color[1], PALETTE_COLOR1);
+             READ_REG(e->oam.obp[1].color[1], PALETTE_COLOR1) |
+             READ_REG(e->oam.obp[1].color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
       return e->lcd.WY;
     case IO_WX_ADDR:
@@ -1841,7 +1843,8 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
       return 0;
     case MEMORY_MAP_IO: {
       uint8_t value = read_io(e, pair.addr);
-      VERBOSE(io, "read_io(0x%04x) = 0x%02x\n", pair.addr, value);
+      VERBOSE(io, "read_io(0x%04x [%s]) = 0x%02x\n", pair.addr,
+              get_io_reg_string(pair.addr), value);
       return value;
     }
     case MEMORY_MAP_APU:
@@ -2029,11 +2032,13 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->oam.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
       e->oam.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
       e->oam.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->oam.obp[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP1_ADDR:
       e->oam.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
       e->oam.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
       e->oam.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->oam.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_WY_ADDR:
       e->lcd.WY = value;
@@ -3731,8 +3736,6 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define XOR_R(R) RA ^= REG(R); XOR_FLAGS
 #define XOR_MR(MR) RA ^= READMR(MR); XOR_FLAGS
 #define XOR_N RA ^= READ_N; XOR_FLAGS
-
-#define TRACEI s_trace = TRUE; s_trace_counter = 2; print_emulator_info(e)
 
 static void execute_instruction(struct Emulator* e) {
   int8_t s;
