@@ -720,19 +720,16 @@ struct Emulator;
 struct MBC1 {
   uint8_t byte_2000_3fff;
   uint8_t byte_4000_5fff;
-  uint8_t rom_bank;
-  uint8_t ram_bank;
-  enum Bool ram_enabled;
   enum BankMode bank_mode;
 };
 
-union MBC {
-  struct MBC1 mbc1;
-};
-
 struct MemoryMap {
-  union MBC state;
-  uint8_t (*read_rom_bank_switch)(struct Emulator*, MaskedAddress);
+  uint8_t rom_bank;
+  uint8_t ext_ram_bank;
+  enum Bool ext_ram_enabled;
+  union {
+    struct MBC1 mbc1;
+  };
   uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
   uint8_t (*read_external_ram)(struct Emulator*, MaskedAddress);
   void (*write_rom)(struct Emulator*, MaskedAddress, uint8_t);
@@ -994,7 +991,6 @@ struct EmulatorConfig {
 struct Emulator {
   struct EmulatorConfig config;
   struct RomData rom_data;
-  struct RomInfo rom_info;
   struct MemoryMap memory_map;
   struct Registers reg;
   struct VideoRam vram;
@@ -1188,14 +1184,6 @@ static void print_rom_info(struct RomInfo* rom_info) {
          get_result_string(rom_info->global_checksum_valid));
 }
 
-static uint8_t rom_only_read_rom_bank_switch(struct Emulator* e,
-                                             MaskedAddress addr) {
-  /* Always return ROM in range 0x4000-0x7fff. */
-  assert(addr <= ADDR_MASK_16K);
-  addr += 0x4000;
-  return e->rom_data.data[addr];
-}
-
 static void rom_only_write_rom(struct Emulator* e,
                                MaskedAddress addr,
                                uint8_t value) {
@@ -1208,27 +1196,21 @@ static uint8_t gb_read_work_ram_bank_switch(struct Emulator* e,
   return e->ram.data[0x1000 + addr];
 }
 
-static uint8_t mbc1_read_rom_bank_switch(struct Emulator* e,
-                                         MaskedAddress addr) {
-  assert(addr <= ADDR_MASK_16K);
-  uint8_t rom_bank = e->memory_map.state.mbc1.rom_bank;
-  uint32_t rom_addr = (rom_bank << ROM_BANK_SHIFT) | addr;
-  if (rom_addr < e->rom_data.size) {
-    return e->rom_data.data[rom_addr];
-  } else {
-    INFO(memory, "%s(0x%04x): bad address (bank = %u)!\n", __func__, addr,
-         rom_bank);
-    return 0;
-  }
+static void gb_write_work_ram_bank_switch(struct Emulator* e,
+                                          MaskedAddress addr,
+                                          uint8_t value) {
+  assert(addr <= ADDR_MASK_4K);
+  e->ram.data[0x1000 + addr] = value;
 }
 
 static void mbc1_write_rom(struct Emulator* e,
                            MaskedAddress addr,
                            uint8_t value) {
-  struct MBC1* mbc1 = &e->memory_map.state.mbc1;
+  struct MemoryMap* memory_map = &e->memory_map;
+  struct MBC1* mbc1 = &memory_map->mbc1;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
-      mbc1->ram_enabled =
+      e->memory_map.ext_ram_enabled =
           (value & MBC1_RAM_ENABLED_MASK) == MBC1_RAM_ENABLED_VALUE;
       break;
     case 1: /* 2000-3fff */
@@ -1245,29 +1227,22 @@ static void mbc1_write_rom(struct Emulator* e,
       break;
   }
 
-  mbc1->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_MASK;
-  if (mbc1->rom_bank == 0) {
-    mbc1->rom_bank++;
+  memory_map->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_MASK;
+  if (memory_map->rom_bank == 0) {
+    memory_map->rom_bank++;
   }
 
   if (mbc1->bank_mode == BANK_MODE_ROM) {
-    mbc1->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK)
-                      << MBC1_BANK_HI_SHIFT;
-    mbc1->ram_bank = 0;
+    memory_map->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK)
+                            << MBC1_BANK_HI_SHIFT;
+    memory_map->ext_ram_bank = 0;
   } else {
-    mbc1->ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK;
+    memory_map->ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_MASK;
   }
 
   VERBOSE(memory,
           "mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
-          value, mbc1->rom_bank, mbc1->rom_bank << ROM_BANK_SHIFT);
-}
-
-static void gb_write_work_ram_bank_switch(struct Emulator* e,
-                                          MaskedAddress addr,
-                                          uint8_t value) {
-  assert(addr <= ADDR_MASK_4K);
-  e->ram.data[0x1000 + addr] = value;
+          value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
 }
 
 static uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
@@ -1281,7 +1256,7 @@ static void dummy_write_external_ram(struct Emulator* e,
 static uint32_t get_external_ram_address(struct Emulator* e,
                                          MaskedAddress addr) {
   assert(addr <= ADDR_MASK_8K);
-  uint8_t ram_bank = e->memory_map.state.mbc1.ram_bank;
+  uint8_t ram_bank = e->memory_map.ext_ram_bank;
   uint32_t ram_addr = (ram_bank << EXTERNAL_RAM_BANK_SHIFT) | addr;
   if (ram_addr < e->external_ram.size) {
     return ram_addr;
@@ -1293,13 +1268,18 @@ static uint32_t get_external_ram_address(struct Emulator* e,
 }
 
 static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
-  return e->external_ram.data[get_external_ram_address(e, addr)];
+  if (e->memory_map.ext_ram_enabled) {
+    return e->external_ram.data[get_external_ram_address(e, addr)];
+  } else {
+    INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr);
+    return INVALID_READ_BYTE;
+  }
 }
 
 static void gb_write_external_ram(struct Emulator* e,
                                   MaskedAddress addr,
                                   uint8_t value) {
-  if (e->memory_map.state.mbc1.ram_enabled) {
+  if (e->memory_map.ext_ram_enabled) {
     e->external_ram.data[get_external_ram_address(e, addr)] = value;
   } else {
     INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr,
@@ -1307,35 +1287,19 @@ static void gb_write_external_ram(struct Emulator* e,
   }
 }
 
-static struct MemoryMap s_rom_only_memory_map = {
-    .read_rom_bank_switch = rom_only_read_rom_bank_switch,
-    .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
-    .read_external_ram = dummy_read_external_ram,
-    .write_rom = rom_only_write_rom,
-    .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
-    .write_external_ram = dummy_write_external_ram,
-};
+static enum Result init_memory_map(struct RomInfo* rom_info,
+                                   struct MemoryMap* out_memory_map) {
+  ZERO_MEMORY(*out_memory_map);
+  out_memory_map->rom_bank = 1;
+  out_memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
+  out_memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
 
-static struct MemoryMap s_mbc1_memory_map = {
-    .state = {
-      .mbc1 = { .rom_bank = 1 }
-    },
-    .read_rom_bank_switch = mbc1_read_rom_bank_switch,
-    .read_work_ram_bank_switch = gb_read_work_ram_bank_switch,
-    .read_external_ram = dummy_read_external_ram,
-    .write_rom = mbc1_write_rom,
-    .write_work_ram_bank_switch = gb_write_work_ram_bank_switch,
-    .write_external_ram = dummy_write_external_ram,
-};
-
-static enum Result get_memory_map(struct RomInfo* rom_info,
-                                  struct MemoryMap* out_memory_map) {
   switch (s_mbc_type[rom_info->cartridge_type]) {
     case NO_MBC:
-      *out_memory_map = s_rom_only_memory_map;
+      out_memory_map->write_rom = rom_only_write_rom;
       break;
     case MBC1:
-      *out_memory_map = s_mbc1_memory_map;
+      out_memory_map->write_rom = mbc1_write_rom;
       break;
     default:
       PRINT_ERROR("memory map for %s not implemented.\n",
@@ -1350,6 +1314,8 @@ static enum Result get_memory_map(struct RomInfo* rom_info,
       break;
     default:
     case NO_RAM:
+      out_memory_map->read_external_ram = dummy_read_external_ram;
+      out_memory_map->write_external_ram = dummy_write_external_ram;
       break;
   }
 
@@ -1383,12 +1349,11 @@ static enum Result init_emulator(struct Emulator* e,
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
   e->sound.buffer = sound_buffer;
-  CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
-#if 1
-  print_rom_info(&e->rom_info);
-#endif
-  CHECK(SUCCESS(get_memory_map(&e->rom_info, &e->memory_map)));
-  e->external_ram.size = s_ram_bank_size[e->rom_info.ram_size];
+  struct RomInfo rom_info;
+  CHECK(SUCCESS(get_rom_info(rom_data, &rom_info)));
+  print_rom_info(&rom_info);
+  CHECK(SUCCESS(init_memory_map(&rom_info, &e->memory_map)));
+  e->external_ram.size = s_ram_bank_size[rom_info.ram_size];
   set_af_reg(&e->reg, 0x01b0);
   e->reg.BC = 0x0013;
   e->reg.DE = 0x00d8;
@@ -1827,8 +1792,17 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
-    case MEMORY_MAP_ROM_BANK_SWITCH:
-      return e->memory_map.read_rom_bank_switch(e, pair.addr);
+    case MEMORY_MAP_ROM_BANK_SWITCH: {
+      uint8_t rom_bank = e->memory_map.rom_bank;
+      uint32_t rom_addr = (rom_bank << ROM_BANK_SHIFT) | pair.addr;
+      if (rom_addr < e->rom_data.size) {
+        return e->rom_data.data[rom_addr];
+      } else {
+        INFO(memory, "%s(0x%04x): bad address (bank = %u)!\n", __func__,
+             pair.addr, rom_bank);
+        return INVALID_READ_BYTE;
+      }
+    }
     case MEMORY_MAP_VRAM:
       return read_vram(e, pair.addr);
     case MEMORY_MAP_EXTERNAL_RAM:
