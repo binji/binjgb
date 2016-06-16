@@ -2960,7 +2960,7 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
               do_sweep ? 'S' : '.', sound->frame, e->cycles + i);
     }
 
-    uint16_t sample;
+    uint16_t sample = 0;
     uint32_t so1_mixed_sample = 0;
     uint32_t so2_mixed_sample = 0;
 
@@ -4557,7 +4557,7 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(init_emulator(e, &rom_data, &sound_buffer)));
   read_external_ram_from_file(e, save_filename);
 
-  EmulatorEvent event;
+  EmulatorEvent event = 0;
   while (TRUE) {
     if (!sdl_poll_events(e)) {
       break;
