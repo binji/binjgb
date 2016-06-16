@@ -299,6 +299,7 @@ typedef uint32_t RGBA;
 #define INTERRUPT_TIMER_MASK 0x04
 #define INTERRUPT_SERIAL_MASK 0x08
 #define INTERRUPT_JOYPAD_MASK 0x10
+#define INTERRUPT_UNUSED 0xe0
 
 #define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
 #define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
@@ -1589,7 +1590,7 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
       return READ_REG(e->timer.on, TAC_TIMER_ON) |
              READ_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
     case IO_IF_ADDR:
-      return e->interrupts.IF;
+      return INTERRUPT_UNUSED | e->interrupts.IF;
     case IO_LCDC_ADDR:
       return READ_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
              READ_REG(e->lcd.lcdc.window_tile_map_select,
