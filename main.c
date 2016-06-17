@@ -2516,24 +2516,6 @@ static RGBA get_palette_index_rgba(uint8_t palette_index,
   return s_color_to_rgba[palette->color[palette_index]];
 }
 
-static int obj_cmp(const void* v1, const void* v2, void* arg) {
-  const struct Obj* o1 = v1;
-  const struct Obj* o2 = v2;
-  const uint8_t* obj_height = arg;
-  enum Bool o1_visible = o1->y < *obj_height;
-  enum Bool o2_visible = o2->y < *obj_height;
-  if (o1_visible != o2_visible) {
-    /* Put invisible sprites at the end. */
-    return o2_visible - o1_visible;
-  }
-  if (o1->x != o2->x) {
-    /* Prioritize sprites with a smaller X value. */
-    return o1->x - o2->x;
-  }
-  /* Otherwise use table order (i.e. pointer value). */
-  return o1 - o2;
-}
-
 static void render_line(struct Emulator* e, uint8_t line_y) {
   assert(line_y < SCREEN_HEIGHT);
   RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
@@ -2589,22 +2571,33 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   }
 
   if (e->lcd.lcdc.obj_display && !e->config.disable_obj) {
-    int n;
-    struct Obj line_objs[OBJ_COUNT];
-    memcpy(line_objs, e->oam.objs, sizeof(line_objs));
     uint8_t obj_height = s_obj_size_to_height[e->lcd.lcdc.obj_size];
-    for (n = 0; n < OBJ_COUNT; ++n) {
-      line_objs[n].y = line_y - line_objs[n].y;
+    struct Obj line_objs[OBJ_PER_LINE_COUNT];
+    int n;
+    int dst = 0;
+    /* Put the visible sprites into line_objs, but insert them so sprites with
+     * smaller X-coordinates are earlier. Also, store the Y-coordinate relative
+     * to the line being drawn, range [0..obj_height). */
+    for (n = 0; n < OBJ_COUNT && dst < OBJ_PER_LINE_COUNT; ++n) {
+      struct Obj *src = &e->oam.objs[n];
+      uint8_t rel_y = line_y - src->y;
+      if (rel_y < obj_height) {
+        int j = dst;
+        while (j > 0 && src->x < line_objs[j - 1].x) {
+          line_objs[j] = line_objs[j - 1];
+          j--;
+        }
+        line_objs[j] = *src;
+        line_objs[j].y = rel_y;
+        dst++;
+      }
     }
 
-    qsort_r(line_objs, OBJ_COUNT, sizeof(struct Obj), obj_cmp, &obj_height);
     /* Draw in reverse so sprites with higher priority are rendered on top. */
-    for (n = OBJ_PER_LINE_COUNT - 1; n >= 0; --n) {
+    for (n = dst - 1; n >= 0; --n) {
       struct Obj* o = &line_objs[n];
       uint8_t oy = o->y;
-      if (oy >= obj_height) {
-        continue;
-      }
+      assert(oy < obj_height);
 
       uint8_t* tile_data;
       if (o->yflip) {
