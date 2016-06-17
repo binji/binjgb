@@ -287,10 +287,11 @@ typedef uint32_t RGBA;
 #define JOYP_BUTTON_B(X, OP) BIT(X, OP, 1)
 #define JOYP_BUTTON_A(X, OP) BIT(X, OP, 0)
 
+#define SC_UNUSED 0x7e
 #define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
-#define SC_CLOCK_SPEED(X, OP) BIT(X, OP, 1)
 #define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
 
+#define TAC_UNUSED 0xf8
 #define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
 #define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
@@ -310,6 +311,7 @@ typedef uint32_t RGBA;
 #define LCDC_OBJ_DISPLAY(X, OP) BIT(X, OP, 1)
 #define LCDC_BG_DISPLAY(X, OP) BIT(X, OP, 0)
 
+#define STAT_UNUSED 0x80
 #define STAT_YCOMPARE_INTR(X, OP) BIT(X, OP, 6)
 #define STAT_USING_OAM_INTR(X, OP) BIT(X, OP, 5)
 #define STAT_VBLANK_INTR(X, OP) BIT(X, OP, 4)
@@ -1577,8 +1579,7 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_SB_ADDR:
       return 0; /* TODO */
     case IO_SC_ADDR:
-      return READ_REG(e->serial.transfer_start, SC_TRANSFER_START) |
-             READ_REG(e->serial.clock_speed, SC_CLOCK_SPEED) |
+      return SC_UNUSED | READ_REG(e->serial.transfer_start, SC_TRANSFER_START) |
              READ_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
       return e->timer.DIV;
@@ -1587,7 +1588,7 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_TMA_ADDR:
       return e->timer.TMA;
     case IO_TAC_ADDR:
-      return READ_REG(e->timer.on, TAC_TIMER_ON) |
+      return TAC_UNUSED | READ_REG(e->timer.on, TAC_TIMER_ON) |
              READ_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
     case IO_IF_ADDR:
       return INTERRUPT_UNUSED | e->interrupts.IF;
@@ -1603,7 +1604,8 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
              READ_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
              READ_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
-      return READ_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
+      return STAT_UNUSED |
+             READ_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
              READ_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
              READ_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
              READ_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
@@ -1822,7 +1824,7 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
   struct MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
-    return 0;
+    return INVALID_READ_BYTE;
   }
 
   switch (pair.type) {
@@ -1964,7 +1966,6 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_SC_ADDR:
       e->serial.transfer_start = WRITE_REG(value, SC_TRANSFER_START);
-      e->serial.clock_speed = WRITE_REG(value, SC_CLOCK_SPEED);
       e->serial.shift_clock = WRITE_REG(value, SC_SHIFT_CLOCK);
       break;
     case IO_DIV_ADDR:
