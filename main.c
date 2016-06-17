@@ -786,6 +786,7 @@ struct Obj {
   uint8_t y;
   uint8_t x;
   uint8_t tile;
+  uint8_t byte3;
   enum ObjPriority priority;
   enum Bool yflip;
   enum Bool xflip;
@@ -1544,10 +1545,7 @@ static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
     case 0: return obj->y + OBJ_Y_OFFSET;
     case 1: return obj->x + OBJ_X_OFFSET;
     case 2: return obj->tile;
-    case 3:
-      return READ_REG(obj->priority, OBJ_PRIORITY) |
-             READ_REG(obj->yflip, OBJ_YFLIP) | READ_REG(obj->xflip, OBJ_XFLIP) |
-             READ_REG(obj->palette, OBJ_PALETTE);
+    case 3: return obj->byte3;
   }
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
@@ -1947,6 +1945,7 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       obj->tile = value;
       break;
     case 3:
+      obj->byte3 = value;
       obj->priority = WRITE_REG(value, OBJ_PRIORITY);
       obj->yflip = WRITE_REG(value, OBJ_YFLIP);
       obj->xflip = WRITE_REG(value, OBJ_XFLIP);
