@@ -1868,10 +1868,6 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
   return read_u8_no_dma_check(e, pair);
 }
 
-static uint16_t read_u16(struct Emulator* e, Address addr) {
-  return read_u8(e, addr) | (read_u8(e, addr + 1) << 8);
-}
-
 static void write_vram_tile_data(struct Emulator* e,
                                  uint32_t index,
                                  uint32_t plane,
@@ -2521,11 +2517,6 @@ static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   }
 }
 
-static void write_u16(struct Emulator* e, Address addr, uint16_t value) {
-  write_u8(e, addr, value);
-  write_u8(e, addr + 1, value >> 8);
-}
-
 static TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
   switch (select) {
     case TILE_MAP_9800_9BFF: return &e->vram.map[0];
@@ -3072,6 +3063,28 @@ static void update_cycles(struct Emulator* e, uint8_t cycles) {
   e->cycles += cycles;
 }
 
+static uint8_t read_u8_cy(struct Emulator* e, Address addr) {
+  update_cycles(e, 4);
+  uint8_t result = read_u8(e, addr);
+  return result;
+}
+
+static uint16_t read_u16_cy(struct Emulator* e, Address addr) {
+  uint8_t lo = read_u8_cy(e, addr);
+  uint8_t hi = read_u8_cy(e, addr + 1);
+  return (hi << 8) | lo;
+}
+
+static void write_u8_cy(struct Emulator* e, Address addr, uint8_t value) {
+  update_cycles(e, 4);
+  write_u8(e, addr, value);
+}
+
+static void write_u16_cy(struct Emulator* e, Address addr, uint16_t value) {
+  write_u8_cy(e, addr + 1, value >> 8);
+  write_u8_cy(e, addr, value);
+}
+
 static uint8_t s_opcode_bytes[] = {
     /*       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
     /* 00 */ 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
@@ -3240,53 +3253,13 @@ static void print_emulator_info(struct Emulator* e) {
   }
 }
 
-static uint8_t s_opcode_cycles[] = {
-    /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
-    /* 00 */  4, 12,  8,  8,  4,  4,  8,  4, 20,  8,  8,  8,  4,  4,  8,  4,
-    /* 10 */  0, 12,  8,  8,  4,  4,  8,  4, 12,  8,  8,  8,  4,  4,  8,  4,
-    /* 20 */  8, 12,  8,  8,  4,  4,  8,  4,  8,  8,  8,  8,  4,  4,  8,  4,
-    /* 30 */  8, 12,  8,  8,  8,  8, 12,  4,  8,  8,  8,  8,  4,  4,  8,  4,
-    /* 40 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* 50 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* 60 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* 70 */  8,  8,  8,  8,  8,  8,  0,  8,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* 80 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* 90 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* a0 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* b0 */  4,  4,  4,  4,  4,  4,  8,  4,  4,  4,  4,  4,  4,  4,  8,  4,
-    /* c0 */  8, 12, 12, 16, 12, 16,  8, 16,  8, 16, 12,  0, 12, 24,  8, 16,
-    /* d0 */  8, 12, 12,  0, 12, 16,  8, 16,  8, 16, 12,  0, 12,  0,  8, 16,
-    /* e0 */ 12, 12,  8,  0,  0, 16,  8, 16, 16,  4, 16,  0,  0,  0,  8, 16,
-    /* f0 */ 12, 12,  8,  4,  0, 16,  8, 16, 12,  8, 16,  4,  0,  0,  8, 16,
-};
-
-static uint8_t s_cb_opcode_cycles[] = {
-    /*        0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
-    /* 00 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 10 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 20 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 30 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 40 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 50 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 60 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 70 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 80 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* 90 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* a0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* b0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* c0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* d0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* e0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-    /* f0 */  8,  8,  8,  8,  8,  8, 12,  8,  8,  8,  8,  8,  8,  8, 12,  8,
-};
-
 #define NI UNREACHABLE("opcode not implemented!\n")
 #define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
 #define REG(R) e->reg.R
 #define FLAG(x) e->reg.F.x
 #define INTR(m) e->interrupts.m
-#define CYCLES(X) update_cycles(e, X)
+#define CY(X) update_cycles(e, X)
 
 #define RA REG(A)
 #define RHL REG(HL)
@@ -3320,17 +3293,17 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
 #define FCH_SBC(X, Y, C) FC_SBC(X, Y, C); FH_SBC(X, Y, C)
 
-#define READ8(X) read_u8(e, X)
-#define READ16(X) read_u16(e, X)
-#define WRITE8(X, V) write_u8(e, X, V)
-#define WRITE16(X, V) write_u16(e, X, V)
+#define READ8(X) read_u8_cy(e, X)
+#define READ16(X) read_u16_cy(e, X)
+#define WRITE8(X, V) write_u8_cy(e, X, V)
+#define WRITE16(X, V) write_u16_cy(e, X, V)
 #define READ_N READ8(RPC + 1)
 #define READ_NN READ16(RPC + 1)
 #define READMR(MR) READ8(REG(MR))
 #define WRITEMR(MR, V) WRITE8(REG(MR), V)
 
 #define BASIC_OP_R(R, OP) u = REG(R); OP; REG(R) = u
-#define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; CYCLES(4); WRITEMR(MR, u)
+#define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; WRITEMR(MR, u)
 
 #define ADD_FLAGS(X, Y) FZ_EQ0((X) + (Y)); FN = 0; FCH_ADD(X, Y)
 #define ADD_FLAGS16(X, Y) FN = 0; FCH_ADD16(X, Y)
@@ -3338,8 +3311,8 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define ADD_R(R) ADD_FLAGS(RA, REG(R)); RA += REG(R)
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
-#define ADD_HL_RR(RR) ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
-#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s
+#define ADD_HL_RR(RR) CY(4); ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
+#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s; CY(8)
 
 #define ADC_FLAGS(X, Y, C) FZ_EQ0((X) + (Y) + (C)); FN = 0; FCH_ADC(X, Y, C)
 #define ADC_R(R) u = REG(R); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
@@ -3355,9 +3328,9 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(BIT, u)
 #define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
 
-#define CALL(X) RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
-#define CALL_NN CALL(READ_NN)
-#define CALL_F_NN(COND) if (COND) { CALL_NN; CYCLES(12); }
+#define CALL(X) CY(4); RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
+#define CALL_NN u16 = READ_NN; CALL(u16)
+#define CALL_F_NN(COND) u16 = READ_NN; if (COND) { CALL(u16); }
 
 #define CCF FC ^= 1; FN = FH = 0
 
@@ -3386,7 +3359,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define DEC u--
 #define DEC_FLAGS FZ_EQ0(u); FN = 1; FH = MASK8(u) == 0xf
 #define DEC_R(R) BASIC_OP_R(R, DEC); DEC_FLAGS
-#define DEC_RR(RR) REG(RR)--
+#define DEC_RR(RR) REG(RR)--; CY(4)
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 
 #define DI INTR(IME) = INTR(enable) = FALSE;
@@ -3401,19 +3374,21 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
 #define INC_R(R) BASIC_OP_R(R, INC); INC_FLAGS
-#define INC_RR(RR) REG(RR)++
+#define INC_RR(RR) REG(RR)++; CY(4)
 #define INC_MR(MR) BASIC_OP_MR(MR, INC); INC_FLAGS
 
-#define JP_F_NN(COND) if (COND) { JP_NN; CYCLES(4); }
-#define JP_RR(RR) new_pc = REG(RR)
-#define JP_NN new_pc = READ_NN
+#define JP new_pc = u16
+#define JP_F_NN(COND) u16 = READ_NN; if (COND) { JP; CY(4); }
+#define JP_RR(RR) u16 = REG(RR); JP
+#define JP_NN u16 = READ_NN; JP; CY(4)
 
-#define JR_F_N(COND) if (COND) { JR_N; CYCLES(4); }
-#define JR_N new_pc += (int8_t)READ_N
+#define JR new_pc += s; CY(4)
+#define JR_F_N(COND) s = READ_N; if (COND) { JR; }
+#define JR_N s = READ_N; JR
 
 #define LD_R_R(RD, RS) REG(RD) = REG(RS)
 #define LD_R_N(R) REG(R) = READ_N
-#define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS)
+#define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS); CY(4)
 #define LD_RR_NN(RR) REG(RR) = READ_NN
 #define LD_R_MR(R, MR) REG(R) = READMR(MR)
 #define LD_R_MN(R) REG(R) = READ8(READ_NN)
@@ -3424,8 +3399,8 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define LD_MFF00_R_R(R1, R2) WRITE8(0xFF00 + REG(R1), REG(R2))
 #define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
-#define LD_MNN_SP WRITE16(READ_NN, RSP)
-#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s
+#define LD_MNN_SP u16 = READ_NN; WRITE16(u16, RSP)
+#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s; CY(4)
 
 #define OR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define OR_R(R) RA |= REG(R); OR_FLAGS
@@ -3435,15 +3410,15 @@ static uint8_t s_cb_opcode_cycles[] = {
 #define POP_RR(RR) REG(RR) = READ16(RSP); RSP += 2
 #define POP_AF set_af_reg(&e->reg, READ16(RSP)); RSP += 2
 
-#define PUSH_RR(RR) RSP -= 2; WRITE16(RSP, REG(RR))
-#define PUSH_AF RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
+#define PUSH_RR(RR) CY(4); RSP -= 2; WRITE16(RSP, REG(RR))
+#define PUSH_AF CY(4); RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
 
 #define RES(BIT) u &= ~(1 << (BIT))
 #define RES_R(BIT, R) BASIC_OP_R(R, RES(BIT))
 #define RES_MR(BIT, MR) BASIC_OP_MR(MR, RES(BIT))
 
-#define RET new_pc = READ16(RSP); RSP += 2
-#define RET_F(COND) if (COND) { RET; CYCLES(12); }
+#define RET new_pc = READ16(RSP); RSP += 2; CY(4)
+#define RET_F(COND) CY(4); if (COND) { RET; }
 #define RETI INTR(enable) = FALSE; INTR(IME) = TRUE; RET
 
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
@@ -3514,6 +3489,7 @@ static uint8_t s_cb_opcode_cycles[] = {
 static void execute_instruction(struct Emulator* e) {
   int8_t s;
   uint8_t u;
+  uint16_t u16;
   uint8_t c;
   uint8_t opcode;
   Address new_pc;
@@ -3528,7 +3504,7 @@ static void execute_instruction(struct Emulator* e) {
     return;
   }
 
-  opcode = read_u8(e, e->reg.PC);
+  opcode = read_u8_cy(e, e->reg.PC);
   if (INTR(halt_DI)) {
     /* HALT bug. When interrupts are disabled during a HALT, the following byte
      * will be duplicated when decoding. */
@@ -3538,8 +3514,7 @@ static void execute_instruction(struct Emulator* e) {
   new_pc = e->reg.PC + s_opcode_bytes[opcode];
 
   if (opcode == 0xcb) {
-    uint8_t opcode = read_u8(e, e->reg.PC + 1);
-    update_cycles(e, s_cb_opcode_cycles[opcode]);
+    uint8_t opcode = read_u8_cy(e, e->reg.PC + 1);
     switch (opcode) {
       case 0x00: RLC_R(B); break;
       case 0x01: RLC_R(C); break;
@@ -3799,7 +3774,6 @@ static void execute_instruction(struct Emulator* e) {
       case 0xff: SET_R(7, A); break;
     }
   } else {
-    update_cycles(e, s_opcode_cycles[opcode]);
     switch (opcode) {
       case 0x00: break;
       case 0x01: LD_RR_NN(BC); break;
