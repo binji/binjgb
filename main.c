@@ -112,11 +112,6 @@ typedef uint32_t RGBA;
 #define MILLISECONDS_PER_SECOND 1000
 #define GB_CYCLES_PER_SECOND 4194304
 #define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / APU_CYCLES)
-#define DIV_CYCLES (GB_CYCLES_PER_SECOND / 16384)
-#define TIMA_4096_CYCLES (GB_CYCLES_PER_SECOND / 4096)
-#define TIMA_262144_CYCLES (GB_CYCLES_PER_SECOND / 262144)
-#define TIMA_65536_CYCLES (GB_CYCLES_PER_SECOND / 65536)
-#define TIMA_16384_CYCLES (GB_CYCLES_PER_SECOND / 16384)
 #define FRAME_CYCLES 70224
 #define LINE_CYCLES 456
 #define HBLANK_CYCLES 204         /* LCD STAT mode 0 */
@@ -295,7 +290,7 @@ typedef uint32_t RGBA;
 
 #define TAC_UNUSED 0xf8
 #define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
-#define TAC_INPUT_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
+#define TAC_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
 #define INTERRUPT_VBLANK_MASK 0x01
 #define INTERRUPT_LCD_STAT_MASK 0x02
@@ -573,6 +568,8 @@ enum TimerClock {
   TIMER_CLOCK_65536_HZ = 2,
   TIMER_CLOCK_16384_HZ = 3,
 };
+/* TIMA is incremented when the given bit of div_counter changes from 1 to 0. */
+static const uint16_t s_tima_mask[] = {1 << 9, 1 << 3, 1 << 5, 1 << 7};
 
 enum {
   CHANNEL1,
@@ -818,12 +815,13 @@ struct Interrupts {
 };
 
 struct Timer {
-  uint8_t DIV;  /* Incremented at 16384 Hz */
-  uint8_t TIMA; /* Incremented at rate defined by input_clock_select */
+  uint8_t TIMA; /* Incremented at rate defined by clock_select */
   uint8_t TMA;  /* When TIMA overflows, it is set to this value */
-  enum TimerClock input_clock_select; /* Select the rate of TIMA */
-  uint32_t div_cycles;
-  uint32_t tima_cycles;
+  enum TimerClock clock_select; /* Select the rate of TIMA */
+
+  /* Internal state */
+  uint16_t div_counter;    /* Interal clock counter, upper 8 bits are DIV. */
+  enum Bool tima_overflow; /* Used to implement TIMA overflow delay. */
   enum Bool on;
 };
 
@@ -1576,14 +1574,14 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
       return SC_UNUSED | READ_REG(e->serial.transfer_start, SC_TRANSFER_START) |
              READ_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
-      return e->timer.DIV;
+      return e->timer.div_counter >> 8;
     case IO_TIMA_ADDR:
       return e->timer.TIMA;
     case IO_TMA_ADDR:
       return e->timer.TMA;
     case IO_TAC_ADDR:
       return TAC_UNUSED | READ_REG(e->timer.on, TAC_TIMER_ON) |
-             READ_REG(e->timer.input_clock_select, TAC_INPUT_CLOCK_SELECT);
+             READ_REG(e->timer.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
       return INTERRUPT_UNUSED | e->interrupts.IF;
     case IO_LCDC_ADDR:
@@ -1950,6 +1948,23 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
+static void increment_tima(struct Emulator* e) {
+  if (++e->timer.TIMA == 0) {
+    e->timer.tima_overflow = TRUE;
+  }
+}
+
+static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
+  if (e->timer.on) {
+    uint16_t falling_edge =
+        ((e->timer.div_counter ^ div_counter) & ~div_counter);
+    if ((falling_edge & s_tima_mask[e->timer.clock_select]) != 0) {
+      increment_tima(e);
+    }
+  }
+  e->timer.div_counter = div_counter;
+}
+
 static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG(io, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_io_reg_string(addr), value);
@@ -1964,18 +1979,37 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->serial.shift_clock = WRITE_REG(value, SC_SHIFT_CLOCK);
       break;
     case IO_DIV_ADDR:
-      e->timer.DIV = 0;
+      write_div_counter(e, 0);
       break;
     case IO_TIMA_ADDR:
-      e->timer.TIMA = value; /* TODO is this correct? */
+      e->timer.TIMA = value;
       break;
     case IO_TMA_ADDR:
       e->timer.TMA = value;
       break;
-    case IO_TAC_ADDR:
-      e->timer.input_clock_select = WRITE_REG(value, TAC_INPUT_CLOCK_SELECT);
+    case IO_TAC_ADDR: {
+      enum Bool old_timer_on = e->timer.on;
+      uint16_t old_tima_mask = s_tima_mask[e->timer.clock_select];
+      e->timer.clock_select = WRITE_REG(value, TAC_CLOCK_SELECT);
       e->timer.on = WRITE_REG(value, TAC_TIMER_ON);
+      /* TIMA is incremented when a specific bit of div_counter transitions
+       * from 1 to 0. This can happen as a result of writing to DIV, or in this
+       * case modifying which bit we're looking at. */
+      enum Bool tima_tick = FALSE;
+      if (!old_timer_on) {
+        uint16_t tima_mask = s_tima_mask[e->timer.clock_select];
+        if (e->timer.on) {
+          tima_tick = (e->timer.div_counter & old_tima_mask) != 0;
+        } else {
+          tima_tick = (e->timer.div_counter & old_tima_mask) != 0 &&
+                      (e->timer.div_counter & tima_mask) == 0;
+        }
+        if (tima_tick) {
+          increment_tima(e);
+        }
+      }
       break;
+    }
     case IO_IF_ADDR:
       e->interrupts.IF = value;
       break;
@@ -2730,27 +2764,15 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
 }
 
 static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
-  static const uint32_t s_tima_cycles[] = {
-      TIMA_4096_CYCLES, TIMA_262144_CYCLES, TIMA_65536_CYCLES,
-      TIMA_16384_CYCLES,
-  };
-
-  e->timer.div_cycles += cycles;
-  if (VALUE_WRAPPED(e->timer.div_cycles, DIV_CYCLES)) {
-    e->timer.DIV++;
-  }
-
-  if (e->timer.on) {
-    e->timer.tima_cycles += cycles;
-    assert(e->timer.input_clock_select < ARRAY_SIZE(s_tima_cycles));
-    uint32_t tima_max_cycles = s_tima_cycles[e->timer.input_clock_select];
-    while (VALUE_WRAPPED(e->timer.tima_cycles, tima_max_cycles)) {
-      e->timer.TIMA++;
-      if (e->timer.TIMA == 0) {
-        e->timer.TIMA = e->timer.TMA;
-        e->interrupts.IF |= INTERRUPT_TIMER_MASK;
-      }
+  int i;
+  for (i = 0; i < cycles; i += 4) {
+    if (e->timer.on && e->timer.tima_overflow) {
+      e->timer.tima_overflow = FALSE;
+      e->timer.TIMA = e->timer.TMA;
+      e->interrupts.IF |= INTERRUPT_TIMER_MASK;
     }
+
+    write_div_counter(e, e->timer.div_counter + 4);
   }
 }
 
