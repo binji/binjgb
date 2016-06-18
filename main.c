@@ -976,8 +976,7 @@ struct LCD {
 
 struct DMA {
   enum Bool active;
-  enum Bool copying; /* TRUE when performing DMA accesses. */
-  Address base_addr;
+  struct MemoryTypeAddressPair source;
   uint8_t addr_offset;
   uint32_t cycles;
 };
@@ -1012,7 +1011,7 @@ struct Emulator {
   uint32_t cycles;
 };
 
-static enum Bool s_trace = FALSE;
+static enum Bool s_trace = 0;
 static uint32_t s_trace_counter = 0;
 static int s_log_level_memory = 1;
 static int s_log_level_video = 1;
@@ -1809,16 +1808,13 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
 
 static enum Bool is_dma_access_ok(struct Emulator* e,
                                   struct MemoryTypeAddressPair pair) {
-  return !e->dma.active || e->dma.copying || pair.type == MEMORY_MAP_HIGH_RAM;
+  return !e->dma.active || pair.type == MEMORY_MAP_HIGH_RAM ||
+         (e->dma.source.type == MEMORY_MAP_VRAM &&
+          pair.type != MEMORY_MAP_VRAM && pair.type != MEMORY_MAP_OAM);
 }
 
-static uint8_t read_u8(struct Emulator* e, Address addr) {
-  struct MemoryTypeAddressPair pair = map_address(addr);
-  if (!is_dma_access_ok(e, pair)) {
-    INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
-    return INVALID_READ_BYTE;
-  }
-
+static uint8_t read_u8_no_dma_check(struct Emulator* e,
+                                    struct MemoryTypeAddressPair pair) {
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
@@ -1857,8 +1853,19 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
       return read_wave_ram(e, pair.addr);
     case MEMORY_MAP_HIGH_RAM:
       return e->hram[pair.addr];
+    default:
+      UNREACHABLE("invalid address: %u 0x%04x.\n", pair.type, pair.addr);
   }
-  UNREACHABLE("invalid address: 0x%04x.\n", addr);
+}
+
+static uint8_t read_u8(struct Emulator* e, Address addr) {
+  struct MemoryTypeAddressPair pair = map_address(addr);
+  if (!is_dma_access_ok(e, pair)) {
+    INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
+    return INVALID_READ_BYTE;
+  }
+
+  return read_u8_no_dma_check(e, pair);
 }
 
 static uint16_t read_u16(struct Emulator* e, Address addr) {
@@ -1917,16 +1924,9 @@ static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  /* TODO: Not sure this is correct, it seems like DMA shouldn't be able to
-   * write to OAM while the video hardware is reading it. But without it, the
-   * rendering is incorrect. */
-  if (!e->dma.copying && is_using_oam(e)) {
-    INFO(video, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
-         value);
-    return;
-  }
-
+static void write_oam_no_mode_check(struct Emulator* e,
+                                    MaskedAddress addr,
+                                    uint8_t value) {
   struct Obj* obj = &e->oam.objs[addr >> 2];
   switch (addr & 3) {
     case 0:
@@ -1946,6 +1946,16 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       obj->palette = WRITE_REG(value, OBJ_PALETTE);
       break;
   }
+}
+
+static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+  if (is_using_oam(e)) {
+    INFO(video, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
+         value);
+    return;
+  }
+
+  write_oam_no_mode_check(e, addr, value);
 }
 
 static void increment_tima(struct Emulator* e) {
@@ -2058,7 +2068,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_DMA_ADDR:
       e->dma.active = TRUE;
-      e->dma.base_addr = value << 8;
+      e->dma.source = map_address(value << 8);
       e->dma.addr_offset = 0;
       e->dma.cycles = 0;
       break;
@@ -2673,14 +2683,14 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   }
 
   if (e->dma.addr_offset < OAM_TRANSFER_SIZE) {
-    e->dma.copying = TRUE;
     int n;
     for (n = 0; n < cycles && e->dma.addr_offset < OAM_TRANSFER_SIZE; n += 4) {
-      uint8_t value = read_u8(e, e->dma.base_addr + e->dma.addr_offset);
-      write_oam(e, e->dma.addr_offset, value);
+      struct MemoryTypeAddressPair pair = e->dma.source;
+      pair.addr += e->dma.addr_offset;
+      uint8_t value = read_u8_no_dma_check(e, pair);
+      write_oam_no_mode_check(e, e->dma.addr_offset, value);
       e->dma.addr_offset++;
     }
-    e->dma.copying = FALSE;
   }
   e->dma.cycles += cycles;
   if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
