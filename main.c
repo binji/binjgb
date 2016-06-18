@@ -214,7 +214,7 @@ typedef uint32_t RGBA;
 #define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
 #define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
-/* Addresses are relative to IO_START_ADDR. */
+/* Addresses are relative to IO_START_ADDR (0xff00). */
 #define FOREACH_IO_REG(V)                     \
   V(JOYP, 0x00) /* Joypad */                  \
   V(SB, 0x01)   /* Serial transfer data */    \
@@ -238,7 +238,7 @@ typedef uint32_t RGBA;
   V(WX, 0x4b)   /* Window X */                \
   V(IE, 0xff)   /* Interrupt enable */
 
-/* Addresses are relative to APU_START_ADDR. */
+/* Addresses are relative to APU_START_ADDR (0xff10). */
 #define FOREACH_APU_REG(V)                                   \
   V(NR10, 0x0)  /* Channel 1 sweep */                        \
   V(NR11, 0x1)  /* Channel 1 sound length/wave pattern */    \
@@ -277,6 +277,8 @@ typedef uint32_t RGBA;
 #define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
 #define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
 
+#define JOYP_UNUSED 0xc0
+#define JOYP_RESULT_MASK 0x0f
 #define JOYP_JOYPAD_SELECT(X, OP) BITS(X, OP, 5, 4)
 #define JOYP_DPAD_DOWN(X, OP) BIT(X, OP, 3)
 #define JOYP_DPAD_UP(X, OP) BIT(X, OP, 2)
@@ -1402,24 +1404,15 @@ static enum Result init_emulator(struct Emulator* e,
   e->interrupts.IME = TRUE;
   /* Enable sound first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
-  write_apu(e, APU_NR10_ADDR, 0x80);
-  write_apu(e, APU_NR11_ADDR, 0xbf);
+  write_apu(e, APU_NR11_ADDR, 0x80);
   write_apu(e, APU_NR12_ADDR, 0xf3);
-  write_apu(e, APU_NR14_ADDR, 0xff);
-  write_apu(e, APU_NR21_ADDR, 0x3f);
-  write_apu(e, APU_NR22_ADDR, 0x00);
-  write_apu(e, APU_NR23_ADDR, 0xff);
-  write_apu(e, APU_NR24_ADDR, 0xbf);
-  write_apu(e, APU_NR30_ADDR, 0x7f);
-  write_apu(e, APU_NR31_ADDR, 0xff);
-  write_apu(e, APU_NR32_ADDR, 0x9f);
-  write_apu(e, APU_NR33_ADDR, 0xff);
-  write_apu(e, APU_NR41_ADDR, 0xff);
-  write_apu(e, APU_NR42_ADDR, 0x00);
-  write_apu(e, APU_NR43_ADDR, 0x00);
-  write_apu(e, APU_NR44_ADDR, 0xbf);
+  write_apu(e, APU_NR14_ADDR, 0x80);
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
+  /* Turn down the volume on channel1, it is playing by default (because of the
+   * GB startup sound), but we don't want to hear it when starting the
+   * emulator. */
+  e->sound.channel[CHANNEL1].envelope.volume = 0;
   write_io(e, IO_LCDC_ADDR, 0x91);
   write_io(e, IO_SCY_ADDR, 0x00);
   write_io(e, IO_SCX_ADDR, 0x00);
@@ -1427,6 +1420,7 @@ static enum Result init_emulator(struct Emulator* e,
   write_io(e, IO_BGP_ADDR, 0xfc);
   write_io(e, IO_OBP0_ADDR, 0xff);
   write_io(e, IO_OBP1_ADDR, 0xff);
+  write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
   return OK;
 error:
@@ -1572,7 +1566,9 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
       }
 
       /* The bits are low when the buttons are pressed. */
-      return READ_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) | ~result;
+      return JOYP_UNUSED |
+             READ_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) |
+             (~result & JOYP_RESULT_MASK);
     }
     case IO_SB_ADDR:
       return 0; /* TODO */
@@ -1672,7 +1668,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff /* Unused. */
   };
 
-  /* addr is relative to APU_START_ADDR, apu_addr to APU_START_ADDR. */
+  /* addr is relative to APU_START_ADDR. */
   assert(addr < ARRAY_SIZE(mask));
   uint8_t result = mask[addr];
 
