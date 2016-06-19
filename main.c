@@ -4086,6 +4086,7 @@ static void handle_interrupts(struct Emulator* e) {
     CALL(vector);
     REG(PC) = new_pc;
     e->interrupts.IME = FALSE;
+    update_cycles(e, 8);
   }
   e->interrupts.halt = FALSE;
 }
