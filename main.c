@@ -110,8 +110,10 @@ typedef uint32_t RGBA;
 
 /* Cycle counts */
 #define MILLISECONDS_PER_SECOND 1000
-#define GB_CYCLES_PER_SECOND 4194304
-#define APU_CYCLES_PER_SECOND (GB_CYCLES_PER_SECOND / APU_CYCLES)
+#define CPU_CYCLES_PER_SECOND 4194304
+#define CPU_MCYCLE 4
+#define APU_CYCLES_PER_SECOND (CPU_CYCLES_PER_SECOND / APU_CYCLES)
+#define APU_CYCLES 2 /* APU runs at 2MHz */
 #define FRAME_CYCLES 70224
 #define LINE_CYCLES 456
 #define HBLANK_CYCLES 204         /* LCD STAT mode 0 */
@@ -120,8 +122,7 @@ typedef uint32_t RGBA;
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 648
 #define DMA_DELAY_CYCLES 8
-#define APU_CYCLES 2 /* APU runs at 2MHz */
-#define SERIAL_CYCLES (GB_CYCLES_PER_SECOND / 8192)
+#define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
 
 /* Memory map */
 #define ADDR_MASK_1K 0x03ff
@@ -2697,39 +2698,34 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   }
 }
 
-static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
+static void dma_mcycle(struct Emulator* e) {
   if (e->dma.state == DMA_INACTIVE) {
     return;
   }
   if (e->dma.cycles < DMA_DELAY_CYCLES) {
-    e->dma.cycles += cycles;
-    if (e->dma.cycles < DMA_DELAY_CYCLES) {
-      return;
+    e->dma.cycles += CPU_MCYCLE;
+    if (e->dma.cycles >= DMA_DELAY_CYCLES) {
+      e->dma.cycles = DMA_DELAY_CYCLES;
+      e->dma.state = DMA_ACTIVE;
     }
-    cycles = e->dma.cycles - DMA_DELAY_CYCLES;
-    e->dma.cycles = DMA_DELAY_CYCLES;
-    e->dma.state = DMA_ACTIVE;
+    return;
   }
 
-  uint8_t i;
-  for (i = 0; i < cycles; i += 4) {
-    uint8_t addr_offset = (e->dma.cycles - DMA_DELAY_CYCLES) >> 2;
-    assert(addr_offset < OAM_TRANSFER_SIZE);
-    struct MemoryTypeAddressPair pair = e->dma.source;
-    pair.addr += addr_offset;
-    uint8_t value = read_u8_no_dma_check(e, pair);
-    write_oam_no_mode_check(e, addr_offset, value);
-    e->dma.cycles += 4;
-    if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
-      e->dma.state = DMA_INACTIVE;
-      break;
-    }
+  uint8_t addr_offset = (e->dma.cycles - DMA_DELAY_CYCLES) >> 2;
+  assert(addr_offset < OAM_TRANSFER_SIZE);
+  struct MemoryTypeAddressPair pair = e->dma.source;
+  pair.addr += addr_offset;
+  uint8_t value = read_u8_no_dma_check(e, pair);
+  write_oam_no_mode_check(e, addr_offset, value);
+  e->dma.cycles += CPU_MCYCLE;
+  if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
+    e->dma.state = DMA_INACTIVE;
   }
 }
 
-static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
+static void ppu_mcycle(struct Emulator* e) {
   struct PPU* ppu = &e->ppu;
-  ppu->cycles += cycles;
+  ppu->cycles += CPU_MCYCLE;
   e->ppu.stat.new_line_edge = FALSE;
 
   if (ppu->lcdc.display) {
@@ -2792,17 +2788,14 @@ static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_timer_cycles(struct Emulator* e, uint8_t cycles) {
-  int i;
-  for (i = 0; i < cycles; i += 4) {
-    if (e->timer.on && e->timer.tima_overflow) {
-      e->timer.tima_overflow = FALSE;
-      e->timer.TIMA = e->timer.TMA;
-      e->interrupts.IF |= INTERRUPT_TIMER_MASK;
-    }
-
-    write_div_counter(e, e->timer.div_counter + 4);
+static void timer_mcycle(struct Emulator* e) {
+  if (e->timer.on && e->timer.tima_overflow) {
+    e->timer.tima_overflow = FALSE;
+    e->timer.TIMA = e->timer.TMA;
+    e->interrupts.IF |= INTERRUPT_TIMER_MASK;
   }
+
+  write_div_counter(e, e->timer.div_counter + CPU_MCYCLE);
 }
 
 static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
@@ -2954,11 +2947,11 @@ static void write_sample(struct APU* apu, uint16_t so1, uint16_t so2) {
   *buffer->position++ = so2;
 }
 
-static void update_apu_cycles(struct Emulator* e, uint8_t cycles) {
+static void apu_mcycle(struct Emulator* e) {
   struct APU* apu = &e->apu;
   uint8_t i;
   if (!apu->enabled) {
-    for (i = 0; i < cycles; i += APU_CYCLES) {
+    for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
       write_sample(apu, 0, 0);
     }
     return;
@@ -2975,7 +2968,7 @@ static void update_apu_cycles(struct Emulator* e, uint8_t cycles) {
   /* Synchronize with CPU cycle counter. */
   apu->cycles = e->cycles;
 
-  for (i = 0; i < cycles; i += APU_CYCLES) {
+  for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
     enum Bool do_length = FALSE;
     enum Bool do_envelope = FALSE;
     enum Bool do_sweep = FALSE;
@@ -3083,12 +3076,12 @@ static void update_apu_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_serial_cycles(struct Emulator* e, uint8_t cycles) {
+static void serial_mcycle(struct Emulator* e) {
   if (!e->serial.transferring) {
     return;
   }
   if (e->serial.clock == SERIAL_CLOCK_INTERNAL) {
-    e->serial.cycles += cycles;
+    e->serial.cycles += CPU_MCYCLE;
     if (VALUE_WRAPPED(e->serial.cycles, SERIAL_CYCLES)) {
       /* Since we're never connected to another device, always shift in 0xff. */
       e->serial.SB = (e->serial.SB << 1) | 1;
@@ -3101,17 +3094,17 @@ static void update_serial_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_cycles(struct Emulator* e, uint8_t cycles) {
-  update_dma_cycles(e, cycles);
-  update_ppu_cycles(e, cycles);
-  update_timer_cycles(e, cycles);
-  update_apu_cycles(e, cycles);
-  update_serial_cycles(e, cycles);
-  e->cycles += cycles;
+static void mcycle(struct Emulator* e) {
+  dma_mcycle(e);
+  ppu_mcycle(e);
+  timer_mcycle(e);
+  apu_mcycle(e);
+  serial_mcycle(e);
+  e->cycles += CPU_MCYCLE;
 }
 
 static uint8_t read_u8_cy(struct Emulator* e, Address addr) {
-  update_cycles(e, 4);
+  mcycle(e);
   uint8_t result = read_u8(e, addr);
   return result;
 }
@@ -3123,7 +3116,7 @@ static uint16_t read_u16_cy(struct Emulator* e, Address addr) {
 }
 
 static void write_u8_cy(struct Emulator* e, Address addr, uint8_t value) {
-  update_cycles(e, 4);
+  mcycle(e);
   write_u8(e, addr, value);
 }
 
@@ -3306,7 +3299,7 @@ static void print_emulator_info(struct Emulator* e) {
 #define REG(R) e->reg.R
 #define FLAG(x) e->reg.F.x
 #define INTR(m) e->interrupts.m
-#define CY(X) update_cycles(e, X)
+#define CY mcycle(e)
 
 #define RA REG(A)
 #define RHL REG(HL)
@@ -3358,8 +3351,8 @@ static void print_emulator_info(struct Emulator* e) {
 #define ADD_R(R) ADD_FLAGS(RA, REG(R)); RA += REG(R)
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
-#define ADD_HL_RR(RR) CY(4); ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
-#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s; CY(8)
+#define ADD_HL_RR(RR) CY; ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
+#define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s; CY; CY
 
 #define ADC_FLAGS(X, Y, C) FZ_EQ0((X) + (Y) + (C)); FN = 0; FCH_ADC(X, Y, C)
 #define ADC_R(R) u = REG(R); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
@@ -3375,7 +3368,7 @@ static void print_emulator_info(struct Emulator* e) {
 #define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(BIT, u)
 #define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
 
-#define CALL(X) CY(4); RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
+#define CALL(X) CY; RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
 #define CALL_NN u16 = READ_NN; CALL(u16)
 #define CALL_F_NN(COND) u16 = READ_NN; if (COND) { CALL(u16); }
 
@@ -3406,7 +3399,7 @@ static void print_emulator_info(struct Emulator* e) {
 #define DEC u--
 #define DEC_FLAGS FZ_EQ0(u); FN = 1; FH = MASK8(u) == 0xf
 #define DEC_R(R) BASIC_OP_R(R, DEC); DEC_FLAGS
-#define DEC_RR(RR) REG(RR)--; CY(4)
+#define DEC_RR(RR) REG(RR)--; CY
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 
 #define DI INTR(IME) = INTR(enable) = FALSE;
@@ -3421,21 +3414,21 @@ static void print_emulator_info(struct Emulator* e) {
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
 #define INC_R(R) BASIC_OP_R(R, INC); INC_FLAGS
-#define INC_RR(RR) REG(RR)++; CY(4)
+#define INC_RR(RR) REG(RR)++; CY
 #define INC_MR(MR) BASIC_OP_MR(MR, INC); INC_FLAGS
 
 #define JP new_pc = u16
-#define JP_F_NN(COND) u16 = READ_NN; if (COND) { JP; CY(4); }
+#define JP_F_NN(COND) u16 = READ_NN; if (COND) { JP; CY; }
 #define JP_RR(RR) u16 = REG(RR); JP
-#define JP_NN u16 = READ_NN; JP; CY(4)
+#define JP_NN u16 = READ_NN; JP; CY
 
-#define JR new_pc += s; CY(4)
+#define JR new_pc += s; CY
 #define JR_F_N(COND) s = READ_N; if (COND) { JR; }
 #define JR_N s = READ_N; JR
 
 #define LD_R_R(RD, RS) REG(RD) = REG(RS)
 #define LD_R_N(R) REG(R) = READ_N
-#define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS); CY(4)
+#define LD_RR_RR(RRD, RRS) REG(RRD) = REG(RRS); CY
 #define LD_RR_NN(RR) REG(RR) = READ_NN
 #define LD_R_MR(R, MR) REG(R) = READMR(MR)
 #define LD_R_MN(R) REG(R) = READ8(READ_NN)
@@ -3447,7 +3440,7 @@ static void print_emulator_info(struct Emulator* e) {
 #define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
 #define LD_MNN_SP u16 = READ_NN; WRITE16(u16, RSP)
-#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s; CY(4)
+#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s; CY
 
 #define OR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define OR_R(R) RA |= REG(R); OR_FLAGS
@@ -3457,15 +3450,15 @@ static void print_emulator_info(struct Emulator* e) {
 #define POP_RR(RR) REG(RR) = READ16(RSP); RSP += 2
 #define POP_AF set_af_reg(&e->reg, READ16(RSP)); RSP += 2
 
-#define PUSH_RR(RR) CY(4); RSP -= 2; WRITE16(RSP, REG(RR))
-#define PUSH_AF CY(4); RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
+#define PUSH_RR(RR) CY; RSP -= 2; WRITE16(RSP, REG(RR))
+#define PUSH_AF CY; RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
 
 #define RES(BIT) u &= ~(1 << (BIT))
 #define RES_R(BIT, R) BASIC_OP_R(R, RES(BIT))
 #define RES_MR(BIT, MR) BASIC_OP_MR(MR, RES(BIT))
 
-#define RET new_pc = READ16(RSP); RSP += 2; CY(4)
-#define RET_F(COND) CY(4); if (COND) { RET; }
+#define RET new_pc = READ16(RSP); RSP += 2; CY
+#define RET_F(COND) CY; if (COND) { RET; }
 #define RETI INTR(enable) = FALSE; INTR(IME) = TRUE; RET
 
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
@@ -3547,7 +3540,7 @@ static void execute_instruction(struct Emulator* e) {
   }
 
   if (INTR(halt)) {
-    update_cycles(e, 4);
+    mcycle(e);
     return;
   }
 
@@ -4138,7 +4131,8 @@ static void handle_interrupts(struct Emulator* e) {
     CALL(vector);
     REG(PC) = new_pc;
     e->interrupts.IME = FALSE;
-    update_cycles(e, 8);
+    mcycle(e);
+    mcycle(e);
   }
   e->interrupts.halt = FALSE;
 }
@@ -4417,7 +4411,7 @@ static void sdl_render_surface(struct SDL* sdl, struct Emulator* e) {
 
 static void sdl_wait_for_frame(struct SDL* sdl, struct Emulator* e) {
   double gb_ms = (double)(e->cycles - sdl->last_frame_cycles) *
-                 MILLISECONDS_PER_SECOND / GB_CYCLES_PER_SECOND;
+                 MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
   while (TRUE) {
     double ticks_ms = get_time_ms();
     double real_ms = ticks_ms - sdl->last_frame_real_ms;
