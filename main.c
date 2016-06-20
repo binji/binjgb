@@ -961,6 +961,8 @@ struct LCDStatus {
   enum Bool vblank_intr;
   enum Bool hblank_intr;
   enum PPUMode mode;
+  /* Internal state */
+  enum Bool new_line_edge;
 };
 
 struct PPU {
@@ -1980,7 +1982,9 @@ static void check_if_lcd_stat(struct Emulator* e) {
   enum Bool set =
       (e->ppu.stat.hblank_intr && e->ppu.stat.mode == PPU_MODE_HBLANK) ||
       (e->ppu.stat.vblank_intr && e->ppu.stat.mode == PPU_MODE_VBLANK) ||
-      (e->ppu.stat.using_oam_intr && e->ppu.stat.mode == PPU_MODE_USING_OAM) ||
+      (e->ppu.stat.using_oam_intr &&
+       (e->ppu.stat.mode == PPU_MODE_USING_OAM ||
+        (e->ppu.stat.new_line_edge && e->ppu.LY == SCREEN_HEIGHT))) ||
       (e->ppu.stat.y_compare_intr && e->ppu.LY == e->ppu.LYC);
   if (!e->interrupts.if_lcd_stat && set) {
     e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
@@ -2726,7 +2730,7 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
 static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
   struct PPU* ppu = &e->ppu;
   ppu->cycles += cycles;
-  enum Bool new_line_edge = FALSE;
+  e->ppu.stat.new_line_edge = FALSE;
 
   if (ppu->lcdc.display) {
     switch (ppu->stat.mode) {
@@ -2745,7 +2749,7 @@ static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
       case PPU_MODE_HBLANK:
         if (VALUE_WRAPPED(ppu->cycles, HBLANK_CYCLES)) {
           ppu->LY++;
-          new_line_edge = TRUE;
+          e->ppu.stat.new_line_edge = TRUE;
           if (ppu->LY == SCREEN_HEIGHT) {
             ppu->stat.mode = PPU_MODE_VBLANK;
             e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
@@ -2759,7 +2763,7 @@ static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
       case PPU_MODE_VBLANK:
         if (VALUE_WRAPPED(ppu->cycles, LINE_CYCLES)) {
           ppu->LY++;
-          new_line_edge = TRUE;
+          e->ppu.stat.new_line_edge = TRUE;
           if (VALUE_WRAPPED(ppu->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
             ppu->win_y = 0;
             ppu->frame_WY = ppu->WY;
@@ -2771,7 +2775,7 @@ static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
         }
         break;
     }
-    if (new_line_edge) {
+    if (e->ppu.stat.new_line_edge) {
       check_if_lcd_stat(e);
     }
   } else {
