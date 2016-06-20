@@ -119,6 +119,7 @@ typedef uint32_t RGBA;
 #define USING_OAM_CYCLES 80       /* LCD STAT mode 2 */
 #define USING_OAM_VRAM_CYCLES 172 /* LCD STAT mode 3 */
 #define DMA_CYCLES 648
+#define DMA_DELAY_CYCLES 8
 #define APU_CYCLES 2 /* APU runs at 2MHz */
 
 /* Memory map */
@@ -681,6 +682,12 @@ enum ObjPriority {
   OBJ_PRIORITY_BEHIND_BG = 1,
 };
 
+enum DMAState {
+  DMA_INACTIVE = 0,
+  DMA_TRIGGERED = 1,
+  DMA_ACTIVE = 2,
+};
+
 struct RomData {
   uint8_t* data;
   size_t size;
@@ -976,9 +983,8 @@ struct LCD {
 };
 
 struct DMA {
-  enum Bool active;
+  enum DMAState state;
   struct MemoryTypeAddressPair source;
-  uint8_t addr_offset;
   uint32_t cycles;
 };
 
@@ -1813,9 +1819,8 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
 
 static enum Bool is_dma_access_ok(struct Emulator* e,
                                   struct MemoryTypeAddressPair pair) {
-  return !e->dma.active || pair.type == MEMORY_MAP_HIGH_RAM ||
-         (e->dma.source.type == MEMORY_MAP_VRAM &&
-          pair.type != MEMORY_MAP_VRAM && pair.type != MEMORY_MAP_OAM);
+  /* TODO: need to figure out bus conflicts during DMA for non-OAM accesses. */
+  return e->dma.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
 }
 
 static uint8_t read_u8_no_dma_check(struct Emulator* e,
@@ -2063,9 +2068,10 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->lcd.LYC = value;
       break;
     case IO_DMA_ADDR:
-      e->dma.active = TRUE;
+      /* DMA can be restarted. */
+      e->dma.state =
+          (e->dma.state != DMA_INACTIVE ? e->dma.state : DMA_TRIGGERED);
       e->dma.source = map_address(value << 8);
-      e->dma.addr_offset = 0;
       e->dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
@@ -2669,24 +2675,32 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
 }
 
 static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
-  if (!e->dma.active) {
+  if (e->dma.state == DMA_INACTIVE) {
     return;
   }
-
-  if (e->dma.addr_offset < OAM_TRANSFER_SIZE) {
-    int n;
-    for (n = 0; n < cycles && e->dma.addr_offset < OAM_TRANSFER_SIZE; n += 4) {
-      struct MemoryTypeAddressPair pair = e->dma.source;
-      pair.addr += e->dma.addr_offset;
-      uint8_t value = read_u8_no_dma_check(e, pair);
-      write_oam_no_mode_check(e, e->dma.addr_offset, value);
-      e->dma.addr_offset++;
+  if (e->dma.cycles < DMA_DELAY_CYCLES) {
+    e->dma.cycles += cycles;
+    if (e->dma.cycles < DMA_DELAY_CYCLES) {
+      return;
     }
+    cycles = e->dma.cycles - DMA_DELAY_CYCLES;
+    e->dma.cycles = DMA_DELAY_CYCLES;
+    e->dma.state = DMA_ACTIVE;
   }
-  e->dma.cycles += cycles;
-  if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
-    assert(e->dma.addr_offset == OAM_TRANSFER_SIZE);
-    e->dma.active = FALSE;
+
+  uint8_t i;
+  for (i = 0; i < cycles; i += 4) {
+    uint8_t addr_offset = (e->dma.cycles - DMA_DELAY_CYCLES) >> 2;
+    assert(addr_offset < OAM_TRANSFER_SIZE);
+    struct MemoryTypeAddressPair pair = e->dma.source;
+    pair.addr += addr_offset;
+    uint8_t value = read_u8_no_dma_check(e, pair);
+    write_oam_no_mode_check(e, addr_offset, value);
+    e->dma.cycles += 4;
+    if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
+      e->dma.state = DMA_INACTIVE;
+      break;
+    }
   }
 }
 
