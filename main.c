@@ -196,11 +196,11 @@ typedef uint32_t RGBA;
 #define SOUND_OUTPUT_COUNT 2
 #define SO1_MAX_VOLUME 7
 #define SO2_MAX_VOLUME 7
-/* Additional samples so the SoundBuffer doesn't overflow. This could happen
- * because the sound buffer is updated at the granularity of an instruction, so
+/* Additional samples so the AudioBuffer doesn't overflow. This could happen
+ * because the audio buffer is updated at the granularity of an instruction, so
  * the most extra samples that could be added is equal to the APU cycle count
  * of the slowest instruction. */
-#define SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES 256
+#define AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES 256
 
 /* TODO hack to make dmg_sound-2 tests pass. */
 #define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
@@ -657,11 +657,11 @@ static uint8_t s_obj_size_to_height[] = {
   [OBJ_SIZE_8X16] = 16,
 };
 
-enum LCDMode {
-  LCD_MODE_HBLANK = 0,         /* LCD mode 0 */
-  LCD_MODE_VBLANK = 1,         /* LCD mode 1 */
-  LCD_MODE_USING_OAM = 2,      /* LCD mode 2 */
-  LCD_MODE_USING_OAM_VRAM = 3, /* LCD mode 3 */
+enum PPUMode {
+  PPU_MODE_HBLANK = 0,         /* PPU mode 0 */
+  PPU_MODE_VBLANK = 1,         /* PPU mode 1 */
+  PPU_MODE_USING_OAM = 2,      /* PPU mode 2 */
+  PPU_MODE_USING_OAM_VRAM = 3, /* PPU mode 3 */
 };
 
 enum Color {
@@ -921,13 +921,13 @@ struct Channel {
   enum Bool status; /* Status bit for NR52 */
 };
 
-struct SoundBuffer {
+struct AudioBuffer {
   uint16_t* data; /* Unsigned 16-bit 2-channel samples @ 2MHz */
   uint16_t* end;
   uint16_t* position;
 };
 
-struct Sound {
+struct APU {
   uint8_t so2_volume;
   uint8_t so1_volume;
   enum Bool so2_output[SOUND_COUNT];
@@ -941,7 +941,7 @@ struct Sound {
   uint8_t frame;         /* 0..FRAME_SEQUENCER_COUNT */
   uint32_t frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
   uint32_t cycles;       /* Raw cycle counter */
-  struct SoundBuffer* buffer;
+  struct AudioBuffer* buffer;
 };
 
 struct LCDControl {
@@ -960,10 +960,10 @@ struct LCDStatus {
   enum Bool using_oam_intr;
   enum Bool vblank_intr;
   enum Bool hblank_intr;
-  enum LCDMode mode;
+  enum PPUMode mode;
 };
 
-struct LCD {
+struct PPU {
   struct LCDControl lcdc; /* LCD control */
   struct LCDStatus stat;  /* LCD status */
   uint8_t SCY;            /* Screen Y */
@@ -1010,8 +1010,8 @@ struct Emulator {
   struct Joypad joypad;
   struct Serial serial;
   struct Timer timer;
-  struct Sound sound;
-  struct LCD lcd;
+  struct APU apu;
+  struct PPU ppu;
   struct DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
   FrameBuffer frame_buffer;
@@ -1021,8 +1021,8 @@ struct Emulator {
 static enum Bool s_trace = 0;
 static uint32_t s_trace_counter = 0;
 static int s_log_level_memory = 1;
-static int s_log_level_video = 1;
-static int s_log_level_sound = 1;
+static int s_log_level_ppu = 1;
+static int s_log_level_apu = 1;
 static int s_log_level_io = 1;
 static int s_log_level_interrupt = 1;
 static int s_log_level_sdl = 1;
@@ -1395,10 +1395,10 @@ static void set_af_reg(struct Registers* reg, uint16_t af) {
 
 static enum Result init_emulator(struct Emulator* e,
                                  struct RomData* rom_data,
-                                 struct SoundBuffer* sound_buffer) {
+                                 struct AudioBuffer* audio_buffer) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
-  e->sound.buffer = sound_buffer;
+  e->apu.buffer = audio_buffer;
   struct RomInfo rom_info;
   CHECK(SUCCESS(get_rom_info(rom_data, &rom_info)));
   print_rom_info(&rom_info);
@@ -1410,7 +1410,7 @@ static enum Result init_emulator(struct Emulator* e,
   e->reg.SP = 0xfffe;
   e->reg.PC = 0x0100;
   e->interrupts.IME = TRUE;
-  /* Enable sound first, so subsequent writes succeed. */
+  /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
   write_apu(e, APU_NR12_ADDR, 0xf3);
@@ -1418,9 +1418,9 @@ static enum Result init_emulator(struct Emulator* e,
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
   /* Turn down the volume on channel1, it is playing by default (because of the
-   * GB startup sound), but we don't want to hear it when starting the
+   * GB startup apu), but we don't want to hear it when starting the
    * emulator. */
-  e->sound.channel[CHANNEL1].envelope.volume = 0;
+  e->apu.channel[CHANNEL1].envelope.volume = 0;
   write_io(e, IO_LCDC_ADDR, 0x91);
   write_io(e, IO_SCY_ADDR, 0x00);
   write_io(e, IO_SCX_ADDR, 0x00);
@@ -1521,8 +1521,8 @@ static struct MemoryTypeAddressPair map_address(Address addr) {
 }
 
 static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
-  if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    DEBUG(video, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
+  if (e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM) {
+    DEBUG(ppu, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
@@ -1531,13 +1531,13 @@ static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
 }
 
 static enum Bool is_using_oam(struct Emulator* e) {
-  return e->lcd.stat.mode == LCD_MODE_USING_OAM ||
-         e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM;
+  return e->ppu.stat.mode == PPU_MODE_USING_OAM ||
+         e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM;
 }
 
 static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   if (is_using_oam(e)) {
-    DEBUG(video, "read_oam(0x%04x): returning 0xff because in use.\n", addr);
+    DEBUG(ppu, "read_oam(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   }
 
@@ -1595,39 +1595,39 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
     case IO_IF_ADDR:
       return INTERRUPT_UNUSED | e->interrupts.IF;
     case IO_LCDC_ADDR:
-      return READ_REG(e->lcd.lcdc.display, LCDC_DISPLAY) |
-             READ_REG(e->lcd.lcdc.window_tile_map_select,
+      return READ_REG(e->ppu.lcdc.display, LCDC_DISPLAY) |
+             READ_REG(e->ppu.lcdc.window_tile_map_select,
                       LCDC_WINDOW_TILE_MAP_SELECT) |
-             READ_REG(e->lcd.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
-             READ_REG(e->lcd.lcdc.bg_tile_data_select,
+             READ_REG(e->ppu.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
+             READ_REG(e->ppu.lcdc.bg_tile_data_select,
                       LCDC_BG_TILE_DATA_SELECT) |
-             READ_REG(e->lcd.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
-             READ_REG(e->lcd.lcdc.obj_size, LCDC_OBJ_SIZE) |
-             READ_REG(e->lcd.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
-             READ_REG(e->lcd.lcdc.bg_display, LCDC_BG_DISPLAY);
+             READ_REG(e->ppu.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
+             READ_REG(e->ppu.lcdc.obj_size, LCDC_OBJ_SIZE) |
+             READ_REG(e->ppu.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
+             READ_REG(e->ppu.lcdc.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
       return STAT_UNUSED |
-             READ_REG(e->lcd.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
-             READ_REG(e->lcd.stat.using_oam_intr, STAT_USING_OAM_INTR) |
-             READ_REG(e->lcd.stat.vblank_intr, STAT_VBLANK_INTR) |
-             READ_REG(e->lcd.stat.hblank_intr, STAT_HBLANK_INTR) |
-             READ_REG(e->lcd.LY == e->lcd.LYC, STAT_YCOMPARE) |
-             READ_REG(e->lcd.stat.mode, STAT_MODE);
+             READ_REG(e->ppu.stat.y_compare_intr, STAT_YCOMPARE_INTR) |
+             READ_REG(e->ppu.stat.using_oam_intr, STAT_USING_OAM_INTR) |
+             READ_REG(e->ppu.stat.vblank_intr, STAT_VBLANK_INTR) |
+             READ_REG(e->ppu.stat.hblank_intr, STAT_HBLANK_INTR) |
+             READ_REG(e->ppu.LY == e->ppu.LYC, STAT_YCOMPARE) |
+             READ_REG(e->ppu.stat.mode, STAT_MODE);
     case IO_SCY_ADDR:
-      return e->lcd.SCY;
+      return e->ppu.SCY;
     case IO_SCX_ADDR:
-      return e->lcd.SCX;
+      return e->ppu.SCX;
     case IO_LY_ADDR:
-      return e->lcd.LY;
+      return e->ppu.LY;
     case IO_LYC_ADDR:
-      return e->lcd.LYC;
+      return e->ppu.LYC;
     case IO_DMA_ADDR:
       return INVALID_READ_BYTE; /* Write only. */
     case IO_BGP_ADDR:
-      return READ_REG(e->lcd.bgp.color[3], PALETTE_COLOR3) |
-             READ_REG(e->lcd.bgp.color[2], PALETTE_COLOR2) |
-             READ_REG(e->lcd.bgp.color[1], PALETTE_COLOR1) |
-             READ_REG(e->lcd.bgp.color[0], PALETTE_COLOR0);
+      return READ_REG(e->ppu.bgp.color[3], PALETTE_COLOR3) |
+             READ_REG(e->ppu.bgp.color[2], PALETTE_COLOR2) |
+             READ_REG(e->ppu.bgp.color[1], PALETTE_COLOR1) |
+             READ_REG(e->ppu.bgp.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
       return READ_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
              READ_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
@@ -1639,9 +1639,9 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
              READ_REG(e->oam.obp[1].color[1], PALETTE_COLOR1) |
              READ_REG(e->oam.obp[1].color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
-      return e->lcd.WY;
+      return e->ppu.WY;
     case IO_WX_ADDR:
-      return e->lcd.WX;
+      return e->ppu.WX;
     case IO_IE_ADDR:
       return e->interrupts.IE;
     default:
@@ -1680,14 +1680,14 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   assert(addr < ARRAY_SIZE(mask));
   uint8_t result = mask[addr];
 
-  struct Sound* sound = &e->sound;
-  struct Channel* channel1 = &sound->channel[CHANNEL1];
-  struct Channel* channel2 = &sound->channel[CHANNEL2];
-  struct Channel* channel3 = &sound->channel[CHANNEL3];
-  struct Channel* channel4 = &sound->channel[CHANNEL4];
-  struct Sweep* sweep = &sound->sweep;
-  struct Wave* wave = &sound->wave;
-  struct Noise* noise = &sound->noise;
+  struct APU* apu = &e->apu;
+  struct Channel* channel1 = &apu->channel[CHANNEL1];
+  struct Channel* channel2 = &apu->channel[CHANNEL2];
+  struct Channel* channel3 = &apu->channel[CHANNEL3];
+  struct Channel* channel4 = &apu->channel[CHANNEL4];
+  struct Sweep* sweep = &apu->sweep;
+  struct Wave* wave = &apu->wave;
+  struct Noise* noise = &apu->noise;
 
   switch (addr) {
     case APU_NR10_ADDR: {
@@ -1752,28 +1752,28 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
       result |= read_nrx4_reg(channel4);
       break;
     case APU_NR50_ADDR:
-      result |= READ_REG(sound->so2_output[VIN], NR50_VIN_SO2) |
-                READ_REG(sound->so2_volume, NR50_SO2_VOLUME) |
-                READ_REG(sound->so1_output[VIN], NR50_VIN_SO1) |
-                READ_REG(sound->so1_volume, NR50_SO1_VOLUME);
+      result |= READ_REG(apu->so2_output[VIN], NR50_VIN_SO2) |
+                READ_REG(apu->so2_volume, NR50_SO2_VOLUME) |
+                READ_REG(apu->so1_output[VIN], NR50_VIN_SO1) |
+                READ_REG(apu->so1_volume, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      result |= READ_REG(sound->so2_output[SOUND4], NR51_SOUND4_SO2) |
-                READ_REG(sound->so2_output[SOUND3], NR51_SOUND3_SO2) |
-                READ_REG(sound->so2_output[SOUND2], NR51_SOUND2_SO2) |
-                READ_REG(sound->so2_output[SOUND1], NR51_SOUND1_SO2) |
-                READ_REG(sound->so1_output[SOUND4], NR51_SOUND4_SO1) |
-                READ_REG(sound->so1_output[SOUND3], NR51_SOUND3_SO1) |
-                READ_REG(sound->so1_output[SOUND2], NR51_SOUND2_SO1) |
-                READ_REG(sound->so1_output[SOUND1], NR51_SOUND1_SO1);
+      result |= READ_REG(apu->so2_output[SOUND4], NR51_SOUND4_SO2) |
+                READ_REG(apu->so2_output[SOUND3], NR51_SOUND3_SO2) |
+                READ_REG(apu->so2_output[SOUND2], NR51_SOUND2_SO2) |
+                READ_REG(apu->so2_output[SOUND1], NR51_SOUND1_SO2) |
+                READ_REG(apu->so1_output[SOUND4], NR51_SOUND4_SO1) |
+                READ_REG(apu->so1_output[SOUND3], NR51_SOUND3_SO1) |
+                READ_REG(apu->so1_output[SOUND2], NR51_SOUND2_SO1) |
+                READ_REG(apu->so1_output[SOUND1], NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR:
-      result |= READ_REG(sound->enabled, NR52_ALL_SOUND_ENABLED) |
+      result |= READ_REG(apu->enabled, NR52_ALL_SOUND_ENABLED) |
                 READ_REG(channel4->status, NR52_SOUND4_ON) |
                 READ_REG(channel3->status, NR52_SOUND3_ON) |
                 READ_REG(channel2->status, NR52_SOUND2_ON) |
                 READ_REG(channel1->status, NR52_SOUND1_ON);
-      VERBOSE(sound, "read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
+      VERBOSE(apu, "read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
       break;
     default:
       break;
@@ -1784,7 +1784,7 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
 
 static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
                                                         uint8_t offset_cycles) {
-  struct Wave* wave = &e->sound.wave;
+  struct Wave* wave = &e->apu.wave;
   size_t i;
   for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
     if (wave->sample[i].time == e->cycles + offset_cycles) {
@@ -1795,8 +1795,8 @@ static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
 }
 
 static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
-  struct Wave* wave = &e->sound.wave;
-  if (e->sound.channel[CHANNEL3].status) {
+  struct Wave* wave = &e->apu.wave;
+  if (e->apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel.  */
@@ -1804,11 +1804,11 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
     struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       result = sample->byte;
-      DEBUG(sound, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
+      DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
             addr, result, e->cycles);
     } else {
       result = INVALID_READ_BYTE;
-      DEBUG(sound, "%s(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
+      DEBUG(apu, "%s(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
             __func__, addr, e->cycles);
     }
     return result;
@@ -1878,7 +1878,7 @@ static void write_vram_tile_data(struct Emulator* e,
                                  uint32_t plane,
                                  uint32_t y,
                                  uint8_t value) {
-  VERBOSE(video, "write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
+  VERBOSE(ppu, "write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
           value);
   assert(index < TILE_COUNT);
   Tile* tile = &e->vram.tile[index];
@@ -1894,8 +1894,8 @@ static void write_vram_tile_data(struct Emulator* e,
 }
 
 static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (e->lcd.stat.mode == LCD_MODE_USING_OAM_VRAM) {
-    DEBUG(video, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
+  if (e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM) {
+    DEBUG(ppu, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
           value);
     return;
   }
@@ -1951,7 +1951,7 @@ static void write_oam_no_mode_check(struct Emulator* e,
 
 static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   if (is_using_oam(e)) {
-    INFO(video, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
+    INFO(ppu, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
          value);
     return;
   }
@@ -1978,10 +1978,10 @@ static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
 
 static void check_if_lcd_stat(struct Emulator* e) {
   enum Bool set =
-      (e->lcd.stat.hblank_intr && e->lcd.stat.mode == LCD_MODE_HBLANK) ||
-      (e->lcd.stat.vblank_intr && e->lcd.stat.mode == LCD_MODE_VBLANK) ||
-      (e->lcd.stat.using_oam_intr && e->lcd.stat.mode == LCD_MODE_USING_OAM) ||
-      (e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC);
+      (e->ppu.stat.hblank_intr && e->ppu.stat.mode == PPU_MODE_HBLANK) ||
+      (e->ppu.stat.vblank_intr && e->ppu.stat.mode == PPU_MODE_VBLANK) ||
+      (e->ppu.stat.using_oam_intr && e->ppu.stat.mode == PPU_MODE_USING_OAM) ||
+      (e->ppu.stat.y_compare_intr && e->ppu.LY == e->ppu.LYC);
   if (!e->interrupts.if_lcd_stat && set) {
     e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
   }
@@ -2042,7 +2042,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->interrupts.IF = value;
       break;
     case IO_LCDC_ADDR: {
-      struct LCDControl* lcdc = &e->lcd.lcdc;
+      struct LCDControl* lcdc = &e->ppu.lcdc;
       enum Bool was_enabled = lcdc->display;
       lcdc->display = WRITE_REG(value, LCDC_DISPLAY);
       lcdc->window_tile_map_select =
@@ -2054,36 +2054,36 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       lcdc->obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
       lcdc->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
       if (was_enabled && !lcdc->display) {
-        e->lcd.cycles = 0;
-        e->lcd.LY = 0;
-        e->lcd.fake_LY = 0;
-        e->lcd.stat.mode = LCD_MODE_VBLANK;
-        DEBUG(video, "Disabling display.\n");
+        e->ppu.cycles = 0;
+        e->ppu.LY = 0;
+        e->ppu.fake_LY = 0;
+        e->ppu.stat.mode = PPU_MODE_VBLANK;
+        DEBUG(ppu, "Disabling display.\n");
       } else if (!was_enabled && lcdc->display) {
-        e->lcd.cycles = 0;
-        e->lcd.LY = 0;
-        e->lcd.stat.mode = LCD_MODE_USING_OAM;
-        DEBUG(video, "Enabling display.\n");
+        e->ppu.cycles = 0;
+        e->ppu.LY = 0;
+        e->ppu.stat.mode = PPU_MODE_USING_OAM;
+        DEBUG(ppu, "Enabling display.\n");
       }
       break;
     }
     case IO_STAT_ADDR:
-      e->lcd.stat.y_compare_intr = WRITE_REG(value, STAT_YCOMPARE_INTR);
-      e->lcd.stat.using_oam_intr = WRITE_REG(value, STAT_USING_OAM_INTR);
-      e->lcd.stat.vblank_intr = WRITE_REG(value, STAT_VBLANK_INTR);
-      e->lcd.stat.hblank_intr = WRITE_REG(value, STAT_HBLANK_INTR);
+      e->ppu.stat.y_compare_intr = WRITE_REG(value, STAT_YCOMPARE_INTR);
+      e->ppu.stat.using_oam_intr = WRITE_REG(value, STAT_USING_OAM_INTR);
+      e->ppu.stat.vblank_intr = WRITE_REG(value, STAT_VBLANK_INTR);
+      e->ppu.stat.hblank_intr = WRITE_REG(value, STAT_HBLANK_INTR);
       check_if_lcd_stat(e);
       break;
     case IO_SCY_ADDR:
-      e->lcd.SCY = value;
+      e->ppu.SCY = value;
       break;
     case IO_SCX_ADDR:
-      e->lcd.SCX = value;
+      e->ppu.SCX = value;
       break;
     case IO_LY_ADDR:
       break;
     case IO_LYC_ADDR:
-      e->lcd.LYC = value;
+      e->ppu.LYC = value;
       check_if_lcd_stat(e);
       break;
     case IO_DMA_ADDR:
@@ -2094,10 +2094,10 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
-      e->lcd.bgp.color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->lcd.bgp.color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->lcd.bgp.color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->lcd.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->ppu.bgp.color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->ppu.bgp.color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->ppu.bgp.color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->ppu.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
       e->oam.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
@@ -2112,10 +2112,10 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->oam.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_WY_ADDR:
-      e->lcd.WY = value;
+      e->ppu.WY = value;
       break;
     case IO_WX_ADDR:
-      e->lcd.WX = value;
+      e->ppu.WX = value;
       break;
     case IO_IE_ADDR:
       e->interrupts.IE = value;
@@ -2126,16 +2126,16 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-#define CHANNEL_INDEX(c) ((c) - e->sound.channel)
+#define CHANNEL_INDEX(c) ((c) - e->apu.channel)
 
 static void write_nrx1_reg(struct Emulator* e,
                            struct Channel* channel,
                            uint8_t value) {
-  if (e->sound.enabled) {
+  if (e->apu.enabled) {
     channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   }
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
-  VERBOSE(sound, "write_nrx1_reg(%zu, 0x%02x) length=%u\n",
+  VERBOSE(apu, "write_nrx1_reg(%zu, 0x%02x) length=%u\n",
           CHANNEL_INDEX(channel), value, channel->length);
 }
 
@@ -2146,16 +2146,16 @@ static void write_nrx2_reg(struct Emulator* e,
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
+    VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
             CHANNEL_INDEX(channel), value);
   }
   if (channel->status) {
-    VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
+    VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
             CHANNEL_INDEX(channel), value);
   }
   channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
-  VERBOSE(sound, "write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
+  VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
           CHANNEL_INDEX(channel), value, channel->envelope.initial_volume);
 }
 
@@ -2180,14 +2180,14 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
    * enabled. */
-  enum Bool next_frame_is_length = (e->sound.frame & 1) == 1;
+  enum Bool next_frame_is_length = (e->apu.frame & 1) == 1;
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG(sound, "%s(%zu, 0x%02x) extra length clock = %u\n", __func__,
+    DEBUG(apu, "%s(%zu, 0x%02x) extra length clock = %u\n", __func__,
           CHANNEL_INDEX(channel), value, channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG(sound, "%s(%zu, 0x%02x) disabling channel.\n", __func__,
+      DEBUG(apu, "%s(%zu, 0x%02x) disabling channel.\n", __func__,
             CHANNEL_INDEX(channel), value);
       channel->status = FALSE;
     }
@@ -2199,7 +2199,7 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG(sound, "%s(%zu, 0x%02x) trigger, new length = %u\n", __func__,
+      DEBUG(apu, "%s(%zu, 0x%02x) trigger, new length = %u\n", __func__,
             CHANNEL_INDEX(channel), value, channel->length);
     }
     if (channel->dac_enabled) {
@@ -2207,7 +2207,7 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
     }
   }
 
-  VERBOSE(sound, "write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
+  VERBOSE(apu, "write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
           CHANNEL_INDEX(channel), value, trigger, channel->length_enabled);
   return trigger;
 }
@@ -2218,10 +2218,10 @@ static void trigger_nrx4_envelope(struct Emulator* e,
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = envelope->period != 0;
   /* If the next APU frame will update the envelope, increment the timer. */
-  if (e->sound.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
+  if (e->apu.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
   }
-  DEBUG(sound, "%s: volume=%u, timer=%u\n", __func__, envelope->volume,
+  DEBUG(apu, "%s: volume=%u, timer=%u\n", __func__, envelope->volume,
         envelope->timer);
 }
 
@@ -2244,9 +2244,9 @@ static void trigger_nr14_reg(struct Emulator* e,
   sweep->calculated_subtract = FALSE;
   if (sweep->shift && calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
     channel->status = FALSE;
-    DEBUG(sound, "%s: disabling, sweep overflow.\n", __func__);
+    DEBUG(apu, "%s: disabling, sweep overflow.\n", __func__);
   } else {
-    DEBUG(sound, "%s: sweep frequency=%u\n", __func__, sweep->frequency);
+    DEBUG(apu, "%s: sweep frequency=%u\n", __func__, sweep->frequency);
   }
 }
 
@@ -2272,9 +2272,9 @@ static void trigger_nr34_reg(struct Emulator* e,
           memcpy(&wave->ram[0], &wave->ram[(sample->position >> 1) & 12], 4);
           break;
       }
-      DEBUG(sound, "%s: corrupting wave ram. (cy: %u)\n", __func__, e->cycles);
+      DEBUG(apu, "%s: corrupting wave ram. (cy: %u)\n", __func__, e->cycles);
     } else {
-      DEBUG(sound, "%s: ignoring write (cy: %u)\n", __func__, e->cycles);
+      DEBUG(apu, "%s: ignoring write (cy: %u)\n", __func__, e->cycles);
     }
   }
   wave->playing = TRUE;
@@ -2290,14 +2290,14 @@ static void write_wave_period(struct Emulator* e,
                               struct Channel* channel,
                               struct Wave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
-  DEBUG(sound, "%s: freq: %u cycle: %u period: %u\n", __func__,
+  DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
 static void write_square_wave_period(struct Channel* channel,
                                      struct SquareWave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
-  DEBUG(sound, "%s: freq: %u cycle: %u period: %u\n", __func__,
+  DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
@@ -2307,12 +2307,12 @@ static void write_noise_period(struct Channel* channel, struct Noise* noise) {
   uint8_t divisor = s_divisors[noise->divisor];
   assert(noise->divisor < NOISE_DIVISOR_COUNT);
   noise->period = divisor << noise->clock_shift;
-  DEBUG(sound, "%s: divisor: %u clock shift: %u period: %u\n", __func__,
+  DEBUG(apu, "%s: divisor: %u clock shift: %u period: %u\n", __func__,
         divisor, noise->clock_shift, noise->period);
 }
 
 static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (!e->sound.enabled) {
+  if (!e->apu.enabled) {
     if (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
         addr == APU_NR31_ADDR || addr == APU_NR41_ADDR) {
       /* DMG allows writes to the length counters when power is disabled. */
@@ -2320,22 +2320,22 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       /* Always can write to NR52; it's necessary to re-enable power. */
     } else {
       /* Ignore all other writes. */
-      DEBUG(sound, "%s(0x%04x [%s], 0x%02x) ignored.\n", __func__, addr,
+      DEBUG(apu, "%s(0x%04x [%s], 0x%02x) ignored.\n", __func__, addr,
             get_apu_reg_string(addr), value);
       return;
     }
   }
 
-  struct Sound* sound = &e->sound;
-  struct Channel* channel1 = &sound->channel[CHANNEL1];
-  struct Channel* channel2 = &sound->channel[CHANNEL2];
-  struct Channel* channel3 = &sound->channel[CHANNEL3];
-  struct Channel* channel4 = &sound->channel[CHANNEL4];
-  struct Sweep* sweep = &sound->sweep;
-  struct Wave* wave = &sound->wave;
-  struct Noise* noise = &sound->noise;
+  struct APU* apu = &e->apu;
+  struct Channel* channel1 = &apu->channel[CHANNEL1];
+  struct Channel* channel2 = &apu->channel[CHANNEL2];
+  struct Channel* channel3 = &apu->channel[CHANNEL3];
+  struct Channel* channel4 = &apu->channel[CHANNEL4];
+  struct Sweep* sweep = &apu->sweep;
+  struct Wave* wave = &apu->wave;
+  struct Noise* noise = &apu->noise;
 
-  DEBUG(sound, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
+  DEBUG(apu, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_apu_reg_string(addr), value);
   switch (addr) {
     case APU_NR10_ADDR: {
@@ -2435,26 +2435,26 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case APU_NR50_ADDR:
-      sound->so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
-      sound->so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
-      sound->so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
-      sound->so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
+      apu->so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
+      apu->so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
+      apu->so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
+      apu->so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      sound->so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
-      sound->so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
-      sound->so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
-      sound->so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
-      sound->so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
-      sound->so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
-      sound->so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
-      sound->so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
+      apu->so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
+      apu->so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
+      apu->so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
+      apu->so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
+      apu->so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
+      apu->so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
+      apu->so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
+      apu->so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
-      enum Bool was_enabled = sound->enabled;
+      enum Bool was_enabled = apu->enabled;
       enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
-        DEBUG(sound, "Powered down APU. Clearing registers.\n");
+        DEBUG(apu, "Powered down APU. Clearing registers.\n");
         int i;
         for (i = 0; i < APU_REG_COUNT; ++i) {
           switch (i) {
@@ -2466,10 +2466,10 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
           }
         }
       } else if (!was_enabled && is_enabled) {
-        DEBUG(sound, "Powered up APU. Resetting frame and sweep timers.\n");
-        sound->frame = 7;
+        DEBUG(apu, "Powered up APU. Resetting frame and sweep timers.\n");
+        apu->frame = 7;
       }
-      sound->enabled = is_enabled;
+      apu->enabled = is_enabled;
       break;
     }
   }
@@ -2478,20 +2478,20 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 static void write_wave_ram(struct Emulator* e,
                            MaskedAddress addr,
                            uint8_t value) {
-  struct Wave* wave = &e->sound.wave;
-  if (e->sound.channel[CHANNEL3].status) {
+  struct Wave* wave = &e->apu.wave;
+  if (e->apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
     struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       wave->ram[sample->position >> 1] = value;
-      DEBUG(sound, "%s(0x%02x, 0x%02x) while playing.\n", __func__,
+      DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__,
             addr, value);
     }
   } else {
-    e->sound.wave.ram[addr] = value;
-    DEBUG(sound, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
+    e->apu.wave.ram[addr] = value;
+    DEBUG(apu, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
   }
 }
 
@@ -2584,16 +2584,16 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
     line_data[sx] = RGBA_WHITE;
   }
 
-  if (!e->lcd.lcdc.display) {
+  if (!e->ppu.lcdc.display) {
     return;
   }
 
-  if (e->lcd.lcdc.bg_display && !e->config.disable_bg) {
-    TileMap* map = get_tile_map(e, e->lcd.lcdc.bg_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
-    struct Palette* palette = &e->lcd.bgp;
-    uint8_t bg_y = line_y + e->lcd.SCY;
-    uint8_t bg_x = e->lcd.SCX;
+  if (e->ppu.lcdc.bg_display && !e->config.disable_bg) {
+    TileMap* map = get_tile_map(e, e->ppu.lcdc.bg_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
+    struct Palette* palette = &e->ppu.bgp;
+    uint8_t bg_y = line_y + e->ppu.SCY;
+    uint8_t bg_x = e->ppu.SCX;
     int sx;
     for (sx = 0; sx < SCREEN_WIDTH; ++sx, ++bg_x) {
       uint8_t palette_index =
@@ -2603,31 +2603,31 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
     }
   }
 
-  if (e->lcd.lcdc.window_display && e->lcd.WX <= WINDOW_MAX_X &&
-      line_y >= e->lcd.frame_WY && !e->config.disable_window) {
-    TileMap* map = get_tile_map(e, e->lcd.lcdc.window_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->lcd.lcdc.bg_tile_data_select);
-    struct Palette* palette = &e->lcd.bgp;
+  if (e->ppu.lcdc.window_display && e->ppu.WX <= WINDOW_MAX_X &&
+      line_y >= e->ppu.frame_WY && !e->config.disable_window) {
+    TileMap* map = get_tile_map(e, e->ppu.lcdc.window_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
+    struct Palette* palette = &e->ppu.bgp;
     uint8_t win_x = 0;
     int sx = 0;
-    if (e->lcd.WX < WINDOW_X_OFFSET) {
+    if (e->ppu.WX < WINDOW_X_OFFSET) {
       /* Start at the leftmost screen X, but skip N pixels of the window. */
-      win_x = WINDOW_X_OFFSET - e->lcd.WX;
+      win_x = WINDOW_X_OFFSET - e->ppu.WX;
     } else {
       /* Start N pixels right of the left of the screen. */
-      sx += e->lcd.WX - WINDOW_X_OFFSET;
+      sx += e->ppu.WX - WINDOW_X_OFFSET;
     }
     for (; sx < SCREEN_WIDTH; ++sx, ++win_x) {
       uint8_t palette_index =
-          get_tile_map_palette_index(map, tiles, win_x, e->lcd.win_y);
+          get_tile_map_palette_index(map, tiles, win_x, e->ppu.win_y);
       bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
       line_data[sx] = get_palette_index_rgba(palette_index, palette);
     }
-    e->lcd.win_y++;
+    e->ppu.win_y++;
   }
 
-  if (e->lcd.lcdc.obj_display && !e->config.disable_obj) {
-    uint8_t obj_height = s_obj_size_to_height[e->lcd.lcdc.obj_size];
+  if (e->ppu.lcdc.obj_display && !e->config.disable_obj) {
+    uint8_t obj_height = s_obj_size_to_height[e->ppu.lcdc.obj_size];
     struct Obj line_objs[OBJ_PER_LINE_COUNT];
     int n;
     int dst = 0;
@@ -2723,49 +2723,49 @@ static void update_dma_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
-static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
-  struct LCD* lcd = &e->lcd;
-  lcd->cycles += cycles;
+static void update_ppu_cycles(struct Emulator* e, uint8_t cycles) {
+  struct PPU* ppu = &e->ppu;
+  ppu->cycles += cycles;
   enum Bool new_line_edge = FALSE;
 
-  if (lcd->lcdc.display) {
-    switch (lcd->stat.mode) {
-      case LCD_MODE_USING_OAM:
-        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_CYCLES)) {
-          render_line(e, lcd->LY);
-          lcd->stat.mode = LCD_MODE_USING_OAM_VRAM;
+  if (ppu->lcdc.display) {
+    switch (ppu->stat.mode) {
+      case PPU_MODE_USING_OAM:
+        if (VALUE_WRAPPED(ppu->cycles, USING_OAM_CYCLES)) {
+          render_line(e, ppu->LY);
+          ppu->stat.mode = PPU_MODE_USING_OAM_VRAM;
         }
         break;
-      case LCD_MODE_USING_OAM_VRAM:
-        if (VALUE_WRAPPED(lcd->cycles, USING_OAM_VRAM_CYCLES)) {
-          lcd->stat.mode = LCD_MODE_HBLANK;
+      case PPU_MODE_USING_OAM_VRAM:
+        if (VALUE_WRAPPED(ppu->cycles, USING_OAM_VRAM_CYCLES)) {
+          ppu->stat.mode = PPU_MODE_HBLANK;
           check_if_lcd_stat(e);
         }
         break;
-      case LCD_MODE_HBLANK:
-        if (VALUE_WRAPPED(lcd->cycles, HBLANK_CYCLES)) {
-          lcd->LY++;
+      case PPU_MODE_HBLANK:
+        if (VALUE_WRAPPED(ppu->cycles, HBLANK_CYCLES)) {
+          ppu->LY++;
           new_line_edge = TRUE;
-          if (lcd->LY == SCREEN_HEIGHT) {
-            lcd->stat.mode = LCD_MODE_VBLANK;
+          if (ppu->LY == SCREEN_HEIGHT) {
+            ppu->stat.mode = PPU_MODE_VBLANK;
             e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
             check_if_lcd_stat(e);
           } else {
-            lcd->stat.mode = LCD_MODE_USING_OAM;
+            ppu->stat.mode = PPU_MODE_USING_OAM;
             check_if_lcd_stat(e);
           }
         }
         break;
-      case LCD_MODE_VBLANK:
-        if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-          lcd->LY++;
+      case PPU_MODE_VBLANK:
+        if (VALUE_WRAPPED(ppu->cycles, LINE_CYCLES)) {
+          ppu->LY++;
           new_line_edge = TRUE;
-          if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
-            lcd->win_y = 0;
-            lcd->frame_WY = lcd->WY;
-            lcd->frame++;
-            lcd->new_frame_edge = TRUE;
-            lcd->stat.mode = LCD_MODE_USING_OAM;
+          if (VALUE_WRAPPED(ppu->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+            ppu->win_y = 0;
+            ppu->frame_WY = ppu->WY;
+            ppu->frame++;
+            ppu->new_frame_edge = TRUE;
+            ppu->stat.mode = PPU_MODE_USING_OAM;
             check_if_lcd_stat(e);
           }
         }
@@ -2775,14 +2775,14 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       check_if_lcd_stat(e);
     }
   } else {
-    if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-      lcd->fake_LY++;
-      if (VALUE_WRAPPED(lcd->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
-        lcd->new_frame_edge = TRUE;
-        lcd->frame++;
+    if (VALUE_WRAPPED(ppu->cycles, LINE_CYCLES)) {
+      ppu->fake_LY++;
+      if (VALUE_WRAPPED(ppu->fake_LY, SCREEN_HEIGHT_WITH_VBLANK)) {
+        ppu->new_frame_edge = TRUE;
+        ppu->frame++;
       }
-      if (lcd->fake_LY < SCREEN_HEIGHT) {
-        render_line(e, lcd->fake_LY);
+      if (ppu->fake_LY < SCREEN_HEIGHT) {
+        render_line(e, ppu->fake_LY);
       }
     }
   }
@@ -2812,18 +2812,18 @@ static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
       sweep->timer = period;
       uint16_t new_frequency = calculate_sweep_frequency(sweep);
       if (new_frequency > SOUND_MAX_FREQUENCY) {
-        DEBUG(sound, "%s: disabling from sweep overflow\n", __func__);
+        DEBUG(apu, "%s: disabling from sweep overflow\n", __func__);
         channel->status = FALSE;
       } else {
         if (sweep->shift) {
-          DEBUG(sound, "%s: updated frequency=%u\n", __func__, new_frequency);
+          DEBUG(apu, "%s: updated frequency=%u\n", __func__, new_frequency);
           sweep->frequency = channel->frequency = new_frequency;
           write_square_wave_period(channel, &channel->square_wave);
         }
 
         /* Perform another overflow check */
         if (calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
-          DEBUG(sound, "%s: disabling from 2nd sweep overflow\n", __func__);
+          DEBUG(apu, "%s: disabling from 2nd sweep overflow\n", __func__);
           channel->status = FALSE;
         }
       }
@@ -2885,13 +2885,13 @@ static void update_channel_envelope(struct Emulator* e,
   }
 }
 
-static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
+static uint8_t update_wave(struct APU* apu, struct Wave* wave) {
   if (wave->cycles <= APU_CYCLES) {
     wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
     struct WaveSample sample;
-    sample.time = sound->cycles + wave->cycles;
+    sample.time = apu->cycles + wave->cycles;
     sample.position = wave->position;
     sample.byte = wave->ram[wave->position >> 1];
     if ((wave->position & 1) == 0) {
@@ -2901,14 +2901,14 @@ static uint8_t update_wave(struct Sound* sound, struct Wave* wave) {
     }
     wave->sample[1] = wave->sample[0];
     wave->sample[0] = sample;
-    VERBOSE(sound, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
+    VERBOSE(apu, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
             sample.data, sample.time);
   }
   wave->cycles -= APU_CYCLES;
   return wave->sample[0].data;
 }
 
-static uint8_t update_noise(struct Sound* sound, struct Noise* noise) {
+static uint8_t update_noise(struct APU* apu, struct Noise* noise) {
   if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT &&
       noise->cycles <= APU_CYCLES) {
     noise->cycles += noise->period;
@@ -2943,45 +2943,45 @@ static uint16_t channel3_sample(struct Channel* channel,
   return (sample >> shift[wave->volume]) << 12;
 }
 
-static void write_sample(struct Sound* sound, uint16_t so1, uint16_t so2) {
-  struct SoundBuffer* buffer = sound->buffer;
+static void write_sample(struct APU* apu, uint16_t so1, uint16_t so2) {
+  struct AudioBuffer* buffer = apu->buffer;
   assert(buffer->position + 2 <= buffer->end);
   *buffer->position++ = so1;
   *buffer->position++ = so2;
 }
 
-static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
-  struct Sound* sound = &e->sound;
+static void update_apu_cycles(struct Emulator* e, uint8_t cycles) {
+  struct APU* apu = &e->apu;
   uint8_t i;
-  if (!sound->enabled) {
+  if (!apu->enabled) {
     for (i = 0; i < cycles; i += APU_CYCLES) {
-      write_sample(sound, 0, 0);
+      write_sample(apu, 0, 0);
     }
     return;
   }
 
-  struct Channel* channel1 = &sound->channel[CHANNEL1];
-  struct Channel* channel2 = &sound->channel[CHANNEL2];
-  struct Channel* channel3 = &sound->channel[CHANNEL3];
-  struct Channel* channel4 = &sound->channel[CHANNEL4];
-  struct Sweep* sweep = &sound->sweep;
-  struct Wave* wave = &sound->wave;
-  struct Noise* noise = &sound->noise;
+  struct Channel* channel1 = &apu->channel[CHANNEL1];
+  struct Channel* channel2 = &apu->channel[CHANNEL2];
+  struct Channel* channel3 = &apu->channel[CHANNEL3];
+  struct Channel* channel4 = &apu->channel[CHANNEL4];
+  struct Sweep* sweep = &apu->sweep;
+  struct Wave* wave = &apu->wave;
+  struct Noise* noise = &apu->noise;
 
   /* Synchronize with CPU cycle counter. */
-  sound->cycles = e->cycles;
+  apu->cycles = e->cycles;
 
   for (i = 0; i < cycles; i += APU_CYCLES) {
     enum Bool do_length = FALSE;
     enum Bool do_envelope = FALSE;
     enum Bool do_sweep = FALSE;
-    sound->cycles += APU_CYCLES;
-    sound->frame_cycles += APU_CYCLES;
-    if (VALUE_WRAPPED(sound->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
-      sound->frame++;
-      VALUE_WRAPPED(sound->frame, FRAME_SEQUENCER_COUNT);
+    apu->cycles += APU_CYCLES;
+    apu->frame_cycles += APU_CYCLES;
+    if (VALUE_WRAPPED(apu->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
+      apu->frame++;
+      VALUE_WRAPPED(apu->frame, FRAME_SEQUENCER_COUNT);
 
-      switch (sound->frame) {
+      switch (apu->frame) {
         case 0: do_length = TRUE; break;
         case 1: break;
         case 2: do_length = do_sweep = TRUE; break;
@@ -2992,9 +2992,9 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
         case 7: do_envelope = TRUE; break;
       }
 
-      VERBOSE(sound, "update_sound_cycles: %c%c%c frame: %u cy: %u\n",
+      VERBOSE(apu, "%s: %c%c%c frame: %u cy: %u\n", __func__,
               do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-              do_sweep ? 'S' : '.', sound->frame, e->cycles + i);
+              do_sweep ? 'S' : '.', apu->frame, e->cycles + i);
     }
 
     uint16_t sample = 0;
@@ -3011,10 +3011,10 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
       if (do_envelope) update_channel_envelope(e, channel1);
       if (!e->config.disable_sound[CHANNEL1]) {
         sample = channelx_sample(channel1, sample);
-        if (sound->so1_output[CHANNEL1]) {
+        if (apu->so1_output[CHANNEL1]) {
           so1_mixed_sample += sample;
         }
-        if (sound->so2_output[CHANNEL1]) {
+        if (apu->so2_output[CHANNEL1]) {
           so2_mixed_sample += sample;
         }
       }
@@ -3029,10 +3029,10 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
       if (do_envelope) update_channel_envelope(e, channel2);
       sample = channelx_sample(channel2, sample);
       if (!e->config.disable_sound[CHANNEL2]) {
-        if (sound->so1_output[CHANNEL2]) {
+        if (apu->so1_output[CHANNEL2]) {
           so1_mixed_sample += sample;
         }
-        if (sound->so2_output[CHANNEL2]) {
+        if (apu->so2_output[CHANNEL2]) {
           so2_mixed_sample += sample;
         }
       }
@@ -3040,16 +3040,16 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
 
     /* Channel 3 */
     if (channel3->status) {
-      sample = update_wave(sound, wave);
+      sample = update_wave(apu, wave);
     }
     if (do_length) update_channel_length(channel3);
     if (channel3->status) {
       sample = channel3_sample(channel3, wave, sample);
       if (!e->config.disable_sound[CHANNEL3]) {
-        if (sound->so1_output[CHANNEL3]) {
+        if (apu->so1_output[CHANNEL3]) {
           so1_mixed_sample += sample;
         }
-        if (sound->so2_output[CHANNEL3]) {
+        if (apu->so2_output[CHANNEL3]) {
           so2_mixed_sample += sample;
         }
       }
@@ -3058,24 +3058,24 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
     /* Channel 4 */
     if (do_length) update_channel_length(channel4);
     if (channel4->status) {
-      sample = update_noise(sound, noise);
+      sample = update_noise(apu, noise);
       if (do_envelope) update_channel_envelope(e, channel4);
       sample = channelx_sample(channel4, sample);
       if (!e->config.disable_sound[CHANNEL4]) {
-        if (sound->so1_output[CHANNEL4]) {
+        if (apu->so1_output[CHANNEL4]) {
           so1_mixed_sample += sample;
         }
-        if (sound->so2_output[CHANNEL4]) {
+        if (apu->so2_output[CHANNEL4]) {
           so2_mixed_sample += sample;
         }
       }
     }
 
-    so1_mixed_sample *= (sound->so1_volume + 1);
+    so1_mixed_sample *= (apu->so1_volume + 1);
     so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    so2_mixed_sample *= (sound->so2_volume + 1);
+    so2_mixed_sample *= (apu->so2_volume + 1);
     so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    write_sample(sound, so1_mixed_sample, so2_mixed_sample);
+    write_sample(apu, so1_mixed_sample, so2_mixed_sample);
   }
 }
 
@@ -3099,9 +3099,9 @@ static void update_serial_cycles(struct Emulator* e, uint8_t cycles) {
 
 static void update_cycles(struct Emulator* e, uint8_t cycles) {
   update_dma_cycles(e, cycles);
-  update_lcd_cycles(e, cycles);
+  update_ppu_cycles(e, cycles);
   update_timer_cycles(e, cycles);
-  update_sound_cycles(e, cycles);
+  update_apu_cycles(e, cycles);
   update_serial_cycles(e, cycles);
   e->cycles += cycles;
 }
@@ -3284,8 +3284,8 @@ static void print_registers(struct Registers* reg) {
 static void print_emulator_info(struct Emulator* e) {
   if (s_trace && !e->interrupts.halt) {
     print_registers(&e->reg);
-    printf(" (cy: %u) lcd:%c%u | ", e->cycles, e->lcd.lcdc.display ? '+' : '-',
-           e->lcd.stat.mode);
+    printf(" (cy: %u) ppu:%c%u | ", e->cycles, e->ppu.lcdc.display ? '+' : '-',
+           e->ppu.stat.mode);
     print_instruction(e, e->reg.PC);
     printf("\n");
     if (s_trace_counter > 0) {
@@ -4098,15 +4098,15 @@ static void handle_interrupts(struct Emulator* e) {
   uint8_t mask = 0;
   Address vector;
   if (interrupts & INTERRUPT_VBLANK_MASK) {
-    DEBUG(interrupt, ">> VBLANK interrupt [frame = %u]\n", e->lcd.frame);
+    DEBUG(interrupt, ">> VBLANK interrupt [frame = %u]\n", e->ppu.frame);
     vector = 0x40;
     mask = INTERRUPT_VBLANK_MASK;
   } else if (interrupts & INTERRUPT_LCD_STAT_MASK) {
     DEBUG(interrupt, ">> LCD_STAT interrupt [%c%c%c%c]\n",
-          e->lcd.stat.y_compare_intr ? 'Y' : '.',
-          e->lcd.stat.using_oam_intr ? 'O' : '.',
-          e->lcd.stat.vblank_intr ? 'V' : '.',
-          e->lcd.stat.hblank_intr ? 'H' : '.');
+          e->ppu.stat.y_compare_intr ? 'Y' : '.',
+          e->ppu.stat.using_oam_intr ? 'O' : '.',
+          e->ppu.stat.vblank_intr ? 'V' : '.',
+          e->ppu.stat.hblank_intr ? 'H' : '.');
     vector = 0x48;
     mask = INTERRUPT_LCD_STAT_MASK;
   } else if (interrupts & INTERRUPT_TIMER_MASK) {
@@ -4148,32 +4148,32 @@ static void step_emulator(struct Emulator* e) {
 typedef uint32_t EmulatorEvent;
 enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
-  EMULATOR_EVENT_SOUND_BUFFER_FULL = 0x2,
+  EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
 };
 
 static EmulatorEvent run_emulator_until_event(struct Emulator* e,
                                               EmulatorEvent last_event,
                                               uint32_t requested_samples) {
   if (last_event & EMULATOR_EVENT_NEW_FRAME) {
-    e->lcd.new_frame_edge = FALSE;
+    e->ppu.new_frame_edge = FALSE;
   }
-  if (last_event & EMULATOR_EVENT_SOUND_BUFFER_FULL) {
-    e->sound.buffer->position = e->sound.buffer->data;
+  if (last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+    e->apu.buffer->position = e->apu.buffer->data;
   }
 
-  struct SoundBuffer* buffer = e->sound.buffer;
+  struct AudioBuffer* buffer = e->apu.buffer;
   assert(requested_samples <= buffer->end - buffer->data);
 
   EmulatorEvent result = 0;
   enum Bool running = TRUE;
   while (running) {
-    if (e->lcd.new_frame_edge) {
+    if (e->ppu.new_frame_edge) {
       result |= EMULATOR_EVENT_NEW_FRAME;
       running = FALSE;
     }
     size_t samples = buffer->position - buffer->data;
     if (samples >= requested_samples) {
-      result |= EMULATOR_EVENT_SOUND_BUFFER_FULL;
+      result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
       running = FALSE;
     }
     step_emulator(e);
@@ -4233,7 +4233,7 @@ static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
   struct SDLAudio* audio = &sdl->audio;
   int underflow_left = 0;
   if (len > (int)audio->buffer_size) {
-    INFO(sound, "sound buffer underflow. requested %u > avail %zd\n", len,
+    INFO(apu, "audio buffer underflow. requested %u > avail %zd\n", len,
          audio->buffer_size);
     underflow_left = len - audio->buffer_size;
     len = audio->buffer_size;
@@ -4295,11 +4295,11 @@ static enum Result sdl_init_audio(struct SDL* sdl) {
   };
   CHECK_MSG(SDL_OpenAudio(&desired_spec, &sdl->audio.spec) == 0,
             "SDL_OpenAudio failed.\n");
-  INFO(sound, "SDL frequency = %u\n", sdl->audio.spec.freq);
-  INFO(sound, "SDL format = %s\n",
+  INFO(apu, "SDL frequency = %u\n", sdl->audio.spec.freq);
+  INFO(apu, "SDL format = %s\n",
        get_sdl_audio_format_string(sdl->audio.spec.format));
-  INFO(sound, "SDL channels = %u\n", sdl->audio.spec.channels);
-  INFO(sound, "SDL samples = %u\n", sdl->audio.spec.samples);
+  INFO(apu, "SDL channels = %u\n", sdl->audio.spec.channels);
+  INFO(apu, "SDL samples = %u\n", sdl->audio.spec.samples);
   CHECK_MSG(sdl->audio.spec.channels == AUDIO_DESIRED_CHANNELS,
             "Expcted 2 channels.\n");
 
@@ -4327,15 +4327,15 @@ static uint32_t get_gb_channel_samples(struct SDL* sdl) {
          SOUND_OUTPUT_COUNT;
 }
 
-static enum Result sdl_init_sound_buffer(struct SDL* sdl,
-                                         struct SoundBuffer* sound_buffer) {
+static enum Result sdl_init_audio_buffer(struct SDL* sdl,
+                                         struct AudioBuffer* audio_buffer) {
   uint32_t gb_channel_samples =
-      get_gb_channel_samples(sdl) + SOUND_BUFFER_EXTRA_CHANNEL_SAMPLES;
-  size_t buffer_size = gb_channel_samples * sizeof(sound_buffer->data[0]);
-  sound_buffer->data = malloc(buffer_size);
-  CHECK_MSG(sound_buffer->data != NULL, "Sound buffer allocation failed.\n");
-  sound_buffer->end = sound_buffer->data + gb_channel_samples;
-  sound_buffer->position = sound_buffer->data;
+      get_gb_channel_samples(sdl) + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
+  size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
+  audio_buffer->data = malloc(buffer_size);
+  CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
+  audio_buffer->end = audio_buffer->data + gb_channel_samples;
+  audio_buffer->position = audio_buffer->data;
   return OK;
 error:
   return ERROR;
@@ -4475,8 +4475,8 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   ZERO_MEMORY(accumulator);
   uint32_t divisor = 0;
 
-  uint16_t* src = e->sound.buffer->data;
-  uint16_t* src_end = e->sound.buffer->position;
+  uint16_t* src = e->apu.buffer->data;
+  uint16_t* src_end = e->apu.buffer->position;
   union SDLBufferPointer dst_buf = audio->buffer;
   union SDLBufferPointer dst_buf_end = audio->buffer_end;
   union SDLBufferPointer* dst = &audio->write_pos;
@@ -4511,7 +4511,7 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   SDL_UnlockAudio();
 
   if (overflow) {
-    INFO(sound, "sound buffer overflow (old size = %zu).\n", old_buffer_size);
+    INFO(apu, "Audio buffer overflow (old size = %zu).\n", old_buffer_size);
   }
   if (!audio->ready) {
     /* TODO this should wait until the buffer has enough data for a few
@@ -4579,12 +4579,12 @@ int main(int argc, char** argv) {
   struct Emulator emulator;
   struct Emulator* e = &emulator;
   struct SDL sdl;
-  struct SoundBuffer sound_buffer;
+  struct AudioBuffer audio_buffer;
 
   ZERO_MEMORY(rom_data);
   ZERO_MEMORY(emulator);
   ZERO_MEMORY(sdl);
-  ZERO_MEMORY(sound_buffer);
+  ZERO_MEMORY(audio_buffer);
 
   CHECK_MSG(argc == 1, "no rom file given.\n");
   const char* rom_filename = argv[0];
@@ -4596,10 +4596,10 @@ int main(int argc, char** argv) {
 
   CHECK(SUCCESS(sdl_init_video(&sdl)));
   CHECK(SUCCESS(sdl_init_audio(&sdl)));
-  CHECK(SUCCESS(sdl_init_sound_buffer(&sdl, &sound_buffer)));
+  CHECK(SUCCESS(sdl_init_audio_buffer(&sdl, &audio_buffer)));
   uint32_t requested_samples = get_gb_channel_samples(&sdl);
 
-  CHECK(SUCCESS(init_emulator(e, &rom_data, &sound_buffer)));
+  CHECK(SUCCESS(init_emulator(e, &rom_data, &audio_buffer)));
   read_external_ram_from_file(e, save_filename);
 
   EmulatorEvent event = 0;
@@ -4612,7 +4612,7 @@ int main(int argc, char** argv) {
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       sdl_render_surface(&sdl, e);
     }
-    if (event & EMULATOR_EVENT_SOUND_BUFFER_FULL) {
+    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
       sdl_render_audio(&sdl, e);
 
 #if FRAME_LIMITER
