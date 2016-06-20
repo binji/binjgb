@@ -3504,12 +3504,17 @@ static void execute_instruction(struct Emulator* e) {
     return;
   }
 
-  opcode = read_u8_cy(e, e->reg.PC);
   if (INTR(halt_DI)) {
+    /* When execution continues after the interrupt occurs, there are no
+     * additional cycles spent reading the opcode (perhaps because it has
+     * already been fetched?) */
+    opcode = read_u8(e, e->reg.PC);
     /* HALT bug. When interrupts are disabled during a HALT, the following byte
      * will be duplicated when decoding. */
     e->reg.PC--;
     INTR(halt_DI) = FALSE;
+  } else {
+    opcode = read_u8_cy(e, e->reg.PC);
   }
   new_pc = e->reg.PC + s_opcode_bytes[opcode];
 
