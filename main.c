@@ -825,6 +825,7 @@ struct Interrupts {
   enum Bool enable;  /* Set after EI instruction. This delays updating IME. */
   enum Bool halt;    /* Halted, waiting for an interrupt. */
   enum Bool halt_DI; /* Halted w/ disabled interrupts. */
+  enum Bool if_lcd_stat; /* Internal interrupt flag for LCD STAT. */
 };
 
 struct Timer {
@@ -1975,6 +1976,18 @@ static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
   e->timer.div_counter = div_counter;
 }
 
+static void check_if_lcd_stat(struct Emulator* e) {
+  enum Bool set =
+      (e->lcd.stat.hblank_intr && e->lcd.stat.mode == LCD_MODE_HBLANK) ||
+      (e->lcd.stat.vblank_intr && e->lcd.stat.mode == LCD_MODE_VBLANK) ||
+      (e->lcd.stat.using_oam_intr && e->lcd.stat.mode == LCD_MODE_USING_OAM) ||
+      (e->lcd.stat.y_compare_intr && e->lcd.LY == e->lcd.LYC);
+  if (!e->interrupts.if_lcd_stat && set) {
+    e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+  }
+  e->interrupts.if_lcd_stat = set;
+}
+
 static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG(io, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_io_reg_string(addr), value);
@@ -2059,6 +2072,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->lcd.stat.using_oam_intr = WRITE_REG(value, STAT_USING_OAM_INTR);
       e->lcd.stat.vblank_intr = WRITE_REG(value, STAT_VBLANK_INTR);
       e->lcd.stat.hblank_intr = WRITE_REG(value, STAT_HBLANK_INTR);
+      check_if_lcd_stat(e);
       break;
     case IO_SCY_ADDR:
       e->lcd.SCY = value;
@@ -2070,6 +2084,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_LYC_ADDR:
       e->lcd.LYC = value;
+      check_if_lcd_stat(e);
       break;
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
@@ -2724,9 +2739,7 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
       case LCD_MODE_USING_OAM_VRAM:
         if (VALUE_WRAPPED(lcd->cycles, USING_OAM_VRAM_CYCLES)) {
           lcd->stat.mode = LCD_MODE_HBLANK;
-          if (lcd->stat.hblank_intr) {
-            e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-          }
+          check_if_lcd_stat(e);
         }
         break;
       case LCD_MODE_HBLANK:
@@ -2736,37 +2749,30 @@ static void update_lcd_cycles(struct Emulator* e, uint8_t cycles) {
           if (lcd->LY == SCREEN_HEIGHT) {
             lcd->stat.mode = LCD_MODE_VBLANK;
             e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
-            if (lcd->stat.vblank_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
+            check_if_lcd_stat(e);
           } else {
             lcd->stat.mode = LCD_MODE_USING_OAM;
-            if (lcd->stat.using_oam_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
+            check_if_lcd_stat(e);
           }
         }
         break;
       case LCD_MODE_VBLANK:
         if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
-          new_line_edge = TRUE;
           lcd->LY++;
+          new_line_edge = TRUE;
           if (VALUE_WRAPPED(lcd->LY, SCREEN_HEIGHT_WITH_VBLANK)) {
             lcd->win_y = 0;
             lcd->frame_WY = lcd->WY;
             lcd->frame++;
             lcd->new_frame_edge = TRUE;
-            new_line_edge = TRUE;
             lcd->stat.mode = LCD_MODE_USING_OAM;
-            if (lcd->stat.using_oam_intr) {
-              e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-            }
+            check_if_lcd_stat(e);
           }
         }
         break;
     }
-    if (new_line_edge && lcd->stat.y_compare_intr && lcd->LY == lcd->LYC) {
-      e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+    if (new_line_edge) {
+      check_if_lcd_stat(e);
     }
   } else {
     if (VALUE_WRAPPED(lcd->cycles, LINE_CYCLES)) {
