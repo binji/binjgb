@@ -103,5 +103,5 @@ Keys:
 | acceptance/timer/tima\_reload | :ok: |
 | acceptance/timer/tima\_write\_reloading | :x: |
 | acceptance/timer/tma\_write\_reloading | :x: |
-| emulator-only/mbc1\_rom\_4banks | :x: |
+| emulator-only/mbc1\_rom\_4banks | :ok: |
 | manual-only/sprite\_priority | :ok: |

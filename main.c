@@ -708,7 +708,7 @@ struct RomInfo {
   enum SgbFlag sgb_flag;
   enum CartridgeType cartridge_type;
   enum RomSize rom_size;
-  uint32_t rom_banks;
+  uint8_t rom_bank_count;
   enum RamSize ram_size;
   uint8_t header_checksum;
   uint16_t global_checksum;
@@ -725,6 +725,7 @@ struct MBC1 {
 };
 
 struct MemoryMap {
+  uint8_t rom_bank_count;
   uint8_t rom_bank;
   uint8_t ext_ram_bank;
   enum Bool ext_ram_enabled;
@@ -1103,7 +1104,7 @@ static enum Result get_rom_info(struct RomData* rom_data,
             "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
             rom_data->size);
 
-  rom_info.rom_banks = get_rom_bank_count(rom_info.rom_size);
+  rom_info.rom_bank_count = get_rom_bank_count(rom_info.rom_size);
 
   get_rom_title(rom_data, &rom_info.title);
   rom_info.cgb_flag = ROM_U8(enum CgbFlag, CGB_FLAG_ADDR);
@@ -1192,6 +1193,9 @@ static void mbc1_write_rom(struct Emulator* e,
   } else {
     memory_map->ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
   }
+
+  /* rom_bank_count is usually a power-of-two, but not always. */
+  memory_map->rom_bank %= memory_map->rom_bank_count;
 
   VERBOSE(memory,
           "mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
@@ -1319,6 +1323,7 @@ static enum Result init_memory_map(struct Emulator* e,
   struct MemoryMap* memory_map = &e->memory_map;
   ZERO_MEMORY(*memory_map);
   memory_map->rom_bank = 1;
+  memory_map->rom_bank_count = rom_info->rom_bank_count;
   memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
   memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
 
@@ -1821,13 +1826,8 @@ static uint8_t read_u8_no_dma_check(struct Emulator* e,
     case MEMORY_MAP_ROM_BANK_SWITCH: {
       uint8_t rom_bank = e->memory_map.rom_bank;
       uint32_t rom_addr = (rom_bank << ROM_BANK_SHIFT) | pair.addr;
-      if (rom_addr < e->rom_data.size) {
-        return e->rom_data.data[rom_addr];
-      } else {
-        INFO(memory, "%s(0x%04x): bad address (bank = %u)!\n", __func__,
-             pair.addr, rom_bank);
-        return INVALID_READ_BYTE;
-      }
+      assert(rom_addr < e->rom_data.size);
+      return e->rom_data.data[rom_addr];
     }
     case MEMORY_MAP_VRAM:
       return read_vram(e, pair.addr);
