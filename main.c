@@ -121,6 +121,7 @@ typedef uint32_t RGBA;
 #define DMA_CYCLES 648
 #define DMA_DELAY_CYCLES 8
 #define APU_CYCLES 2 /* APU runs at 2MHz */
+#define SERIAL_CYCLES (GB_CYCLES_PER_SECOND / 8192)
 
 /* Memory map */
 #define ADDR_MASK_1K 0x03ff
@@ -572,6 +573,11 @@ enum TimerClock {
 /* TIMA is incremented when the given bit of div_counter changes from 1 to 0. */
 static const uint16_t s_tima_mask[] = {1 << 9, 1 << 3, 1 << 5, 1 << 7};
 
+enum SerialClock {
+  SERIAL_CLOCK_EXTERNAL = 0,
+  SERIAL_CLOCK_INTERNAL = 1,
+};
+
 enum {
   CHANNEL1,
   CHANNEL2,
@@ -815,7 +821,6 @@ struct Interrupts {
   enum Bool IME;  /* Interrupt Master Enable */
   uint8_t IE;     /* Interrupt Enable */
   uint8_t IF;     /* Interrupt Request */
-
   /* Internal state */
   enum Bool enable;  /* Set after EI instruction. This delays updating IME. */
   enum Bool halt;    /* Halted, waiting for an interrupt. */
@@ -826,7 +831,6 @@ struct Timer {
   uint8_t TIMA; /* Incremented at rate defined by clock_select */
   uint8_t TMA;  /* When TIMA overflows, it is set to this value */
   enum TimerClock clock_select; /* Select the rate of TIMA */
-
   /* Internal state */
   uint16_t div_counter;    /* Interal clock counter, upper 8 bits are DIV. */
   enum Bool tima_overflow; /* Used to implement TIMA overflow delay. */
@@ -834,16 +838,18 @@ struct Timer {
 };
 
 struct Serial {
-  enum Bool transfer_start;
-  enum Bool clock_speed;
-  enum Bool shift_clock;
+  enum Bool transferring;
+  enum SerialClock clock;
+  uint8_t SB; /* Serial transfer data. */
+  /* Internal state */
+  uint8_t transferred_bits;
+  uint32_t cycles;
 };
 
 struct Sweep {
   uint8_t period;
   enum SweepDirection direction;
   uint8_t shift;
-
   /* Internal state */
   uint16_t frequency;
   uint8_t timer;   /* 0..period */
@@ -855,7 +861,6 @@ struct Envelope {
   uint8_t initial_volume;
   enum EnvelopeDirection direction;
   uint8_t period;
-
   /* Internal state */
   uint8_t volume;      /* 0..15 */
   uint32_t timer;      /* 0..period */
@@ -872,7 +877,6 @@ struct WaveSample {
 /* Channel 1 and 2 */
 struct SquareWave {
   enum WaveDuty duty;
-
   /* Internal state */
   uint8_t sample;   /* Last sample generated, 0..1 */
   uint32_t period;  /* Calculated from the frequency. */
@@ -884,7 +888,6 @@ struct SquareWave {
 struct Wave {
   enum WaveVolume volume;
   uint8_t ram[WAVE_RAM_SIZE];
-
   /* Internal state */
   struct WaveSample sample[2]; /* The two most recent samples read. */
   uint32_t period;             /* Calculated from the frequency. */
@@ -899,7 +902,6 @@ struct Noise {
   uint8_t clock_shift;
   enum LFSRWidth lfsr_width;
   enum NoiseDivisor divisor;
-
   /* Internal state */
   uint8_t sample;  /* Last sample generated, 0..1 */
   uint16_t lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
@@ -913,7 +915,6 @@ struct Channel {
   uint16_t frequency;            /* Channel 1, 2, 3 */
   uint16_t length;               /* All channels */
   enum Bool length_enabled;      /* All channels */
-
   /* Internal state */
   enum Bool dac_enabled;
   enum Bool status; /* Status bit for NR52 */
@@ -935,7 +936,6 @@ struct Sound {
   struct Wave wave;
   struct Noise noise;
   struct Channel channel[CHANNEL_COUNT];
-
   /* Internal state */
   uint8_t frame;         /* 0..FRAME_SEQUENCER_COUNT */
   uint32_t frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
@@ -972,7 +972,6 @@ struct LCD {
   uint8_t WY;             /* Window Y */
   uint8_t WX;             /* Window X */
   struct Palette bgp;     /* BG Palette */
-
   /* Internal state */
   uint32_t cycles;
   uint32_t frame;
@@ -1579,10 +1578,10 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
              (~result & JOYP_RESULT_MASK);
     }
     case IO_SB_ADDR:
-      return 0; /* TODO */
+      return e->serial.SB;
     case IO_SC_ADDR:
-      return SC_UNUSED | READ_REG(e->serial.transfer_start, SC_TRANSFER_START) |
-             READ_REG(e->serial.shift_clock, SC_SHIFT_CLOCK);
+      return SC_UNUSED | READ_REG(e->serial.transferring, SC_TRANSFER_START) |
+             READ_REG(e->serial.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
       return e->timer.div_counter >> 8;
     case IO_TIMA_ADDR:
@@ -1983,11 +1982,16 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     case IO_JOYP_ADDR:
       e->joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
       break;
-    case IO_SB_ADDR: /* TODO */
+    case IO_SB_ADDR:
+      e->serial.SB = value;
       break;
     case IO_SC_ADDR:
-      e->serial.transfer_start = WRITE_REG(value, SC_TRANSFER_START);
-      e->serial.shift_clock = WRITE_REG(value, SC_SHIFT_CLOCK);
+      e->serial.transferring = WRITE_REG(value, SC_TRANSFER_START);
+      e->serial.clock = WRITE_REG(value, SC_SHIFT_CLOCK);
+      if (e->serial.transferring) {
+        e->serial.cycles = 0;
+        e->serial.transferred_bits = 0;
+      }
       break;
     case IO_DIV_ADDR:
       write_div_counter(e, 0);
@@ -3069,11 +3073,30 @@ static void update_sound_cycles(struct Emulator* e, uint8_t cycles) {
   }
 }
 
+static void update_serial_cycles(struct Emulator* e, uint8_t cycles) {
+  if (!e->serial.transferring) {
+    return;
+  }
+  if (e->serial.clock == SERIAL_CLOCK_INTERNAL) {
+    e->serial.cycles += cycles;
+    if (VALUE_WRAPPED(e->serial.cycles, SERIAL_CYCLES)) {
+      /* Since we're never connected to another device, always shift in 0xff. */
+      e->serial.SB = (e->serial.SB << 1) | 1;
+      e->serial.transferred_bits++;
+      if (VALUE_WRAPPED(e->serial.transferred_bits, 8)) {
+        e->serial.transferring = 0;
+        e->interrupts.IF |= INTERRUPT_SERIAL_MASK;
+      }
+    }
+  }
+}
+
 static void update_cycles(struct Emulator* e, uint8_t cycles) {
   update_dma_cycles(e, cycles);
   update_lcd_cycles(e, cycles);
   update_timer_cycles(e, cycles);
   update_sound_cycles(e, cycles);
+  update_serial_cycles(e, cycles);
   e->cycles += cycles;
 }
 
