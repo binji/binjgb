@@ -2063,7 +2063,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       if (was_enabled ^ lcdc->display) {
         e->ppu.line_cycles = 0;
         e->ppu.LY = e->ppu.line_y = SCREEN_HEIGHT;
-        e->ppu.stat.mode = PPU_MODE_VBLANK;
+        e->ppu.stat.mode = PPU_MODE_HBLANK;
         DEBUG(ppu, "%s display.\n", lcdc->display ? "Enabling" : "Disabling");
         if (!lcdc->display) {
           /* Clear the framebuffer. */
