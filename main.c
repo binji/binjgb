@@ -89,7 +89,7 @@ typedef uint16_t AudioBufferSample;
 #define SAVE_EXTENSION ".sav"
 
 /* ROM header stuff */
-#define ROM_U8(type, addr) ((type)*(rom_data->data + addr))
+#define ROM_U8(type, addr) ((type) * (rom_data->data + addr))
 #define ROM_U16_BE(addr) \
   ((uint16_t)((ROM_U8(uint16_t, addr) << 8) | ROM_U8(uint16_t, addr + 1)))
 
@@ -463,14 +463,12 @@ static const char* get_enum_string(const char** strings,
   return result ? result : "unknown";
 }
 
-#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                 \
-  enum Name { foreach (DEFINE_ENUM) NAME##_COUNT };                  \
-  static enum Result is_##name##_valid(enum Name value) {            \
-    return value < NAME##_COUNT;                                     \
-  }                                                                  \
-  static const char* get_##name##_string(enum Name value) {          \
-    static const char* s_strings[] = {foreach (DEFINE_STRING)};      \
-    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
+#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                           \
+  typedef enum { foreach (DEFINE_ENUM) NAME##_COUNT } Name;                    \
+  static Result is_##name##_valid(Name value) { return value < NAME##_COUNT; } \
+  static const char* get_##name##_string(Name value) {                         \
+    static const char* s_strings[] = {foreach (DEFINE_STRING)};                \
+    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value);           \
   }
 
 DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT)
@@ -487,12 +485,12 @@ DEFINE_NAMED_ENUM(RAM_SIZE, RamSize, ram_size, FOREACH_RAM_SIZE)
 #define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
 #define DEFINE_APU_REG_ENUM(name, code, ...) APU_##name##_ADDR = code,
 
-#define DEFINE_NAMED_REG(NAME, Name, name, foreach, enum_def)   \
-  enum Name { foreach (enum_def) NAME##_REG_COUNT };                 \
-  static enum Result is_##name##_valid(enum Name value) {            \
+#define DEFINE_NAMED_REG(NAME, Name, name, foreach, enum_def)        \
+  typedef enum { foreach (enum_def) NAME##_REG_COUNT } Name;         \
+  static Result is_##name##_valid(Name value) {                      \
     return value < NAME##_REG_COUNT;                                 \
   }                                                                  \
-  static const char* get_##name##_string(enum Name value) {          \
+  static const char* get_##name##_string(Name value) {               \
     static const char* s_strings[] = {foreach (DEFINE_STRING)};      \
     return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
   }
@@ -512,45 +510,45 @@ static uint32_t s_ram_bank_size[] = {
 #undef V
 };
 
-enum MBCType {
-  NO_MBC,
-  MBC1,
-  MBC2,
-  MBC3,
-  MBC4,
-  MBC5,
-  MMM01,
-  TAMA5,
-  HUC3,
-  HUC1,
-};
-static enum MBCType s_mbc_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = mbc,
+typedef enum {
+  MBC_TYPE_NO_MBC,
+  MBC_TYPE_MBC1,
+  MBC_TYPE_MBC2,
+  MBC_TYPE_MBC3,
+  MBC_TYPE_MBC4,
+  MBC_TYPE_MBC5,
+  MBC_TYPE_MMM01,
+  MBC_TYPE_TAMA5,
+  MBC_TYPE_HUC3,
+  MBC_TYPE_HUC1,
+} MBCType;
+static MBCType s_mbc_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = MBC_TYPE_##mbc,
     FOREACH_CARTRIDGE_TYPE(V)
 #undef V
 };
 
-enum ExternalRamType {
-  NO_RAM,
-  WITH_RAM,
-};
-static enum ExternalRamType s_external_ram_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = ram,
+typedef enum {
+  EXTERNAL_RAM_TYPE_NO_RAM,
+  EXTERNAL_RAM_TYPE_WITH_RAM,
+} ExternalRamType;
+static ExternalRamType s_external_ram_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = EXTERNAL_RAM_TYPE_##ram,
     FOREACH_CARTRIDGE_TYPE(V)
 #undef V
 };
 
-enum BatteryType {
-  NO_BATTERY,
-  WITH_BATTERY,
-};
-static enum BatteryType s_battery_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = battery,
+typedef enum {
+  BATTERY_TYPE_NO_BATTERY,
+  BATTERY_TYPE_WITH_BATTERY,
+} BatteryType;
+static BatteryType s_battery_type[] = {
+#define V(name, code, mbc, ram, battery) [code] = BATTERY_TYPE_##battery,
     FOREACH_CARTRIDGE_TYPE(V)
 #undef V
 };
 
-enum MemoryMapType {
+typedef enum {
   MEMORY_MAP_ROM,
   MEMORY_MAP_ROM_BANK_SWITCH,
   MEMORY_MAP_VRAM,
@@ -563,33 +561,33 @@ enum MemoryMapType {
   MEMORY_MAP_APU,
   MEMORY_MAP_WAVE_RAM,
   MEMORY_MAP_HIGH_RAM,
-};
+} MemoryMapType;
 
-enum BankMode {
+typedef enum {
   BANK_MODE_ROM = 0,
   BANK_MODE_RAM = 1,
-};
+} BankMode;
 
-enum JoypadSelect {
+typedef enum {
   JOYPAD_SELECT_BOTH = 0,
   JOYPAD_SELECT_BUTTONS = 1,
   JOYPAD_SELECT_DPAD = 2,
   JOYPAD_SELECT_NONE = 3,
-};
+} JoypadSelect;
 
-enum TimerClock {
+typedef enum {
   TIMER_CLOCK_4096_HZ = 0,
   TIMER_CLOCK_262144_HZ = 1,
   TIMER_CLOCK_65536_HZ = 2,
   TIMER_CLOCK_16384_HZ = 3,
-};
+} TimerClock;
 /* TIMA is incremented when the given bit of div_counter changes from 1 to 0. */
 static const uint16_t s_tima_mask[] = {1 << 9, 1 << 3, 1 << 5, 1 << 7};
 
-enum SerialClock {
+typedef enum {
   SERIAL_CLOCK_EXTERNAL = 0,
   SERIAL_CLOCK_INTERNAL = 1,
-};
+} SerialClock;
 
 enum {
   CHANNEL1,
@@ -608,38 +606,38 @@ enum {
   SOUND_COUNT,
 };
 
-enum SweepDirection {
+typedef enum {
   SWEEP_DIRECTION_ADDITION = 0,
   SWEEP_DIRECTION_SUBTRACTION = 1,
-};
+} SweepDirection;
 
-enum EnvelopeDirection {
+typedef enum {
   ENVELOPE_ATTENUATE = 0,
   ENVELOPE_AMPLIFY = 1,
-};
+} EnvelopeDirection;
 
-enum WaveDuty {
+typedef enum {
   WAVE_DUTY_12_5 = 0,
   WAVE_DUTY_25 = 1,
   WAVE_DUTY_50 = 2,
   WAVE_DUTY_75 = 3,
   WAVE_DUTY_COUNT,
-};
+} WaveDuty;
 
-enum WaveVolume {
+typedef enum {
   WAVE_VOLUME_MUTE = 0,
   WAVE_VOLUME_100 = 1,
   WAVE_VOLUME_50 = 2,
   WAVE_VOLUME_25 = 3,
   WAVE_VOLUME_COUNT,
-};
+} WaveVolume;
 
-enum LFSRWidth {
+typedef enum {
   LFSR_WIDTH_15 = 0, /* 15-bit LFSR */
   LFSR_WIDTH_7 = 1,  /* 7-bit LFSR */
-};
+} LFSRWidth;
 
-enum NoiseDivisor {
+typedef enum {
   NOISE_DIVISOR_8 = 0,
   NOISE_DIVISOR_16 = 1,
   NOISE_DIVISOR_32 = 2,
@@ -649,40 +647,40 @@ enum NoiseDivisor {
   NOISE_DIVISOR_96 = 6,
   NOISE_DIVISOR_112 = 7,
   NOISE_DIVISOR_COUNT,
-};
+} NoiseDivisor;
 
-enum TileMapSelect {
+typedef enum {
   TILE_MAP_9800_9BFF = 0,
   TILE_MAP_9C00_9FFF = 1,
-};
+} TileMapSelect;
 
-enum TileDataSelect {
+typedef enum {
   TILE_DATA_8800_97FF = 0,
   TILE_DATA_8000_8FFF = 1,
-};
+} TileDataSelect;
 
-enum ObjSize {
+typedef enum {
   OBJ_SIZE_8X8 = 0,
   OBJ_SIZE_8X16 = 1,
-};
+} ObjSize;
 static uint8_t s_obj_size_to_height[] = {
   [OBJ_SIZE_8X8] = 8,
   [OBJ_SIZE_8X16] = 16,
 };
 
-enum PPUMode {
+typedef enum {
   PPU_MODE_HBLANK = 0,         /* PPU mode 0 */
   PPU_MODE_VBLANK = 1,         /* PPU mode 1 */
   PPU_MODE_USING_OAM = 2,      /* PPU mode 2 */
   PPU_MODE_USING_OAM_VRAM = 3, /* PPU mode 3 */
-};
+} PPUMode;
 
-enum Color {
+typedef enum {
   COLOR_WHITE = 0,
   COLOR_LIGHT_GRAY = 1,
   COLOR_DARK_GRAY = 2,
   COLOR_BLACK = 3,
-};
+} Color;
 static RGBA s_color_to_rgba[] = {
   [COLOR_WHITE] = RGBA_WHITE,
   [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
@@ -696,79 +694,79 @@ static uint8_t s_color_to_obj_mask[] = {
   [COLOR_BLACK] = 0,
 };
 
-enum ObjPriority {
+typedef enum {
   OBJ_PRIORITY_ABOVE_BG = 0,
   OBJ_PRIORITY_BEHIND_BG = 1,
-};
+} ObjPriority;
 
-enum DMAState {
+typedef enum {
   DMA_INACTIVE = 0,
   DMA_TRIGGERED = 1,
   DMA_ACTIVE = 2,
-};
+} DMAState;
 
-struct RomData {
+typedef struct {
   uint8_t* data;
   size_t size;
-};
+} RomData;
 
-struct ExternalRam {
+typedef struct {
   uint8_t data[EXTERNAL_RAM_MAX_SIZE];
   size_t size;
-  enum BatteryType battery_type;
-};
+  BatteryType battery_type;
+} ExternalRam;
 
-struct WorkRam {
+typedef struct {
   uint8_t data[WORK_RAM_MAX_SIZE];
   size_t size; /* normally 8k, 32k in CGB mode */
-};
+} WorkRam;
 
-struct StringSlice {
+typedef struct {
   const char* start;
   size_t length;
-};
+} StringSlice;
 
-struct RomInfo {
-  struct StringSlice title;
-  enum CgbFlag cgb_flag;
-  enum SgbFlag sgb_flag;
-  enum CartridgeType cartridge_type;
-  enum RomSize rom_size;
+typedef struct {
+  StringSlice title;
+  CgbFlag cgb_flag;
+  SgbFlag sgb_flag;
+  CartridgeType cartridge_type;
+  RomSize rom_size;
   uint8_t rom_bank_count;
-  enum RamSize ram_size;
+  RamSize ram_size;
   uint8_t header_checksum;
   uint16_t global_checksum;
-  enum Result header_checksum_valid;
-  enum Result global_checksum_valid;
-};
+  Result header_checksum_valid;
+  Result global_checksum_valid;
+} RomInfo;
 
 struct Emulator;
 
-struct MBC1 {
+typedef struct {
   uint8_t byte_2000_3fff;
   uint8_t byte_4000_5fff;
-  enum BankMode bank_mode;
-};
+  BankMode bank_mode;
+} MBC1;
 
-struct MemoryMap {
+typedef struct {
   uint8_t rom_bank_count;
   uint8_t rom_bank;
   uint8_t ext_ram_bank;
-  enum Bool ext_ram_enabled;
+  Bool ext_ram_enabled;
   union {
-    struct MBC1 mbc1;
+    MBC1 mbc1;
   };
   uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
   uint8_t (*read_external_ram)(struct Emulator*, MaskedAddress);
   void (*write_rom)(struct Emulator*, MaskedAddress, uint8_t);
   void (*write_work_ram_bank_switch)(struct Emulator*, MaskedAddress, uint8_t);
   void (*write_external_ram)(struct Emulator*, MaskedAddress, uint8_t);
-};
+} MemoryMap;
 
-struct MemoryTypeAddressPair {
-  enum MemoryMapType type;
+typedef struct {
+  MemoryMapType type;
   MaskedAddress addr;
-};
+} MemoryTypeAddressPair;
 
 /* TODO(binji): endianness */
 #define REGISTER_PAIR(X, Y) \
@@ -780,7 +778,7 @@ struct MemoryTypeAddressPair {
     uint16_t X##Y;          \
   }
 
-struct Registers {
+typedef struct {
   uint8_t A;
   REGISTER_PAIR(B, C);
   REGISTER_PAIR(D, E);
@@ -788,254 +786,254 @@ struct Registers {
   uint16_t SP;
   uint16_t PC;
   struct {
-    enum Bool Z;
-    enum Bool N;
-    enum Bool H;
-    enum Bool C;
+    Bool Z;
+    Bool N;
+    Bool H;
+    Bool C;
   } F;
-};
+} Registers;
 
 typedef uint8_t Tile[TILE_WIDTH * TILE_HEIGHT];
 typedef uint8_t TileMap[TILE_MAP_WIDTH * TILE_MAP_HEIGHT];
 
-struct VideoRam {
+typedef struct {
   Tile tile[TILE_COUNT];
   TileMap map[TILE_MAP_COUNT];
   uint8_t data[VIDEO_RAM_SIZE];
-};
+} VideoRam;
 
-struct Palette {
-  enum Color color[PALETTE_COLOR_COUNT];
-};
+typedef struct {
+  Color color[PALETTE_COLOR_COUNT];
+} Palette;
 
-struct Obj {
+typedef struct {
   uint8_t y;
   uint8_t x;
   uint8_t tile;
   uint8_t byte3;
-  enum ObjPriority priority;
-  enum Bool yflip;
-  enum Bool xflip;
+  ObjPriority priority;
+  Bool yflip;
+  Bool xflip;
   uint8_t palette;
-};
+} Obj;
 
-struct OAM {
-  struct Obj objs[OBJ_COUNT];
-  struct Palette obp[OBJ_PALETTE_COUNT];
-};
+typedef struct {
+  Obj objs[OBJ_COUNT];
+  Palette obp[OBJ_PALETTE_COUNT];
+} OAM;
 
-struct Joypad {
-  enum Bool down, up, left, right;
-  enum Bool start, select, B, A;
-  enum JoypadSelect joypad_select;
-};
+typedef struct {
+  Bool down, up, left, right;
+  Bool start, select, B, A;
+  JoypadSelect joypad_select;
+} Joypad;
 
-struct Interrupts {
-  enum Bool IME;  /* Interrupt Master Enable */
-  uint8_t IE;     /* Interrupt Enable */
-  uint8_t IF;     /* Interrupt Request */
+typedef struct {
+  Bool IME;   /* Interrupt Master Enable */
+  uint8_t IE; /* Interrupt Enable */
+  uint8_t IF; /* Interrupt Request */
   /* Internal state */
-  enum Bool enable;  /* Set after EI instruction. This delays updating IME. */
-  enum Bool halt;    /* Halted, waiting for an interrupt. */
-  enum Bool halt_DI; /* Halted w/ disabled interrupts. */
-  enum Bool if_lcd_stat; /* Internal interrupt flag for LCD STAT. */
-};
+  Bool enable;      /* Set after EI instruction. This delays updating IME. */
+  Bool halt;        /* Halted, waiting for an interrupt. */
+  Bool halt_DI;     /* Halted w/ disabled interrupts. */
+  Bool if_lcd_stat; /* Internal interrupt flag for LCD STAT. */
+} Interrupts;
 
-struct Timer {
-  uint8_t TIMA; /* Incremented at rate defined by clock_select */
-  uint8_t TMA;  /* When TIMA overflows, it is set to this value */
-  enum TimerClock clock_select; /* Select the rate of TIMA */
+typedef struct {
+  uint8_t TIMA;            /* Incremented at rate defined by clock_select */
+  uint8_t TMA;             /* When TIMA overflows, it is set to this value */
+  TimerClock clock_select; /* Select the rate of TIMA */
   /* Internal state */
-  uint16_t div_counter;    /* Interal clock counter, upper 8 bits are DIV. */
-  enum Bool tima_overflow; /* Used to implement TIMA overflow delay. */
-  enum Bool on;
-};
+  uint16_t div_counter; /* Interal clock counter, upper 8 bits are DIV. */
+  Bool tima_overflow;   /* Used to implement TIMA overflow delay. */
+  Bool on;
+} Timer;
 
-struct Serial {
-  enum Bool transferring;
-  enum SerialClock clock;
+typedef struct {
+  Bool transferring;
+  SerialClock clock;
   uint8_t SB; /* Serial transfer data. */
   /* Internal state */
   uint8_t transferred_bits;
   uint32_t cycles;
-};
+} Serial;
 
-struct Sweep {
+typedef struct {
   uint8_t period;
-  enum SweepDirection direction;
+  SweepDirection direction;
   uint8_t shift;
   /* Internal state */
   uint16_t frequency;
-  uint8_t timer;   /* 0..period */
-  enum Bool enabled;
-  enum Bool calculated_subtract;
-};
+  uint8_t timer; /* 0..period */
+  Bool enabled;
+  Bool calculated_subtract;
+} Sweep;
 
-struct Envelope {
+typedef struct {
   uint8_t initial_volume;
-  enum EnvelopeDirection direction;
+  EnvelopeDirection direction;
   uint8_t period;
   /* Internal state */
-  uint8_t volume;      /* 0..15 */
-  uint32_t timer;      /* 0..period */
-  enum Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
-};
+  uint8_t volume; /* 0..15 */
+  uint32_t timer; /* 0..period */
+  Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
+} Envelope;
 
-struct WaveSample {
+typedef struct {
   uint32_t time;    /* Time (in cycles) the sample was read. */
   uint8_t position; /* Position in Wave RAM when read. */
   uint8_t byte;     /* Byte read from the Wave RAM. */
   uint8_t data;     /* Just the 4-bits of the sample. */
-};
+} WaveSample;
 
 /* Channel 1 and 2 */
-struct SquareWave {
-  enum WaveDuty duty;
+typedef struct {
+  WaveDuty duty;
   /* Internal state */
   uint8_t sample;   /* Last sample generated, 0..1 */
   uint32_t period;  /* Calculated from the frequency. */
   uint8_t position; /* Position in the duty cycle, 0..7 */
   uint32_t cycles;  /* 0..period */
-};
+} SquareWave;
 
 /* Channel 3 */
-struct Wave {
-  enum WaveVolume volume;
+typedef struct {
+  WaveVolume volume;
   uint8_t ram[WAVE_RAM_SIZE];
   /* Internal state */
-  struct WaveSample sample[2]; /* The two most recent samples read. */
-  uint32_t period;             /* Calculated from the frequency. */
-  uint8_t position;            /* 0..31 */
-  uint32_t cycles;             /* 0..period */
-  enum Bool playing; /* TRUE if the channel has been triggered but the DAC not
+  WaveSample sample[2]; /* The two most recent samples read. */
+  uint32_t period;      /* Calculated from the frequency. */
+  uint8_t position;     /* 0..31 */
+  uint32_t cycles;      /* 0..period */
+  Bool playing; /* TRUE if the channel has been triggered but the DAC not
                         disabled. */
-};
+} Wave;
 
 /* Channel 4 */
-struct Noise {
+typedef struct {
   uint8_t clock_shift;
-  enum LFSRWidth lfsr_width;
-  enum NoiseDivisor divisor;
+  LFSRWidth lfsr_width;
+  NoiseDivisor divisor;
   /* Internal state */
   uint8_t sample;  /* Last sample generated, 0..1 */
   uint16_t lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
   uint32_t period; /* Calculated from the clock_shift and divisor. */
   uint32_t cycles; /* 0..period */
-};
+} Noise;
 
-struct Channel {
-  struct SquareWave square_wave; /* Channel 1, 2 */
-  struct Envelope envelope;      /* Channel 1, 2, 4 */
-  uint16_t frequency;            /* Channel 1, 2, 3 */
-  uint16_t length;               /* All channels */
-  enum Bool length_enabled;      /* All channels */
+typedef struct {
+  SquareWave square_wave; /* Channel 1, 2 */
+  Envelope envelope;      /* Channel 1, 2, 4 */
+  uint16_t frequency;     /* Channel 1, 2, 3 */
+  uint16_t length;        /* All channels */
+  Bool length_enabled;    /* All channels */
   /* Internal state */
-  enum Bool dac_enabled;
-  enum Bool status; /* Status bit for NR52 */
-};
+  Bool dac_enabled;
+  Bool status; /* Status bit for NR52 */
+} Channel;
 
-struct AudioBuffer {
+typedef struct {
   uint16_t* data; /* Unsigned 16-bit 2-channel samples @ 2MHz */
   uint16_t* end;
   uint16_t* position;
-};
+} AudioBuffer;
 
-struct APU {
+typedef struct {
   uint8_t so2_volume;
   uint8_t so1_volume;
-  enum Bool so2_output[SOUND_COUNT];
-  enum Bool so1_output[SOUND_COUNT];
-  enum Bool enabled;
-  struct Sweep sweep;
-  struct Wave wave;
-  struct Noise noise;
-  struct Channel channel[CHANNEL_COUNT];
+  Bool so2_output[SOUND_COUNT];
+  Bool so1_output[SOUND_COUNT];
+  Bool enabled;
+  Sweep sweep;
+  Wave wave;
+  Noise noise;
+  Channel channel[CHANNEL_COUNT];
   /* Internal state */
   uint8_t frame;         /* 0..FRAME_SEQUENCER_COUNT */
   uint32_t frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
   uint32_t cycles;       /* Raw cycle counter */
-  struct AudioBuffer* buffer;
-};
+  AudioBuffer* buffer;
+} APU;
 
-struct LCDControl {
-  enum Bool display;
-  enum TileMapSelect window_tile_map_select;
-  enum Bool window_display;
-  enum TileDataSelect bg_tile_data_select;
-  enum TileMapSelect bg_tile_map_select;
-  enum ObjSize obj_size;
-  enum Bool obj_display;
-  enum Bool bg_display;
-};
+typedef struct {
+  Bool display;
+  TileMapSelect window_tile_map_select;
+  Bool window_display;
+  TileDataSelect bg_tile_data_select;
+  TileMapSelect bg_tile_map_select;
+  ObjSize obj_size;
+  Bool obj_display;
+  Bool bg_display;
+} LCDControl;
 
-struct LCDStatus {
-  enum Bool y_compare_intr;
-  enum Bool using_oam_intr;
-  enum Bool vblank_intr;
-  enum Bool hblank_intr;
-  enum Bool ly_eq_lyc;
-  enum PPUMode mode;
+typedef struct {
+  Bool y_compare_intr;
+  Bool using_oam_intr;
+  Bool vblank_intr;
+  Bool hblank_intr;
+  Bool ly_eq_lyc;
+  PPUMode mode;
   /* Internal state */
-  enum PPUMode new_mode;
-};
+  PPUMode new_mode;
+} LCDStatus;
 
-struct PPU {
-  struct LCDControl lcdc; /* LCD control */
-  struct LCDStatus stat;  /* LCD status */
-  uint8_t SCY;            /* Screen Y */
-  uint8_t SCX;            /* Screen X */
-  uint8_t LY;             /* Line Y */
-  uint8_t LYC;            /* Line Y Compare */
-  uint8_t WY;             /* Window Y */
-  uint8_t WX;             /* Window X */
-  struct Palette bgp;     /* BG Palette */
+typedef struct {
+  LCDControl lcdc; /* LCD control */
+  LCDStatus stat;  /* LCD status */
+  uint8_t SCY;     /* Screen Y */
+  uint8_t SCX;     /* Screen X */
+  uint8_t LY;      /* Line Y */
+  uint8_t LYC;     /* Line Y Compare */
+  uint8_t WY;      /* Window Y */
+  uint8_t WX;      /* Window X */
+  Palette bgp;     /* BG Palette */
   /* Internal state */
   uint32_t line_cycles;
   uint32_t frame;
   uint8_t line_y; /* The currently rendering line. Can be different than LY. */
   uint8_t win_y;  /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
-  enum Bool new_frame_edge;
-};
+  Bool new_frame_edge;
+} PPU;
 
-struct DMA {
-  enum DMAState state;
-  struct MemoryTypeAddressPair source;
+typedef struct {
+  DMAState state;
+  MemoryTypeAddressPair source;
   uint32_t cycles;
-};
+} DMA;
 
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 
-struct EmulatorConfig {
-  enum Bool disable_sound[CHANNEL_COUNT];
-  enum Bool disable_bg;
-  enum Bool disable_window;
-  enum Bool disable_obj;
-  enum Bool no_sync;
-};
+typedef struct {
+  Bool disable_sound[CHANNEL_COUNT];
+  Bool disable_bg;
+  Bool disable_window;
+  Bool disable_obj;
+  Bool no_sync;
+} EmulatorConfig;
 
-struct Emulator {
-  struct EmulatorConfig config;
-  struct RomData rom_data;
-  struct MemoryMap memory_map;
-  struct Registers reg;
-  struct VideoRam vram;
-  struct ExternalRam external_ram;
-  struct WorkRam ram;
-  struct Interrupts interrupts;
-  struct OAM oam;
-  struct Joypad joypad;
-  struct Serial serial;
-  struct Timer timer;
-  struct APU apu;
-  struct PPU ppu;
-  struct DMA dma;
+typedef struct Emulator {
+  EmulatorConfig config;
+  RomData rom_data;
+  MemoryMap memory_map;
+  Registers reg;
+  VideoRam vram;
+  ExternalRam external_ram;
+  WorkRam ram;
+  Interrupts interrupts;
+  OAM oam;
+  Joypad joypad;
+  Serial serial;
+  Timer timer;
+  APU apu;
+  PPU ppu;
+  DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
   FrameBuffer frame_buffer;
   uint32_t cycles;
-};
+} Emulator;
 
-static enum Bool s_trace = 0;
+static Bool s_trace = 0;
 static uint32_t s_trace_counter = 0;
 static int s_log_level_memory = 1;
 static int s_log_level_ppu = 1;
@@ -1044,12 +1042,12 @@ static int s_log_level_io = 1;
 static int s_log_level_interrupt = 1;
 static int s_log_level_sdl = 1;
 
-static void print_emulator_info(struct Emulator*);
-static void write_apu(struct Emulator*, Address, uint8_t);
-static void write_io(struct Emulator*, Address, uint8_t);
+static void print_emulator_info(Emulator*);
+static void write_apu(Emulator*, Address, uint8_t);
+static void write_io(Emulator*, Address, uint8_t);
 
-static enum Result read_rom_data_from_file(const char* filename,
-                                           struct RomData* out_rom_data) {
+static Result read_rom_data_from_file(const char* filename,
+                                      RomData* out_rom_data) {
   FILE* f = fopen(filename, "rb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
@@ -1072,8 +1070,7 @@ error:
   return ERROR;
 }
 
-static void get_rom_title(struct RomData* rom_data,
-                          struct StringSlice* out_title) {
+static void get_rom_title(RomData* rom_data, StringSlice* out_title) {
   const char* start = (char*)rom_data->data + TITLE_START_ADDR;
   const char* end = start + TITLE_END_ADDR;
   const char* p = start;
@@ -1086,7 +1083,7 @@ static void get_rom_title(struct RomData* rom_data,
   out_title->length = length;
 }
 
-static enum Result validate_header_checksum(struct RomData* rom_data) {
+static Result validate_header_checksum(RomData* rom_data) {
   uint8_t expected_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
   uint8_t checksum = 0;
   size_t i = 0;
@@ -1096,7 +1093,7 @@ static enum Result validate_header_checksum(struct RomData* rom_data) {
   return checksum == expected_checksum ? OK : ERROR;
 }
 
-static enum Result validate_global_checksum(struct RomData* rom_data) {
+static Result validate_global_checksum(RomData* rom_data) {
   uint16_t expected_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
   uint16_t checksum = 0;
   size_t i = 0;
@@ -1108,20 +1105,19 @@ static enum Result validate_global_checksum(struct RomData* rom_data) {
   return checksum == expected_checksum ? OK : ERROR;
 }
 
-static uint32_t get_rom_bank_count(enum RomSize rom_size) {
+static uint32_t get_rom_bank_count(RomSize rom_size) {
   return is_rom_size_valid(rom_size) ? s_rom_bank_size[rom_size] : 0;
 }
 
-static uint32_t get_rom_byte_size(enum RomSize rom_size) {
+static uint32_t get_rom_byte_size(RomSize rom_size) {
   return get_rom_bank_count(rom_size) << ROM_BANK_SHIFT;
 }
 
-static enum Result get_rom_info(struct RomData* rom_data,
-                                struct RomInfo* out_rom_info) {
-  struct RomInfo rom_info;
+static Result get_rom_info(RomData* rom_data, RomInfo* out_rom_info) {
+  RomInfo rom_info;
   ZERO_MEMORY(rom_info);
 
-  rom_info.rom_size = ROM_U8(enum RomSize, ROM_SIZE_ADDR);
+  rom_info.rom_size = ROM_U8(RomSize, ROM_SIZE_ADDR);
   uint32_t rom_byte_size = get_rom_byte_size(rom_info.rom_size);
   CHECK_MSG(rom_data->size == rom_byte_size,
             "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
@@ -1130,10 +1126,10 @@ static enum Result get_rom_info(struct RomData* rom_data,
   rom_info.rom_bank_count = get_rom_bank_count(rom_info.rom_size);
 
   get_rom_title(rom_data, &rom_info.title);
-  rom_info.cgb_flag = ROM_U8(enum CgbFlag, CGB_FLAG_ADDR);
-  rom_info.sgb_flag = ROM_U8(enum SgbFlag, SGB_FLAG_ADDR);
-  rom_info.cartridge_type = ROM_U8(enum CartridgeType, CARTRIDGE_TYPE_ADDR);
-  rom_info.ram_size = ROM_U8(enum RamSize, RAM_SIZE_ADDR);
+  rom_info.cgb_flag = ROM_U8(CgbFlag, CGB_FLAG_ADDR);
+  rom_info.sgb_flag = ROM_U8(SgbFlag, SGB_FLAG_ADDR);
+  rom_info.cartridge_type = ROM_U8(CartridgeType, CARTRIDGE_TYPE_ADDR);
+  rom_info.ram_size = ROM_U8(RamSize, RAM_SIZE_ADDR);
   rom_info.header_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
   rom_info.header_checksum_valid = validate_header_checksum(rom_data);
   rom_info.global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
@@ -1145,7 +1141,7 @@ error:
   return ERROR;
 }
 
-static void print_rom_info(struct RomInfo* rom_info) {
+static void print_rom_info(RomInfo* rom_info) {
   printf("title: \"%.*s\"\n", (int)rom_info->title.length,
          rom_info->title.start);
   printf("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
@@ -1161,30 +1157,24 @@ static void print_rom_info(struct RomInfo* rom_info) {
          get_result_string(rom_info->global_checksum_valid));
 }
 
-static void rom_only_write_rom(struct Emulator* e,
-                               MaskedAddress addr,
-                               uint8_t value) {
-  /* TODO(binji): log? */
+static void rom_only_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
-static uint8_t gb_read_work_ram_bank_switch(struct Emulator* e,
-                                            MaskedAddress addr) {
+static uint8_t gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_4K);
   return e->ram.data[0x1000 + addr];
 }
 
-static void gb_write_work_ram_bank_switch(struct Emulator* e,
+static void gb_write_work_ram_bank_switch(Emulator* e,
                                           MaskedAddress addr,
                                           uint8_t value) {
   assert(addr <= ADDR_MASK_4K);
   e->ram.data[0x1000 + addr] = value;
 }
 
-static void mbc1_write_rom(struct Emulator* e,
-                           MaskedAddress addr,
-                           uint8_t value) {
-  struct MemoryMap* memory_map = &e->memory_map;
-  struct MBC1* mbc1 = &memory_map->mbc1;
+static void mbc1_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
+  MemoryMap* memory_map = &e->memory_map;
+  MBC1* mbc1 = &memory_map->mbc1;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ext_ram_enabled =
@@ -1197,7 +1187,7 @@ static void mbc1_write_rom(struct Emulator* e,
       mbc1->byte_4000_5fff = value;
       break;
     case 3: /* 6000-7fff */
-      mbc1->bank_mode = (enum BankMode)(value & 1);
+      mbc1->bank_mode = (BankMode)(value & 1);
       break;
     default:
       UNREACHABLE("invalid addr: 0x%04x\n", addr);
@@ -1225,16 +1215,15 @@ static void mbc1_write_rom(struct Emulator* e,
           value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
 }
 
-static uint8_t dummy_read_external_ram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t dummy_read_external_ram(Emulator* e, MaskedAddress addr) {
   return 0;
 }
 
-static void dummy_write_external_ram(struct Emulator* e,
+static void dummy_write_external_ram(Emulator* e,
                                      MaskedAddress addr,
                                      uint8_t value) {}
 
-static uint32_t get_external_ram_address(struct Emulator* e,
-                                         MaskedAddress addr) {
+static uint32_t get_external_ram_address(Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_8K);
   uint8_t ram_bank = e->memory_map.ext_ram_bank;
   uint32_t ram_addr = (ram_bank << EXTERNAL_RAM_BANK_SHIFT) | addr;
@@ -1253,7 +1242,7 @@ static uint32_t get_external_ram_address(struct Emulator* e,
   INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr, \
        value);
 
-static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t gb_read_external_ram(Emulator* e, MaskedAddress addr) {
   if (e->memory_map.ext_ram_enabled) {
     return e->external_ram.data[get_external_ram_address(e, addr)];
   } else {
@@ -1262,7 +1251,7 @@ static uint8_t gb_read_external_ram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static void gb_write_external_ram(struct Emulator* e,
+static void gb_write_external_ram(Emulator* e,
                                   MaskedAddress addr,
                                   uint8_t value) {
   if (e->memory_map.ext_ram_enabled) {
@@ -1272,10 +1261,8 @@ static void gb_write_external_ram(struct Emulator* e,
   }
 }
 
-static void mbc2_write_rom(struct Emulator* e,
-                           MaskedAddress addr,
-                           uint8_t value) {
-  struct MemoryMap* memory_map = &e->memory_map;
+static void mbc2_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
+  MemoryMap* memory_map = &e->memory_map;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       if ((addr & MBC2_ADDR_SELECT_BIT_MASK) == 0) {
@@ -1298,7 +1285,7 @@ static void mbc2_write_rom(struct Emulator* e,
   }
 }
 
-static uint8_t mbc2_read_ram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t mbc2_read_ram(Emulator* e, MaskedAddress addr) {
   if (e->memory_map.ext_ram_enabled) {
     return e->external_ram.data[addr & MBC2_RAM_ADDR_MASK];
   } else {
@@ -1307,9 +1294,7 @@ static uint8_t mbc2_read_ram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static void mbc2_write_ram(struct Emulator* e,
-                           MaskedAddress addr,
-                           uint8_t value) {
+static void mbc2_write_ram(Emulator* e, MaskedAddress addr, uint8_t value) {
   if (e->memory_map.ext_ram_enabled) {
     e->external_ram.data[addr & MBC2_RAM_ADDR_MASK] =
         value & MBC2_RAM_VALUE_MASK;
@@ -1318,10 +1303,8 @@ static void mbc2_write_ram(struct Emulator* e,
   }
 }
 
-static void mbc3_write_rom(struct Emulator* e,
-                           MaskedAddress addr,
-                           uint8_t value) {
-  struct MemoryMap* memory_map = &e->memory_map;
+static void mbc3_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
+  MemoryMap* memory_map = &e->memory_map;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       e->memory_map.ext_ram_enabled =
@@ -1341,9 +1324,8 @@ static void mbc3_write_rom(struct Emulator* e,
   }
 }
 
-static enum Result init_memory_map(struct Emulator* e,
-                                   struct RomInfo* rom_info) {
-  struct MemoryMap* memory_map = &e->memory_map;
+static Result init_memory_map(Emulator* e, RomInfo* rom_info) {
+  MemoryMap* memory_map = &e->memory_map;
   ZERO_MEMORY(*memory_map);
   memory_map->rom_bank = 1;
   memory_map->rom_bank_count = rom_info->rom_bank_count;
@@ -1351,13 +1333,13 @@ static enum Result init_memory_map(struct Emulator* e,
   memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
 
   switch (s_external_ram_type[rom_info->cartridge_type]) {
-    case WITH_RAM:
+    case EXTERNAL_RAM_TYPE_WITH_RAM:
       memory_map->read_external_ram = gb_read_external_ram;
       memory_map->write_external_ram = gb_write_external_ram;
       e->external_ram.size = s_ram_bank_size[rom_info->ram_size];
       break;
     default:
-    case NO_RAM:
+    case EXTERNAL_RAM_TYPE_NO_RAM:
       memory_map->read_external_ram = dummy_read_external_ram;
       memory_map->write_external_ram = dummy_write_external_ram;
       e->external_ram.size = 0;
@@ -1365,19 +1347,19 @@ static enum Result init_memory_map(struct Emulator* e,
   }
 
   switch (s_mbc_type[rom_info->cartridge_type]) {
-    case NO_MBC:
+    case MBC_TYPE_NO_MBC:
       memory_map->write_rom = rom_only_write_rom;
       break;
-    case MBC1:
+    case MBC_TYPE_MBC1:
       memory_map->write_rom = mbc1_write_rom;
       break;
-    case MBC2:
+    case MBC_TYPE_MBC2:
       memory_map->write_rom = mbc2_write_rom;
       memory_map->read_external_ram = mbc2_read_ram;
       memory_map->write_external_ram = mbc2_write_ram;
       e->external_ram.size = MBC2_RAM_SIZE;
       break;
-    case MBC3:
+    case MBC_TYPE_MBC3:
       memory_map->write_rom = mbc3_write_rom;
       /* TODO handle MBC3 RTC */
       break;
@@ -1391,18 +1373,18 @@ static enum Result init_memory_map(struct Emulator* e,
   return OK;
 }
 
-static uint8_t get_f_reg(struct Registers* reg) {
+static uint8_t get_f_reg(Registers* reg) {
   return READ_REG(reg->F.Z, CPU_FLAG_Z) |
          READ_REG(reg->F.N, CPU_FLAG_N) |
          READ_REG(reg->F.H, CPU_FLAG_H) |
          READ_REG(reg->F.C, CPU_FLAG_C);
 }
 
-static uint16_t get_af_reg(struct Registers* reg) {
+static uint16_t get_af_reg(Registers* reg) {
   return (reg->A << 8) | get_f_reg(reg);
 }
 
-static void set_af_reg(struct Registers* reg, uint16_t af) {
+static void set_af_reg(Registers* reg, uint16_t af) {
   reg->A = af >> 8;
   reg->F.Z = WRITE_REG(af, CPU_FLAG_Z);
   reg->F.N = WRITE_REG(af, CPU_FLAG_N);
@@ -1410,13 +1392,13 @@ static void set_af_reg(struct Registers* reg, uint16_t af) {
   reg->F.C = WRITE_REG(af, CPU_FLAG_C);
 }
 
-static enum Result init_emulator(struct Emulator* e,
-                                 struct RomData* rom_data,
-                                 struct AudioBuffer* audio_buffer) {
+static Result init_emulator(Emulator* e,
+                            RomData* rom_data,
+                            AudioBuffer* audio_buffer) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
   e->apu.buffer = audio_buffer;
-  struct RomInfo rom_info;
+  RomInfo rom_info;
   CHECK(SUCCESS(get_rom_info(rom_data, &rom_info)));
   print_rom_info(&rom_info);
   CHECK(SUCCESS(init_memory_map(e, &rom_info)));
@@ -1435,7 +1417,7 @@ static enum Result init_emulator(struct Emulator* e,
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
   /* Turn down the volume on channel1, it is playing by default (because of the
-   * GB startup apu), but we don't want to hear it when starting the
+   * GB startup sound), but we don't want to hear it when starting the
    * emulator. */
   e->apu.channel[CHANNEL1].envelope.volume = 0;
   write_io(e, IO_LCDC_ADDR, 0x91);
@@ -1452,8 +1434,8 @@ error:
   return ERROR;
 }
 
-static struct MemoryTypeAddressPair map_address(Address addr) {
-  struct MemoryTypeAddressPair result;
+static MemoryTypeAddressPair map_address(Address addr) {
+  MemoryTypeAddressPair result;
   switch (addr >> 12) {
     case 0x0:
     case 0x1:
@@ -1537,7 +1519,7 @@ static struct MemoryTypeAddressPair map_address(Address addr) {
   return result;
 }
 
-static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_vram(Emulator* e, MaskedAddress addr) {
   if (e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM) {
     DEBUG(ppu, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
@@ -1547,19 +1529,19 @@ static uint8_t read_vram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static enum Bool is_using_oam(struct Emulator* e) {
+static Bool is_using_oam(Emulator* e) {
   return e->ppu.stat.mode == PPU_MODE_USING_OAM ||
          e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM;
 }
 
-static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_oam(Emulator* e, MaskedAddress addr) {
   if (is_using_oam(e)) {
     DEBUG(ppu, "read_oam(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   }
 
   uint8_t obj_index = addr >> 2;
-  struct Obj* obj = &e->oam.objs[obj_index];
+  Obj* obj = &e->oam.objs[obj_index];
   switch (addr & 3) {
     case 0: return obj->y + OBJ_Y_OFFSET;
     case 1: return obj->x + OBJ_X_OFFSET;
@@ -1569,11 +1551,10 @@ static uint8_t read_oam(struct Emulator* e, MaskedAddress addr) {
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
 
-static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR: {
       uint8_t result = 0;
-      /* TODO is this the correct behavior when both select bits are low? */
       if (e->joypad.joypad_select == JOYPAD_SELECT_BUTTONS ||
           e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
         result |= READ_REG(e->joypad.start, JOYP_BUTTON_START) |
@@ -1668,21 +1649,21 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static uint8_t read_nrx1_reg(struct Channel* channel) {
+static uint8_t read_nrx1_reg(Channel* channel) {
   return READ_REG(channel->square_wave.duty, NRX1_WAVE_DUTY);
 }
 
-static uint8_t read_nrx2_reg(struct Channel* channel) {
+static uint8_t read_nrx2_reg(Channel* channel) {
   return READ_REG(channel->envelope.initial_volume, NRX2_INITIAL_VOLUME) |
          READ_REG(channel->envelope.direction, NRX2_ENVELOPE_DIRECTION) |
          READ_REG(channel->envelope.period, NRX2_ENVELOPE_PERIOD);
 }
 
-static uint8_t read_nrx4_reg(struct Channel* channel) {
+static uint8_t read_nrx4_reg(Channel* channel) {
   return READ_REG(channel->length_enabled, NRX4_LENGTH_ENABLED);
 }
 
-static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
+static uint8_t read_apu(Emulator* e, MaskedAddress addr) {
   /* APU returns 1 for invalid bits. */
   static uint8_t mask[] = {
       0x80, 0x3f, 0x00, 0xff, 0xbf,                        /* NR10-NR14 */
@@ -1697,14 +1678,14 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   assert(addr < ARRAY_SIZE(mask));
   uint8_t result = mask[addr];
 
-  struct APU* apu = &e->apu;
-  struct Channel* channel1 = &apu->channel[CHANNEL1];
-  struct Channel* channel2 = &apu->channel[CHANNEL2];
-  struct Channel* channel3 = &apu->channel[CHANNEL3];
-  struct Channel* channel4 = &apu->channel[CHANNEL4];
-  struct Sweep* sweep = &apu->sweep;
-  struct Wave* wave = &apu->wave;
-  struct Noise* noise = &apu->noise;
+  APU* apu = &e->apu;
+  Channel* channel1 = &apu->channel[CHANNEL1];
+  Channel* channel2 = &apu->channel[CHANNEL2];
+  Channel* channel3 = &apu->channel[CHANNEL3];
+  Channel* channel4 = &apu->channel[CHANNEL4];
+  Sweep* sweep = &apu->sweep;
+  Wave* wave = &apu->wave;
+  Noise* noise = &apu->noise;
 
   switch (addr) {
     case APU_NR10_ADDR: {
@@ -1799,9 +1780,9 @@ static uint8_t read_apu(struct Emulator* e, MaskedAddress addr) {
   return result;
 }
 
-static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
-                                                        uint8_t offset_cycles) {
-  struct Wave* wave = &e->apu.wave;
+static WaveSample* is_concurrent_wave_ram_access(Emulator* e,
+                                                 uint8_t offset_cycles) {
+  Wave* wave = &e->apu.wave;
   size_t i;
   for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
     if (wave->sample[i].time == e->cycles + offset_cycles) {
@@ -1811,14 +1792,14 @@ static struct WaveSample* is_concurrent_wave_ram_access(struct Emulator* e,
   return NULL;
 }
 
-static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
-  struct Wave* wave = &e->apu.wave;
+static uint8_t read_wave_ram(Emulator* e, MaskedAddress addr) {
+  Wave* wave = &e->apu.wave;
   if (e->apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel.  */
     uint8_t result;
-    struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
+    WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       result = sample->byte;
       DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
@@ -1834,14 +1815,12 @@ static uint8_t read_wave_ram(struct Emulator* e, MaskedAddress addr) {
   }
 }
 
-static enum Bool is_dma_access_ok(struct Emulator* e,
-                                  struct MemoryTypeAddressPair pair) {
+static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
   /* TODO: need to figure out bus conflicts during DMA for non-OAM accesses. */
   return e->dma.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
 }
 
-static uint8_t read_u8_no_dma_check(struct Emulator* e,
-                                    struct MemoryTypeAddressPair pair) {
+static uint8_t read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   switch (pair.type) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
@@ -1880,8 +1859,8 @@ static uint8_t read_u8_no_dma_check(struct Emulator* e,
   }
 }
 
-static uint8_t read_u8(struct Emulator* e, Address addr) {
-  struct MemoryTypeAddressPair pair = map_address(addr);
+static uint8_t read_u8(Emulator* e, Address addr) {
+  MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
     return INVALID_READ_BYTE;
@@ -1890,7 +1869,7 @@ static uint8_t read_u8(struct Emulator* e, Address addr) {
   return read_u8_no_dma_check(e, pair);
 }
 
-static void write_vram_tile_data(struct Emulator* e,
+static void write_vram_tile_data(Emulator* e,
                                  uint32_t index,
                                  uint32_t plane,
                                  uint32_t y,
@@ -1910,7 +1889,7 @@ static void write_vram_tile_data(struct Emulator* e,
   }
 }
 
-static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
   if (e->ppu.stat.mode == PPU_MODE_USING_OAM_VRAM) {
     DEBUG(ppu, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
           value);
@@ -1942,10 +1921,10 @@ static void write_vram(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-static void write_oam_no_mode_check(struct Emulator* e,
+static void write_oam_no_mode_check(Emulator* e,
                                     MaskedAddress addr,
                                     uint8_t value) {
-  struct Obj* obj = &e->oam.objs[addr >> 2];
+  Obj* obj = &e->oam.objs[addr >> 2];
   switch (addr & 3) {
     case 0:
       obj->y = value - OBJ_Y_OFFSET;
@@ -1966,7 +1945,7 @@ static void write_oam_no_mode_check(struct Emulator* e,
   }
 }
 
-static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_oam(Emulator* e, MaskedAddress addr, uint8_t value) {
   if (is_using_oam(e)) {
     INFO(ppu, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
          value);
@@ -1976,13 +1955,13 @@ static void write_oam(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   write_oam_no_mode_check(e, addr, value);
 }
 
-static void increment_tima(struct Emulator* e) {
+static void increment_tima(Emulator* e) {
   if (++e->timer.TIMA == 0) {
     e->timer.tima_overflow = TRUE;
   }
 }
 
-static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
+static void write_div_counter(Emulator* e, uint16_t div_counter) {
   if (e->timer.on) {
     uint16_t falling_edge =
         ((e->timer.div_counter ^ div_counter) & ~div_counter);
@@ -1993,9 +1972,9 @@ static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
   e->timer.div_counter = div_counter;
 }
 
-static void check_if_lcd_stat(struct Emulator* e) {
+static void check_if_lcd_stat(Emulator* e) {
   if (e->ppu.lcdc.display) {
-    enum Bool set =
+    Bool set =
         (e->ppu.stat.y_compare_intr && e->ppu.stat.ly_eq_lyc) ||
         (e->ppu.stat.using_oam_intr &&
          (e->ppu.stat.new_mode == PPU_MODE_USING_OAM ||
@@ -2010,13 +1989,13 @@ static void check_if_lcd_stat(struct Emulator* e) {
   }
 }
 
-static void update_ly_eq_lyc(struct Emulator* e) {
+static void update_ly_eq_lyc(Emulator* e) {
   if (e->ppu.lcdc.display) {
     e->ppu.stat.ly_eq_lyc = e->ppu.LY == e->ppu.LYC;
   }
 }
 
-static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG(io, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_io_reg_string(addr), value);
   switch (addr) {
@@ -2044,14 +2023,14 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->timer.TMA = value;
       break;
     case IO_TAC_ADDR: {
-      enum Bool old_timer_on = e->timer.on;
+      Bool old_timer_on = e->timer.on;
       uint16_t old_tima_mask = s_tima_mask[e->timer.clock_select];
       e->timer.clock_select = WRITE_REG(value, TAC_CLOCK_SELECT);
       e->timer.on = WRITE_REG(value, TAC_TIMER_ON);
       /* TIMA is incremented when a specific bit of div_counter transitions
        * from 1 to 0. This can happen as a result of writing to DIV, or in this
        * case modifying which bit we're looking at. */
-      enum Bool tima_tick = FALSE;
+      Bool tima_tick = FALSE;
       if (!old_timer_on) {
         uint16_t tima_mask = s_tima_mask[e->timer.clock_select];
         if (e->timer.on) {
@@ -2070,8 +2049,8 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       e->interrupts.IF = value;
       break;
     case IO_LCDC_ADDR: {
-      struct LCDControl* lcdc = &e->ppu.lcdc;
-      enum Bool was_enabled = lcdc->display;
+      LCDControl* lcdc = &e->ppu.lcdc;
+      Bool was_enabled = lcdc->display;
       lcdc->display = WRITE_REG(value, LCDC_DISPLAY);
       lcdc->window_tile_map_select =
           WRITE_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
@@ -2163,9 +2142,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
 
 #define CHANNEL_INDEX(c) ((c) - e->apu.channel)
 
-static void write_nrx1_reg(struct Emulator* e,
-                           struct Channel* channel,
-                           uint8_t value) {
+static void write_nrx1_reg(Emulator* e, Channel* channel, uint8_t value) {
   if (e->apu.enabled) {
     channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   }
@@ -2174,9 +2151,7 @@ static void write_nrx1_reg(struct Emulator* e,
           CHANNEL_INDEX(channel), value, channel->length);
 }
 
-static void write_nrx2_reg(struct Emulator* e,
-                           struct Channel* channel,
-                           uint8_t value) {
+static void write_nrx2_reg(Emulator* e, Channel* channel, uint8_t value) {
   channel->envelope.initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
   channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
@@ -2194,20 +2169,18 @@ static void write_nrx2_reg(struct Emulator* e,
           CHANNEL_INDEX(channel), value, channel->envelope.initial_volume);
 }
 
-static void write_nrx3_reg(struct Emulator* e,
-                           struct Channel* channel,
-                           uint8_t value) {
+static void write_nrx3_reg(Emulator* e, Channel* channel, uint8_t value) {
   channel->frequency &= ~0xff;
   channel->frequency |= value;
 }
 
 /* Returns TRUE if this channel was triggered. */
-static enum Bool write_nrx4_reg(struct Emulator* e,
-                                struct Channel* channel,
-                                uint8_t value,
-                                uint16_t max_length) {
-  enum Bool trigger = WRITE_REG(value, NRX4_INITIAL);
-  enum Bool was_length_enabled = channel->length_enabled;
+static Bool write_nrx4_reg(Emulator* e,
+                           Channel* channel,
+                           uint8_t value,
+                           uint16_t max_length) {
+  Bool trigger = WRITE_REG(value, NRX4_INITIAL);
+  Bool was_length_enabled = channel->length_enabled;
   channel->length_enabled = WRITE_REG(value, NRX4_LENGTH_ENABLED);
   channel->frequency &= 0xff;
   channel->frequency |= WRITE_REG(value, NRX4_FREQUENCY_HI) << 8;
@@ -2215,7 +2188,7 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
    * enabled. */
-  enum Bool next_frame_is_length = (e->apu.frame & 1) == 1;
+  Bool next_frame_is_length = (e->apu.frame & 1) == 1;
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
@@ -2247,8 +2220,7 @@ static enum Bool write_nrx4_reg(struct Emulator* e,
   return trigger;
 }
 
-static void trigger_nrx4_envelope(struct Emulator* e,
-                                  struct Envelope* envelope) {
+static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope) {
   envelope->volume = envelope->initial_volume;
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = envelope->period != 0;
@@ -2260,7 +2232,7 @@ static void trigger_nrx4_envelope(struct Emulator* e,
         envelope->timer);
 }
 
-static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
+static uint16_t calculate_sweep_frequency(Sweep* sweep) {
   uint16_t f = sweep->frequency;
   if (sweep->direction == SWEEP_DIRECTION_ADDITION) {
     return f + (f >> sweep->shift);
@@ -2270,9 +2242,7 @@ static uint16_t calculate_sweep_frequency(struct Sweep* sweep) {
   }
 }
 
-static void trigger_nr14_reg(struct Emulator* e,
-                             struct Channel* channel,
-                             struct Sweep* sweep) {
+static void trigger_nr14_reg(Emulator* e, Channel* channel, Sweep* sweep) {
   sweep->enabled = sweep->period || sweep->shift;
   sweep->frequency = channel->frequency;
   sweep->timer = sweep->period ? sweep->period : SWEEP_MAX_PERIOD;
@@ -2285,15 +2255,13 @@ static void trigger_nr14_reg(struct Emulator* e,
   }
 }
 
-static void trigger_nr34_reg(struct Emulator* e,
-                             struct Channel* channel,
-                             struct Wave* wave) {
+static void trigger_nr34_reg(Emulator* e, Channel* channel, Wave* wave) {
   wave->position = 0;
   wave->cycles = wave->period;
   /* Triggering the wave channel while it is already playing will corrupt the
    * wave RAM. */
   if (wave->playing) {
-    struct WaveSample* sample =
+    WaveSample* sample =
         is_concurrent_wave_ram_access(e, WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES);
     if (sample) {
       assert(sample->position < 32);
@@ -2315,28 +2283,23 @@ static void trigger_nr34_reg(struct Emulator* e,
   wave->playing = TRUE;
 }
 
-static void trigger_nr44_reg(struct Emulator* e,
-                             struct Channel* channel,
-                             struct Noise* noise) {
+static void trigger_nr44_reg(Emulator* e, Channel* channel, Noise* noise) {
   noise->lfsr = 0x7fff;
 }
 
-static void write_wave_period(struct Emulator* e,
-                              struct Channel* channel,
-                              struct Wave* wave) {
+static void write_wave_period(Emulator* e, Channel* channel, Wave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
   DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
-static void write_square_wave_period(struct Channel* channel,
-                                     struct SquareWave* wave) {
+static void write_square_wave_period(Channel* channel, SquareWave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
   DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
         channel->frequency, wave->cycles, wave->period);
 }
 
-static void write_noise_period(struct Channel* channel, struct Noise* noise) {
+static void write_noise_period(Channel* channel, Noise* noise) {
   static const uint8_t s_divisors[NOISE_DIVISOR_COUNT] = {8,  16, 32, 48,
                                                           64, 80, 96, 112};
   uint8_t divisor = s_divisors[noise->divisor];
@@ -2346,13 +2309,13 @@ static void write_noise_period(struct Channel* channel, struct Noise* noise) {
         divisor, noise->clock_shift, noise->period);
 }
 
-static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
+static void write_apu(Emulator* e, MaskedAddress addr, uint8_t value) {
   if (!e->apu.enabled) {
     if (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
         addr == APU_NR31_ADDR || addr == APU_NR41_ADDR) {
       /* DMG allows writes to the length counters when power is disabled. */
     } else if (addr == APU_NR52_ADDR) {
-      /* Always can write to NR52; it's necessary to re-enable power. */
+      /* Always can write to NR52; it's necessary to re-enable power to APU. */
     } else {
       /* Ignore all other writes. */
       DEBUG(apu, "%s(0x%04x [%s], 0x%02x) ignored.\n", __func__, addr,
@@ -2361,20 +2324,20 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
     }
   }
 
-  struct APU* apu = &e->apu;
-  struct Channel* channel1 = &apu->channel[CHANNEL1];
-  struct Channel* channel2 = &apu->channel[CHANNEL2];
-  struct Channel* channel3 = &apu->channel[CHANNEL3];
-  struct Channel* channel4 = &apu->channel[CHANNEL4];
-  struct Sweep* sweep = &apu->sweep;
-  struct Wave* wave = &apu->wave;
-  struct Noise* noise = &apu->noise;
+  APU* apu = &e->apu;
+  Channel* channel1 = &apu->channel[CHANNEL1];
+  Channel* channel2 = &apu->channel[CHANNEL2];
+  Channel* channel3 = &apu->channel[CHANNEL3];
+  Channel* channel4 = &apu->channel[CHANNEL4];
+  Sweep* sweep = &apu->sweep;
+  Wave* wave = &apu->wave;
+  Noise* noise = &apu->noise;
 
   DEBUG(apu, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_apu_reg_string(addr), value);
   switch (addr) {
     case APU_NR10_ADDR: {
-      enum SweepDirection old_direction = sweep->direction;
+      SweepDirection old_direction = sweep->direction;
       sweep->period = WRITE_REG(value, NR10_SWEEP_PERIOD);
       sweep->direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
       sweep->shift = WRITE_REG(value, NR10_SWEEP_SHIFT);
@@ -2396,7 +2359,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_square_wave_period(channel1, &channel1->square_wave);
       break;
     case APU_NR14_ADDR: {
-      enum Bool trigger = write_nrx4_reg(e, channel1, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel1, value, NRX1_MAX_LENGTH);
       write_square_wave_period(channel1, &channel1->square_wave);
       if (trigger) {
         trigger_nrx4_envelope(e, &channel1->envelope);
@@ -2415,7 +2378,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_square_wave_period(channel2, &channel2->square_wave);
       break;
     case APU_NR24_ADDR: {
-      enum Bool trigger = write_nrx4_reg(e, channel2, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel2, value, NRX1_MAX_LENGTH);
       write_square_wave_period(channel2, &channel2->square_wave);
       if (trigger) {
         trigger_nrx4_envelope(e, &channel2->envelope);
@@ -2440,7 +2403,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       write_wave_period(e, channel3, wave);
       break;
     case APU_NR34_ADDR: {
-      enum Bool trigger = write_nrx4_reg(e, channel3, value, NR31_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel3, value, NR31_MAX_LENGTH);
       write_wave_period(e, channel3, wave);
       if (trigger) {
         trigger_nr34_reg(e, channel3, wave);
@@ -2461,7 +2424,7 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case APU_NR44_ADDR: {
-      enum Bool trigger = write_nrx4_reg(e, channel4, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel4, value, NRX1_MAX_LENGTH);
       if (trigger) {
         write_noise_period(channel4, noise);
         trigger_nrx4_envelope(e, &channel4->envelope);
@@ -2486,8 +2449,8 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       apu->so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
-      enum Bool was_enabled = apu->enabled;
-      enum Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
+      Bool was_enabled = apu->enabled;
+      Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
         DEBUG(apu, "Powered down APU. Clearing registers.\n");
         int i;
@@ -2510,19 +2473,16 @@ static void write_apu(struct Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-static void write_wave_ram(struct Emulator* e,
-                           MaskedAddress addr,
-                           uint8_t value) {
-  struct Wave* wave = &e->apu.wave;
+static void write_wave_ram(Emulator* e, MaskedAddress addr, uint8_t value) {
+  Wave* wave = &e->apu.wave;
   if (e->apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    struct WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
+    WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
     if (sample) {
       wave->ram[sample->position >> 1] = value;
-      DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__,
-            addr, value);
+      DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__, addr, value);
     }
   } else {
     e->apu.wave.ram[addr] = value;
@@ -2530,8 +2490,8 @@ static void write_wave_ram(struct Emulator* e,
   }
 }
 
-static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
-  struct MemoryTypeAddressPair pair = map_address(addr);
+static void write_u8(Emulator* e, Address addr, uint8_t value) {
+  MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     INFO(memory, "%s(0x%04x, 0x%02x) during DMA.\n", __func__, addr, value);
     return;
@@ -2577,7 +2537,7 @@ static void write_u8(struct Emulator* e, Address addr, uint8_t value) {
   }
 }
 
-static TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
+static TileMap* get_tile_map(Emulator* e, TileMapSelect select) {
   switch (select) {
     case TILE_MAP_9800_9BFF: return &e->vram.map[0];
     case TILE_MAP_9C00_9FFF: return &e->vram.map[1];
@@ -2585,7 +2545,7 @@ static TileMap* get_tile_map(struct Emulator* e, enum TileMapSelect select) {
   }
 }
 
-static Tile* get_tile_data(struct Emulator* e, enum TileDataSelect select) {
+static Tile* get_tile_data(Emulator* e, TileDataSelect select) {
   switch (select) {
     case TILE_DATA_8000_8FFF: return &e->vram.tile[0];
     case TILE_DATA_8800_97FF: return &e->vram.tile[256];
@@ -2602,12 +2562,11 @@ static uint8_t get_tile_map_palette_index(TileMap* map,
   return (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
 }
 
-static RGBA get_palette_index_rgba(uint8_t palette_index,
-                                   struct Palette* palette) {
+static RGBA get_palette_index_rgba(uint8_t palette_index, Palette* palette) {
   return s_color_to_rgba[palette->color[palette_index]];
 }
 
-static void render_line(struct Emulator* e, uint8_t line_y) {
+static void render_line(Emulator* e, uint8_t line_y) {
   assert(line_y < SCREEN_HEIGHT);
   RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
 
@@ -2622,7 +2581,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   if (e->ppu.lcdc.bg_display && !e->config.disable_bg) {
     TileMap* map = get_tile_map(e, e->ppu.lcdc.bg_tile_map_select);
     Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
-    struct Palette* palette = &e->ppu.bgp;
+    Palette* palette = &e->ppu.bgp;
     uint8_t bg_y = line_y + e->ppu.SCY;
     uint8_t bg_x = e->ppu.SCX;
     int sx;
@@ -2638,7 +2597,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
       line_y >= e->ppu.frame_WY && !e->config.disable_window) {
     TileMap* map = get_tile_map(e, e->ppu.lcdc.window_tile_map_select);
     Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
-    struct Palette* palette = &e->ppu.bgp;
+    Palette* palette = &e->ppu.bgp;
     uint8_t win_x = 0;
     int sx = 0;
     if (e->ppu.WX < WINDOW_X_OFFSET) {
@@ -2659,14 +2618,14 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
 
   if (e->ppu.lcdc.obj_display && !e->config.disable_obj) {
     uint8_t obj_height = s_obj_size_to_height[e->ppu.lcdc.obj_size];
-    struct Obj line_objs[OBJ_PER_LINE_COUNT];
+    Obj line_objs[OBJ_PER_LINE_COUNT];
     int n;
     int dst = 0;
     /* Put the visible sprites into line_objs, but insert them so sprites with
      * smaller X-coordinates are earlier. Also, store the Y-coordinate relative
      * to the line being drawn, range [0..obj_height). */
     for (n = 0; n < OBJ_COUNT && dst < OBJ_PER_LINE_COUNT; ++n) {
-      struct Obj *src = &e->oam.objs[n];
+      Obj *src = &e->oam.objs[n];
       uint8_t rel_y = line_y - src->y;
       if (rel_y < obj_height) {
         int j = dst;
@@ -2682,7 +2641,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
 
     /* Draw in reverse so sprites with higher priority are rendered on top. */
     for (n = dst - 1; n >= 0; --n) {
-      struct Obj* o = &line_objs[n];
+      Obj* o = &line_objs[n];
       uint8_t oy = o->y;
       assert(oy < obj_height);
 
@@ -2700,7 +2659,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
         tile_data = &e->vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
       }
 
-      struct Palette* palette = &e->oam.obp[o->palette];
+      Palette* palette = &e->oam.obp[o->palette];
       int d = 1;
       uint8_t sx = o->x;
       if (o->xflip) {
@@ -2724,7 +2683,7 @@ static void render_line(struct Emulator* e, uint8_t line_y) {
   }
 }
 
-static void dma_mcycle(struct Emulator* e) {
+static void dma_mcycle(Emulator* e) {
   if (e->dma.state == DMA_INACTIVE) {
     return;
   }
@@ -2739,7 +2698,7 @@ static void dma_mcycle(struct Emulator* e) {
 
   uint8_t addr_offset = (e->dma.cycles - DMA_DELAY_CYCLES) >> 2;
   assert(addr_offset < OAM_TRANSFER_SIZE);
-  struct MemoryTypeAddressPair pair = e->dma.source;
+  MemoryTypeAddressPair pair = e->dma.source;
   pair.addr += addr_offset;
   uint8_t value = read_u8_no_dma_check(e, pair);
   write_oam_no_mode_check(e, addr_offset, value);
@@ -2749,8 +2708,8 @@ static void dma_mcycle(struct Emulator* e) {
   }
 }
 
-static void ppu_mcycle(struct Emulator* e) {
-  struct PPU* ppu = &e->ppu;
+static void ppu_mcycle(Emulator* e) {
+  PPU* ppu = &e->ppu;
   if (!ppu->lcdc.display) {
     return;
   }
@@ -2805,7 +2764,7 @@ static void ppu_mcycle(struct Emulator* e) {
   check_if_lcd_stat(e);
 }
 
-static void timer_mcycle(struct Emulator* e) {
+static void timer_mcycle(Emulator* e) {
   if (e->timer.on && e->timer.tima_overflow) {
     e->timer.tima_overflow = FALSE;
     e->timer.TIMA = e->timer.TMA;
@@ -2815,7 +2774,7 @@ static void timer_mcycle(struct Emulator* e) {
   write_div_counter(e, e->timer.div_counter + CPU_MCYCLE);
 }
 
-static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
+static void update_channel_sweep(Channel* channel, Sweep* sweep) {
   if (!sweep->enabled) {
     return;
   }
@@ -2847,8 +2806,7 @@ static void update_channel_sweep(struct Channel* channel, struct Sweep* sweep) {
   }
 }
 
-static uint8_t update_square_wave(struct Channel* channel,
-                                  struct SquareWave* wave) {
+static uint8_t update_square_wave(Channel* channel, SquareWave* wave) {
   static uint8_t duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] = {
     {0, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_12_5 */
     {1, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_25 */
@@ -2866,7 +2824,7 @@ static uint8_t update_square_wave(struct Channel* channel,
   return wave->sample;
 }
 
-static void update_channel_length(struct Channel* channel) {
+static void update_channel_length(Channel* channel) {
   if (channel->length_enabled && channel->length > 0) {
     if (--channel->length == 0) {
       channel->status = FALSE;
@@ -2874,9 +2832,8 @@ static void update_channel_length(struct Channel* channel) {
   }
 }
 
-static void update_channel_envelope(struct Emulator* e,
-                                    struct Channel* channel) {
-  struct Envelope* envelope = &channel->envelope;
+static void update_channel_envelope(Emulator* e, Channel* channel) {
+  Envelope* envelope = &channel->envelope;
   if (envelope->period) {
     if (envelope->automatic && --envelope->timer == 0) {
       envelope->timer = envelope->period;
@@ -2899,12 +2856,12 @@ static void update_channel_envelope(struct Emulator* e,
   }
 }
 
-static uint8_t update_wave(struct APU* apu, struct Wave* wave) {
+static uint8_t update_wave(APU* apu, Wave* wave) {
   if (wave->cycles <= APU_CYCLES) {
     wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
-    struct WaveSample sample;
+    WaveSample sample;
     sample.time = apu->cycles + wave->cycles;
     sample.position = wave->position;
     sample.byte = wave->ram[wave->position >> 1];
@@ -2922,7 +2879,7 @@ static uint8_t update_wave(struct APU* apu, struct Wave* wave) {
   return wave->sample[0].data;
 }
 
-static uint8_t update_noise(struct APU* apu, struct Noise* noise) {
+static uint8_t update_noise(APU* apu, Noise* noise) {
   if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT &&
       noise->cycles <= APU_CYCLES) {
     noise->cycles += noise->period;
@@ -2938,17 +2895,15 @@ static uint8_t update_noise(struct APU* apu, struct Noise* noise) {
   return noise->sample;
 }
 
-static uint16_t channelx_sample(struct Channel* channel, uint8_t sample) {
+static uint16_t channelx_sample(Channel* channel, uint8_t sample) {
   assert(channel->status);
   assert(sample < 2);
   assert(channel->envelope.volume < 16);
-  /* Convert from a 4-bit sample to a 16-bit sample. */
+  /* Convert from a 1-bit sample (with 4-bit volume) to a 16-bit sample. */
   return (sample * channel->envelope.volume) << 12;
 }
 
-static uint16_t channel3_sample(struct Channel* channel,
-                                struct Wave* wave,
-                                uint8_t sample) {
+static uint16_t channel3_sample(Channel* channel, Wave* wave, uint8_t sample) {
   assert(channel->status);
   assert(sample < 16);
   assert(wave->volume < WAVE_VOLUME_COUNT);
@@ -2957,15 +2912,15 @@ static uint16_t channel3_sample(struct Channel* channel,
   return (sample >> shift[wave->volume]) << 12;
 }
 
-static void write_sample(struct APU* apu, uint16_t so1, uint16_t so2) {
-  struct AudioBuffer* buffer = apu->buffer;
+static void write_sample(APU* apu, uint16_t so1, uint16_t so2) {
+  AudioBuffer* buffer = apu->buffer;
   assert(buffer->position + 2 <= buffer->end);
   *buffer->position++ = so1;
   *buffer->position++ = so2;
 }
 
-static void apu_mcycle(struct Emulator* e) {
-  struct APU* apu = &e->apu;
+static void apu_mcycle(Emulator* e) {
+  APU* apu = &e->apu;
   uint8_t i;
   if (!apu->enabled) {
     for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
@@ -2974,21 +2929,21 @@ static void apu_mcycle(struct Emulator* e) {
     return;
   }
 
-  struct Channel* channel1 = &apu->channel[CHANNEL1];
-  struct Channel* channel2 = &apu->channel[CHANNEL2];
-  struct Channel* channel3 = &apu->channel[CHANNEL3];
-  struct Channel* channel4 = &apu->channel[CHANNEL4];
-  struct Sweep* sweep = &apu->sweep;
-  struct Wave* wave = &apu->wave;
-  struct Noise* noise = &apu->noise;
+  Channel* channel1 = &apu->channel[CHANNEL1];
+  Channel* channel2 = &apu->channel[CHANNEL2];
+  Channel* channel3 = &apu->channel[CHANNEL3];
+  Channel* channel4 = &apu->channel[CHANNEL4];
+  Sweep* sweep = &apu->sweep;
+  Wave* wave = &apu->wave;
+  Noise* noise = &apu->noise;
 
   /* Synchronize with CPU cycle counter. */
   apu->cycles = e->cycles;
 
   for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
-    enum Bool do_length = FALSE;
-    enum Bool do_envelope = FALSE;
-    enum Bool do_sweep = FALSE;
+    Bool do_length = FALSE;
+    Bool do_envelope = FALSE;
+    Bool do_sweep = FALSE;
     apu->cycles += APU_CYCLES;
     apu->frame_cycles += APU_CYCLES;
     if (VALUE_WRAPPED(apu->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
@@ -3093,7 +3048,7 @@ static void apu_mcycle(struct Emulator* e) {
   }
 }
 
-static void serial_mcycle(struct Emulator* e) {
+static void serial_mcycle(Emulator* e) {
   if (!e->serial.transferring) {
     return;
   }
@@ -3111,7 +3066,7 @@ static void serial_mcycle(struct Emulator* e) {
   }
 }
 
-static void mcycle(struct Emulator* e) {
+static void mcycle(Emulator* e) {
   dma_mcycle(e);
   ppu_mcycle(e);
   timer_mcycle(e);
@@ -3120,24 +3075,24 @@ static void mcycle(struct Emulator* e) {
   e->cycles += CPU_MCYCLE;
 }
 
-static uint8_t read_u8_cy(struct Emulator* e, Address addr) {
+static uint8_t read_u8_cy(Emulator* e, Address addr) {
   mcycle(e);
   uint8_t result = read_u8(e, addr);
   return result;
 }
 
-static uint16_t read_u16_cy(struct Emulator* e, Address addr) {
+static uint16_t read_u16_cy(Emulator* e, Address addr) {
   uint8_t lo = read_u8_cy(e, addr);
   uint8_t hi = read_u8_cy(e, addr + 1);
   return (hi << 8) | lo;
 }
 
-static void write_u8_cy(struct Emulator* e, Address addr, uint8_t value) {
+static void write_u8_cy(Emulator* e, Address addr, uint8_t value) {
   mcycle(e);
   write_u8(e, addr, value);
 }
 
-static void write_u16_cy(struct Emulator* e, Address addr, uint16_t value) {
+static void write_u16_cy(Emulator* e, Address addr, uint16_t value) {
   write_u8_cy(e, addr + 1, value >> 8);
   write_u8_cy(e, addr, value);
 }
@@ -3249,7 +3204,7 @@ static const char* s_cb_opcode_mnemonic[256] = {
     "SET 7,H",    "SET 7,L", "SET 7,(HL)", "SET 7,A",
 };
 
-static void print_instruction(struct Emulator* e, Address addr) {
+static void print_instruction(Emulator* e, Address addr) {
   uint8_t opcode = read_u8(e, addr);
   if (opcode == 0xcb) {
     uint8_t cb_opcode = read_u8(e, addr + 1);
@@ -3288,10 +3243,7 @@ static void print_instruction(struct Emulator* e, Address addr) {
   }
 }
 
-static void print_registers(struct Registers* reg) {
-}
-
-static void print_emulator_info(struct Emulator* e) {
+static void print_emulator_info(Emulator* e) {
   if (s_trace && !e->interrupts.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
            e->reg.A, e->reg.F.Z ? 'Z' : '-', e->reg.F.N ? 'N' : '-',
@@ -3548,7 +3500,7 @@ static void print_emulator_info(struct Emulator* e) {
 #define XOR_MR(MR) RA ^= READMR(MR); XOR_FLAGS
 #define XOR_N RA ^= READ_N; XOR_FLAGS
 
-static void execute_instruction(struct Emulator* e) {
+static void execute_instruction(Emulator* e) {
   int8_t s;
   uint8_t u;
   uint16_t u16;
@@ -4104,7 +4056,7 @@ static void execute_instruction(struct Emulator* e) {
   e->reg.PC = new_pc;
 }
 
-static void handle_interrupts(struct Emulator* e) {
+static void handle_interrupts(Emulator* e) {
   if (!(e->interrupts.IME || e->interrupts.halt)) {
     return;
   }
@@ -4159,7 +4111,7 @@ static void handle_interrupts(struct Emulator* e) {
   e->interrupts.halt = FALSE;
 }
 
-static void step_emulator(struct Emulator* e) {
+static void step_emulator(Emulator* e) {
   print_emulator_info(e);
   execute_instruction(e);
   handle_interrupts(e);
@@ -4171,11 +4123,11 @@ enum {
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
 };
 
-static void reset_audio_buffer(struct Emulator* e) {
+static void reset_audio_buffer(Emulator* e) {
   e->apu.buffer->position = e->apu.buffer->data;
 }
 
-static EmulatorEvent run_emulator_until_event(struct Emulator* e,
+static EmulatorEvent run_emulator_until_event(Emulator* e,
                                               EmulatorEvent last_event,
                                               uint32_t requested_samples) {
   if (last_event & EMULATOR_EVENT_NEW_FRAME) {
@@ -4185,11 +4137,11 @@ static EmulatorEvent run_emulator_until_event(struct Emulator* e,
     reset_audio_buffer(e);
   }
 
-  struct AudioBuffer* buffer = e->apu.buffer;
+  AudioBuffer* buffer = e->apu.buffer;
   assert(requested_samples <= buffer->end - buffer->data);
 
   EmulatorEvent result = 0;
-  enum Bool running = TRUE;
+  Bool running = TRUE;
   while (running) {
     if (e->ppu.new_frame_edge) {
       result |= EMULATOR_EVENT_NEW_FRAME;
@@ -4205,7 +4157,7 @@ static EmulatorEvent run_emulator_until_event(struct Emulator* e,
   return result;
 }
 
-struct SDLAudio {
+typedef struct {
   SDL_AudioSpec spec;
   uint8_t* buffer;
   uint8_t* buffer_end;
@@ -4216,15 +4168,15 @@ struct SDLAudio {
   size_t buffer_target_available; /* Try to keep the buffer this size. */
   uint32_t freq_counter;          /* Counter used for resampling
                                      [0..APU_CYCLES_PER_SECOND). */
-  enum Bool ready; /* Set to TRUE when audio is first rendered. */
-};
+  Bool ready; /* Set to TRUE when audio is first rendered. */
+} SDLAudio;
 
-struct SDL {
+typedef struct {
   SDL_Surface* surface;
-  struct SDLAudio audio;
+  SDLAudio audio;
   uint32_t last_event_cycles; /* GB CPU cycle count of last event. */
   double last_event_real_ms;  /* Wall clock time of last event. */
-};
+} SDL;
 
 /* TODO: remove this global */
 static struct timespec s_start_time;
@@ -4241,7 +4193,7 @@ static double get_time_ms(void) {
   return ms + (double)(to.tv_nsec - from.tv_nsec) / 1000000;
 }
 
-static enum Result sdl_init_video(struct SDL* sdl) {
+static Result sdl_init_video(SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
   sdl->surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
   CHECK_MSG(sdl->surface != NULL, "SDL_SetVideoMode failed.\n");
@@ -4255,8 +4207,8 @@ error:
 }
 
 static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
-  struct SDL* sdl = userdata;
-  struct SDLAudio* audio = &sdl->audio;
+  SDL* sdl = userdata;
+  SDLAudio* audio = &sdl->audio;
   if (len > (int)audio->buffer_available) {
     DEBUG(sdl, "!!! audio underflow. avail %zd < requested %u\n",
           audio->buffer_available, len);
@@ -4275,7 +4227,7 @@ static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
   audio->buffer_available -= len;
 }
 
-static enum Result sdl_init_audio(struct SDL* sdl) {
+static Result sdl_init_audio(SDL* sdl) {
   sdl->last_event_cycles = 0;
   sdl->last_event_real_ms = get_time_ms();
 
@@ -4308,15 +4260,14 @@ error:
   return ERROR;
 }
 
-static uint32_t get_gb_channel_samples(struct SDL* sdl, size_t buffer_bytes) {
+static uint32_t get_gb_channel_samples(SDL* sdl, size_t buffer_bytes) {
   size_t samples = buffer_bytes / (AUDIO_CHANNELS * AUDIO_SAMPLE_SIZE) + 1;
   return (uint32_t)((double)samples * APU_CYCLES_PER_SECOND /
                     sdl->audio.spec.freq) *
          SOUND_OUTPUT_COUNT;
 }
 
-static enum Result init_audio_buffer(struct SDL* sdl,
-                                     struct AudioBuffer* audio_buffer) {
+static Result init_audio_buffer(SDL* sdl, AudioBuffer* audio_buffer) {
   uint32_t gb_channel_samples =
       get_gb_channel_samples(sdl, sdl->audio.spec.size) +
       AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
@@ -4330,21 +4281,21 @@ error:
   return ERROR;
 }
 
-static void sdl_destroy(struct SDL* sdl) {
+static void sdl_destroy(SDL* sdl) {
   if (sdl->surface) {
     SDL_FreeSurface(sdl->surface);
   }
   SDL_Quit();
 }
 
-static enum Bool sdl_poll_events(struct Emulator* e) {
-  enum Bool running = TRUE;
+static Bool sdl_poll_events(Emulator* e) {
+  Bool running = TRUE;
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
       case SDL_KEYDOWN:
       case SDL_KEYUP: {
-        enum Bool set = event.type == SDL_KEYDOWN;
+        Bool set = event.type == SDL_KEYDOWN;
         switch (event.key.keysym.sym) {
           case SDLK_1: if (set) e->config.disable_sound[CHANNEL1] ^= 1; break;
           case SDLK_2: if (set) e->config.disable_sound[CHANNEL2] ^= 1; break;
@@ -4374,7 +4325,7 @@ static enum Bool sdl_poll_events(struct Emulator* e) {
   return running;
 }
 
-static void sdl_render_surface(struct SDL* sdl, struct Emulator* e) {
+static void sdl_render_surface(SDL* sdl, Emulator* e) {
   SDL_Surface* surface = sdl->surface;
   if (SDL_LockSurface(surface) == 0) {
     uint32_t* pixels = surface->pixels;
@@ -4401,7 +4352,7 @@ static void sdl_render_surface(struct SDL* sdl, struct Emulator* e) {
   SDL_Flip(surface);
 }
 
-static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
+static void sdl_synchronize(SDL* sdl, Emulator* e) {
   double now_ms = get_time_ms();
   double gb_ms = (double)(e->cycles - sdl->last_event_cycles) *
                  MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
@@ -4441,8 +4392,7 @@ static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
 }
 
 /* Returns TRUE if there was overflow. */
-static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
-                                        uint16_t sample) {
+static Bool sdl_write_audio_sample(SDLAudio* audio, uint16_t sample) {
   if (audio->buffer_available < audio->buffer_capacity) {
     AudioBufferSample* dst = (AudioBufferSample*)audio->write_pos;
     *dst = AUDIO_CONVERT_SAMPLE_U16SYS(sample);
@@ -4458,12 +4408,12 @@ static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
   }
 }
 
-static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
+static void sdl_render_audio(SDL* sdl, Emulator* e) {
   const uint32_t freq = sdl->audio.spec.freq;
   assert(AUDIO_CHANNELS == SOUND_OUTPUT_COUNT);
 
-  enum Bool overflow = FALSE;
-  struct SDLAudio* audio = &sdl->audio;
+  Bool overflow = FALSE;
+  SDLAudio* audio = &sdl->audio;
   uint32_t accumulator[AUDIO_CHANNELS];
   ZERO_MEMORY(accumulator);
   uint32_t divisor = 0;
@@ -4524,10 +4474,9 @@ static void get_save_filename(const char* rom_filename,
   }
 }
 
-static enum Result read_external_ram_from_file(struct Emulator* e,
-                                               const char* filename) {
+static Result read_external_ram_from_file(Emulator* e, const char* filename) {
   FILE* f = NULL;
-  if (e->external_ram.battery_type == WITH_BATTERY) {
+  if (e->external_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "rb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
     uint8_t* data = e->external_ram.data;
@@ -4543,10 +4492,9 @@ error:
   return ERROR;
 }
 
-static enum Result write_external_ram_to_file(struct Emulator* e,
-                                              const char* filename) {
+static Result write_external_ram_to_file(Emulator* e, const char* filename) {
   FILE* f = NULL;
-  if (e->external_ram.battery_type == WITH_BATTERY) {
+  if (e->external_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "wb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
     uint8_t* data = e->external_ram.data;
@@ -4567,11 +4515,11 @@ int main(int argc, char** argv) {
   --argc; ++argv;
   int result = 1;
 
-  struct RomData rom_data;
-  struct Emulator emulator;
-  struct Emulator* e = &emulator;
-  struct SDL sdl;
-  struct AudioBuffer audio_buffer;
+  RomData rom_data;
+  Emulator emulator;
+  Emulator* e = &emulator;
+  SDL sdl;
+  AudioBuffer audio_buffer;
 
   ZERO_MEMORY(rom_data);
   ZERO_MEMORY(emulator);
