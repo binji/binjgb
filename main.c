@@ -60,7 +60,6 @@ typedef uint16_t MaskedAddress;
 typedef uint32_t RGBA;
 
 /* Configurable constants */
-#define FRAME_LIMITER 1
 #define RGBA_WHITE 0xffffffffu
 #define RGBA_LIGHT_GRAY 0xffaaaaaau
 #define RGBA_DARK_GRAY 0xff555555u
@@ -78,9 +77,15 @@ typedef uint16_t AudioBufferSample;
 /* Try to keep the audio buffer filled to |number of samples| *
  * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
 #define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
-/* If the emulator is running behind by AUDIO_MAX_DESYNC_MS milliseconds, it
- * won't try to catch up, and instead just forcibly resync. */
-#define AUDIO_MAX_DESYNC_MS 20
+#define AUDIO_MAX_BUFFER_SIZE_MULTIPLIER 4
+/* One buffer will be requested every AUDIO_BUFFER_REFILL_MS milliseconds. */
+#define AUDIO_BUFFER_REFILL_MS \
+  ((AUDIO_SAMPLES / AUDIO_CHANNELS) * MILLISECONDS_PER_SECOND / AUDIO_FREQUENCY)
+/* If the emulator is running behind by AUDIO_MAX_FAST_DESYNC_MS milliseconds
+ * (or ahead by AUDIO_MAX_FAST_DESYNC_MS), it won't try to catch up, and
+ * instead just forcibly resync. */
+#define AUDIO_MAX_SLOW_DESYNC_MS (0.5 * AUDIO_BUFFER_REFILL_MS)
+#define AUDIO_MAX_FAST_DESYNC_MS (2 * AUDIO_BUFFER_REFILL_MS)
 #define SAVE_EXTENSION ".sav"
 
 /* ROM header stuff */
@@ -1006,6 +1011,7 @@ struct EmulatorConfig {
   enum Bool disable_bg;
   enum Bool disable_window;
   enum Bool disable_obj;
+  enum Bool no_sync;
 };
 
 struct Emulator {
@@ -4252,8 +4258,8 @@ static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
   struct SDL* sdl = userdata;
   struct SDLAudio* audio = &sdl->audio;
   if (len > (int)audio->buffer_available) {
-    INFO(apu, "!!! audio underflow. avail %zd < requested %u\n",
-         audio->buffer_available, len);
+    DEBUG(sdl, "!!! audio underflow. avail %zd < requested %u\n",
+          audio->buffer_available, len);
     len = audio->buffer_available;
   }
   if (audio->read_pos + len > audio->buffer_end) {
@@ -4287,7 +4293,7 @@ static enum Result sdl_init_audio(struct SDL* sdl) {
 
   /* Enough for 1 second of audio. */
   size_t buffer_capacity =
-      sdl->audio.spec.freq * AUDIO_SAMPLE_SIZE * AUDIO_CHANNELS;
+      (size_t)(sdl->audio.spec.size * AUDIO_MAX_BUFFER_SIZE_MULTIPLIER);
   sdl->audio.buffer_capacity = buffer_capacity;
 
   sdl->audio.buffer = malloc(buffer_capacity);
@@ -4309,8 +4315,8 @@ static uint32_t get_gb_channel_samples(struct SDL* sdl, size_t buffer_bytes) {
          SOUND_OUTPUT_COUNT;
 }
 
-static enum Result sdl_init_audio_buffer(struct SDL* sdl,
-                                         struct AudioBuffer* audio_buffer) {
+static enum Result init_audio_buffer(struct SDL* sdl,
+                                     struct AudioBuffer* audio_buffer) {
   uint32_t gb_channel_samples =
       get_gb_channel_samples(sdl, sdl->audio.spec.size) +
       AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
@@ -4356,6 +4362,7 @@ static enum Bool sdl_poll_events(struct Emulator* e) {
           case SDLK_RETURN: e->joypad.start = set; break;
           case SDLK_BACKSPACE: e->joypad.select = set; break;
           case SDLK_ESCAPE: running = FALSE; break;
+          case SDLK_TAB: e->config.no_sync = set; break;
           default: break;
         }
         break;
@@ -4401,31 +4408,34 @@ static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
   double real_ms = now_ms - sdl->last_event_real_ms;
   double delta_ms = gb_ms - real_ms;
   double delay_until_ms = now_ms + delta_ms;
-  DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
-        delta_ms, gb_ms, real_ms);
-  if (real_ms < gb_ms) {
-    do {
-      if (delta_ms > 1) {
-        SDL_Delay(delta_ms - 0.1);
-      } else {
-        sched_yield();
-      }
-      now_ms = get_time_ms();
-      delta_ms = delay_until_ms - now_ms;
-    } while (delta_ms > 0);
-    sdl->last_event_real_ms = delay_until_ms;
+  if (delta_ms < -AUDIO_MAX_SLOW_DESYNC_MS ||
+      delta_ms > AUDIO_MAX_FAST_DESYNC_MS) {
+    DEBUG(sdl, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
+          real_ms);
+    /* Major desync; don't try to catch up, just reset. But our audio buffer
+     * is probably behind (or way ahead), so pause to refill. */
+    sdl->last_event_real_ms = now_ms;
+    SDL_PauseAudio(1);
+    sdl->audio.ready = FALSE;
+    SDL_LockAudio();
+    sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
+    sdl->audio.buffer_available = 0;
+    SDL_UnlockAudio();
   } else {
-    if (delta_ms < -AUDIO_MAX_DESYNC_MS) {
-      INFO(sdl, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
-           real_ms);
-      /* Major desync; don't try to catch up, just reset. But our audio buffer
-       * is probably behind, so pause to refill. */
-      sdl->last_event_real_ms = now_ms;
-      SDL_PauseAudio(1);
-      sdl->audio.ready = FALSE;
-    } else {
-      sdl->last_event_real_ms = delay_until_ms;
+    if (real_ms < gb_ms) {
+      DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
+            delta_ms, gb_ms, real_ms);
+      do {
+        if (delta_ms > 1) {
+          SDL_Delay(delta_ms - 0.1);
+        } else {
+          sched_yield();
+        }
+        now_ms = get_time_ms();
+        delta_ms = delay_until_ms - now_ms;
+      } while (delta_ms > 0);
     }
+    sdl->last_event_real_ms = delay_until_ms;
   }
   sdl->last_event_cycles = e->cycles;
 }
@@ -4489,8 +4499,7 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   SDL_UnlockAudio();
 
   if (overflow) {
-    INFO(apu, "Audio buffer overflow (old size = %zu).\n",
-         old_buffer_available);
+    DEBUG(sdl, "!!! audio overflow (old size = %zu)\n", old_buffer_available);
   } else {
     DEBUG(sdl, "+++ %.1f: buf: %zu -> %zu\n", get_time_ms(),
           old_buffer_available, new_buffer_available);
@@ -4579,7 +4588,7 @@ int main(int argc, char** argv) {
 
   CHECK(SUCCESS(sdl_init_video(&sdl)));
   CHECK(SUCCESS(sdl_init_audio(&sdl)));
-  CHECK(SUCCESS(sdl_init_audio_buffer(&sdl, &audio_buffer)));
+  CHECK(SUCCESS(init_audio_buffer(&sdl, &audio_buffer)));
 
   CHECK(SUCCESS(init_emulator(e, &rom_data, &audio_buffer)));
   read_external_ram_from_file(e, save_filename);
@@ -4599,9 +4608,9 @@ int main(int argc, char** argv) {
     }
     sdl_render_audio(&sdl, e);
     reset_audio_buffer(e);
-#if FRAME_LIMITER
-    sdl_synchronize(&sdl, e);
-#endif
+    if (!e->config.no_sync) {
+      sdl_synchronize(&sdl, e);
+    }
   }
 
   write_external_ram_to_file(e, save_filename);

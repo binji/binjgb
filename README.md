@@ -31,6 +31,7 @@ Keys:
 | Disable BG layer | b |
 | Disable Window layer | w |
 | Disable OBJ (sprites) | o |
+| Fast-forward | tab |
 
 ## Test status
 
