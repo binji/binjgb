@@ -965,6 +965,7 @@ struct LCDStatus {
   enum Bool using_oam_intr;
   enum Bool vblank_intr;
   enum Bool hblank_intr;
+  enum Bool ly_eq_lyc;
   enum PPUMode mode;
   /* Internal state */
   enum PPUMode new_mode;
@@ -1618,7 +1619,7 @@ static uint8_t read_io(struct Emulator* e, MaskedAddress addr) {
              READ_REG(e->ppu.stat.using_oam_intr, STAT_USING_OAM_INTR) |
              READ_REG(e->ppu.stat.vblank_intr, STAT_VBLANK_INTR) |
              READ_REG(e->ppu.stat.hblank_intr, STAT_HBLANK_INTR) |
-             READ_REG(e->ppu.LY == e->ppu.LYC, STAT_YCOMPARE) |
+             READ_REG(e->ppu.stat.ly_eq_lyc, STAT_YCOMPARE) |
              READ_REG(e->ppu.stat.mode, STAT_MODE);
     case IO_SCY_ADDR:
       return e->ppu.SCY;
@@ -1986,7 +1987,7 @@ static void write_div_counter(struct Emulator* e, uint16_t div_counter) {
 static void check_if_lcd_stat(struct Emulator* e) {
   if (e->ppu.lcdc.display) {
     enum Bool set =
-        (e->ppu.stat.y_compare_intr && e->ppu.LY == e->ppu.LYC) ||
+        (e->ppu.stat.y_compare_intr && e->ppu.stat.ly_eq_lyc) ||
         (e->ppu.stat.using_oam_intr &&
          (e->ppu.stat.new_mode == PPU_MODE_USING_OAM ||
           (e->ppu.stat.new_mode == PPU_MODE_VBLANK &&
@@ -1997,6 +1998,12 @@ static void check_if_lcd_stat(struct Emulator* e) {
       e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
     }
     e->interrupts.if_lcd_stat = set;
+  }
+}
+
+static void update_ly_eq_lyc(struct Emulator* e) {
+  if (e->ppu.lcdc.display) {
+    e->ppu.stat.ly_eq_lyc = e->ppu.LY == e->ppu.LYC;
   }
 }
 
@@ -2071,6 +2078,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
         if (lcdc->display) {
           DEBUG(ppu, "Enabling display.\n");
           e->ppu.stat.mode = PPU_MODE_USING_OAM;
+          update_ly_eq_lyc(e);
         } else {
           DEBUG(ppu, "Disabling display.\n");
           e->ppu.stat.mode = PPU_MODE_HBLANK;
@@ -2101,6 +2109,7 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_LYC_ADDR:
       e->ppu.LYC = value;
+      update_ly_eq_lyc(e);
       check_if_lcd_stat(e);
       break;
     case IO_DMA_ADDR:
@@ -2756,6 +2765,7 @@ static void ppu_mcycle(struct Emulator* e) {
       ppu->frame_WY = ppu->WY;
       ppu->win_y = 0;
     }
+    update_ly_eq_lyc(e);
     if (ppu->line_y < SCREEN_HEIGHT) {
       DEBUG(ppu, "USING_OAM @ %u\n", cycles);
       ppu->stat.new_mode = PPU_MODE_USING_OAM;
@@ -2770,6 +2780,7 @@ static void ppu_mcycle(struct Emulator* e) {
   } else if (ppu->line_y == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
              ppu->line_cycles == PPU_LINE_153_CYCLES) {
     ppu->LY = 0;
+    update_ly_eq_lyc(e);
     DEBUG(ppu, "LYC[%u?=%u] @ %u\n", ppu->LY, ppu->LYC, cycles);
   } else if (ppu->line_y < SCREEN_HEIGHT) {
     if (ppu->line_cycles == PPU_USING_OAM_CYCLES) {
@@ -3269,17 +3280,22 @@ static void print_instruction(struct Emulator* e, Address addr) {
 }
 
 static void print_registers(struct Registers* reg) {
-  printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", reg->A,
-         reg->F.Z ? 'Z' : '-', reg->F.N ? 'N' : '-',
-         reg->F.H ? 'H' : '-', reg->F.C ? 'C' : '-', reg->BC, reg->DE,
-         reg->HL, reg->SP, reg->PC);
 }
 
 static void print_emulator_info(struct Emulator* e) {
   if (s_trace && !e->interrupts.halt) {
-    print_registers(&e->reg);
-    printf(" (cy: %u) ppu:%c%u | ", e->cycles, e->ppu.lcdc.display ? '+' : '-',
-           e->ppu.stat.mode);
+    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
+           e->reg.A, e->reg.F.Z ? 'Z' : '-', e->reg.F.N ? 'N' : '-',
+           e->reg.F.H ? 'H' : '-', e->reg.F.C ? 'C' : '-', e->reg.BC, e->reg.DE,
+           e->reg.HL, e->reg.SP, e->reg.PC);
+    printf(" (cy: %u)", e->cycles);
+    if (s_log_level_ppu >= 1) {
+      printf(" ppu:%c%u", e->ppu.lcdc.display ? '+' : '-', e->ppu.stat.mode);
+    }
+    if (s_log_level_ppu >= 2) {
+      printf(" LY:%u", e->ppu.LY);
+    }
+    printf(" |");
     print_instruction(e, e->reg.PC);
     printf("\n");
     if (s_trace_counter > 0) {
