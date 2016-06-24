@@ -2067,10 +2067,13 @@ static void write_io(struct Emulator* e, MaskedAddress addr, uint8_t value) {
       lcdc->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
       if (was_enabled ^ lcdc->display) {
         e->ppu.line_cycles = 0;
-        e->ppu.LY = e->ppu.line_y = SCREEN_HEIGHT;
-        e->ppu.stat.mode = PPU_MODE_HBLANK;
-        DEBUG(ppu, "%s display.\n", lcdc->display ? "Enabling" : "Disabling");
-        if (!lcdc->display) {
+        e->ppu.LY = e->ppu.line_y = 0;
+        if (lcdc->display) {
+          DEBUG(ppu, "Enabling display.\n");
+          e->ppu.stat.mode = PPU_MODE_USING_OAM;
+        } else {
+          DEBUG(ppu, "Disabling display.\n");
+          e->ppu.stat.mode = PPU_MODE_HBLANK;
           /* Clear the framebuffer. */
           size_t i;
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
