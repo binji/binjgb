@@ -78,6 +78,9 @@ typedef uint16_t AudioBufferSample;
 /* Try to keep the audio buffer filled to |number of samples| *
  * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
 #define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
+/* If the emulator is running behind by AUDIO_MAX_DESYNC_MS milliseconds, it
+ * won't try to catch up, and instead just forcibly resync. */
+#define AUDIO_MAX_DESYNC_MS 20
 #define SAVE_EXTENSION ".sav"
 
 /* ROM header stuff */
@@ -4398,7 +4401,7 @@ static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
   double real_ms = now_ms - sdl->last_event_real_ms;
   double delta_ms = gb_ms - real_ms;
   double delay_until_ms = now_ms + delta_ms;
-  DEBUG(sdl, "... %.1f: waiting %.1fms  [gb_ms=%.1f  real_ms=%.1f ]\n", now_ms,
+  DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
         delta_ms, gb_ms, real_ms);
   if (real_ms < gb_ms) {
     do {
@@ -4410,8 +4413,20 @@ static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
       now_ms = get_time_ms();
       delta_ms = delay_until_ms - now_ms;
     } while (delta_ms > 0);
+    sdl->last_event_real_ms = delay_until_ms;
+  } else {
+    if (delta_ms < -AUDIO_MAX_DESYNC_MS) {
+      INFO(sdl, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
+           real_ms);
+      /* Major desync; don't try to catch up, just reset. But our audio buffer
+       * is probably behind, so pause to refill. */
+      sdl->last_event_real_ms = now_ms;
+      SDL_PauseAudio(1);
+      sdl->audio.ready = FALSE;
+    } else {
+      sdl->last_event_real_ms = delay_until_ms;
+    }
   }
-  sdl->last_event_real_ms = delay_until_ms;
   sdl->last_event_cycles = e->cycles;
 }
 
@@ -4476,9 +4491,12 @@ static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   if (overflow) {
     INFO(apu, "Audio buffer overflow (old size = %zu).\n",
          old_buffer_available);
+  } else {
+    DEBUG(sdl, "+++ %.1f: buf: %zu -> %zu\n", get_time_ms(),
+          old_buffer_available, new_buffer_available);
   }
   if (!audio->ready && new_buffer_available >= audio->buffer_target_available) {
-    DEBUG(apu, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
+    DEBUG(sdl, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
           new_buffer_available);
     audio->ready = TRUE;
     SDL_PauseAudio(0);
