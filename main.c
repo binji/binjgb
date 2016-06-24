@@ -68,11 +68,13 @@ typedef uint32_t RGBA;
 #define RENDER_SCALE 4
 #define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
 #define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
-#define AUDIO_DESIRED_FREQUENCY 44100
-#define AUDIO_DESIRED_FORMAT AUDIO_S16SYS
-#define AUDIO_DESIRED_CHANNELS 2
-#define AUDIO_DESIRED_SAMPLES 4096
-#define AUDIO_MAX_CHANNELS 2
+#define AUDIO_FREQUENCY 44100
+#define AUDIO_FORMAT AUDIO_U16SYS
+#define AUDIO_CONVERT_SAMPLE_U16SYS(X) (X)
+#define AUDIO_CHANNELS 2
+#define AUDIO_SAMPLES 4096
+#define AUDIO_SAMPLE_SIZE 2
+typedef uint16_t AudioBufferSample;
 /* Try to keep the audio buffer filled to |number of samples| *
  * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
 #define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
@@ -4175,24 +4177,15 @@ static EmulatorEvent run_emulator_until_event(struct Emulator* e,
   return result;
 }
 
-union SDLBufferPointer {
-  void* v;
-  int8_t* s8;
-  uint8_t* u8;
-  int16_t* s16;
-  uint16_t* u16;
-};
-
 struct SDLAudio {
   SDL_AudioSpec spec;
-  union SDLBufferPointer buffer;
-  union SDLBufferPointer buffer_end;
-  union SDLBufferPointer read_pos;
-  union SDLBufferPointer write_pos;
+  uint8_t* buffer;
+  uint8_t* buffer_end;
+  uint8_t* read_pos;
+  uint8_t* write_pos;
   size_t buffer_capacity;         /* Total capacity in bytes of the buffer. */
   size_t buffer_available;        /* Number of bytes available for reading. */
   size_t buffer_target_available; /* Try to keep the buffer this size. */
-  size_t sample_size;             /* Size of one channel's sample in bytes. */
   uint32_t freq_counter;          /* Counter used for resampling
                                      [0..APU_CYCLES_PER_SECOND). */
   enum Bool ready; /* Set to TRUE when audio is first rendered. */
@@ -4236,102 +4229,59 @@ error:
 static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
   struct SDL* sdl = userdata;
   struct SDLAudio* audio = &sdl->audio;
-  int underflow_left = 0;
   if (len > (int)audio->buffer_available) {
     INFO(apu, "!!! audio underflow. avail %zd < requested %u\n",
          audio->buffer_available, len);
-    underflow_left = len - audio->buffer_available;
     len = audio->buffer_available;
   }
-  union SDLBufferPointer src_buf = audio->buffer;
-  union SDLBufferPointer src_buf_end = audio->buffer_end;
-  union SDLBufferPointer* src = &audio->read_pos;
-  if (src->u8 + len > src_buf_end.u8) {
-    size_t len1 = src_buf_end.u8 - src->u8;
+  if (audio->read_pos + len > audio->buffer_end) {
+    size_t len1 = audio->buffer_end - audio->read_pos;
     size_t len2 = len - len1;
-    memcpy(dst, src->u8, len1);
-    memcpy(dst + len1, src_buf.u8, len2);
-    src->v = src_buf.u8 + len2;
+    memcpy(dst, audio->read_pos, len1);
+    memcpy(dst + len1, audio->buffer, len2);
+    audio->read_pos = audio->buffer + len2;
   } else {
-    memcpy(dst, src->u8, len);
-    src->v = src->u8 + len;
+    memcpy(dst, audio->read_pos, len);
+    audio->read_pos += len;
   }
   audio->buffer_available -= len;
-  if (underflow_left) {
-    memset(dst + len, 0, underflow_left);
-  }
-}
-
-static const char* get_sdl_audio_format_string(uint16_t format) {
-  switch (format) {
-    case AUDIO_U8: return "AUDIO_U8";
-    case AUDIO_S8: return "AUDIO_S8";
-    case AUDIO_U16LSB: return "AUDIO_U16LSB";
-    case AUDIO_S16LSB: return "AUDIO_S16LSB";
-    case AUDIO_U16MSB: return "AUDIO_U16MSB";
-    case AUDIO_S16MSB: return "AUDIO_S16MSB";
-    default: return "unknown";
-  }
-}
-
-static size_t get_sdl_format_sample_size(uint16_t format) {
-  switch (format) {
-    case AUDIO_U8: return 1;
-    case AUDIO_S8: return 1;
-    case AUDIO_U16LSB: return 2;
-    case AUDIO_S16LSB: return 2;
-    case AUDIO_U16MSB: return 2;
-    case AUDIO_S16MSB: return 2;
-    default: UNREACHABLE("Bad format: 0x%04x\n", format);
-  }
 }
 
 static enum Result sdl_init_audio(struct SDL* sdl) {
   sdl->last_event_cycles = 0;
   sdl->last_event_real_ms = get_time_ms();
 
-  SDL_AudioSpec desired_spec = {
-      .freq = AUDIO_DESIRED_FREQUENCY,
-      .format = AUDIO_DESIRED_FORMAT,
-      .channels = AUDIO_DESIRED_CHANNELS,
-      .samples = AUDIO_DESIRED_SAMPLES,
-      .callback = sdl_audio_callback,
-      .userdata = sdl,
-  };
-  CHECK_MSG(SDL_OpenAudio(&desired_spec, &sdl->audio.spec) == 0,
+  sdl->audio.spec.freq = AUDIO_FREQUENCY;
+  sdl->audio.spec.format = AUDIO_FORMAT;
+  sdl->audio.spec.channels = AUDIO_CHANNELS;
+  sdl->audio.spec.samples = AUDIO_SAMPLES;
+  sdl->audio.spec.callback = sdl_audio_callback;
+  sdl->audio.spec.userdata = sdl;
+  CHECK_MSG(SDL_OpenAudio(&sdl->audio.spec, NULL) == 0,
             "SDL_OpenAudio failed.\n");
-  INFO(apu, "SDL frequency = %u\n", sdl->audio.spec.freq);
-  INFO(apu, "SDL format = %s\n",
-       get_sdl_audio_format_string(sdl->audio.spec.format));
-  INFO(apu, "SDL channels = %u\n", sdl->audio.spec.channels);
-  INFO(apu, "SDL samples = %u\n", sdl->audio.spec.samples);
-  CHECK_MSG(sdl->audio.spec.channels == AUDIO_DESIRED_CHANNELS,
-            "Expcted 2 channels.\n");
 
-  sdl->audio.sample_size = get_sdl_format_sample_size(sdl->audio.spec.format);
   sdl->audio.buffer_target_available =
       (size_t)(sdl->audio.spec.size * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER);
 
   /* Enough for 1 second of audio. */
   size_t buffer_capacity =
-      sdl->audio.spec.freq * sdl->audio.sample_size * sdl->audio.spec.channels;
+      sdl->audio.spec.freq * AUDIO_SAMPLE_SIZE * AUDIO_CHANNELS;
   sdl->audio.buffer_capacity = buffer_capacity;
 
-  sdl->audio.buffer.v = malloc(buffer_capacity);
-  CHECK_MSG(sdl->audio.buffer.v != NULL,
+  sdl->audio.buffer = malloc(buffer_capacity);
+  CHECK_MSG(sdl->audio.buffer != NULL,
             "SDL audio buffer allocation failed.\n");
-  memset(sdl->audio.buffer.v, 0, buffer_capacity);
+  memset(sdl->audio.buffer, 0, buffer_capacity);
 
-  sdl->audio.buffer_end.v = sdl->audio.buffer.u8 + buffer_capacity;
-  sdl->audio.read_pos.v = sdl->audio.write_pos.v = sdl->audio.buffer.v;
+  sdl->audio.buffer_end = sdl->audio.buffer + buffer_capacity;
+  sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
   return OK;
 error:
   return ERROR;
 }
 
 static uint32_t get_gb_channel_samples(struct SDL* sdl, size_t buffer_bytes) {
-  size_t samples =
-      buffer_bytes / (sdl->audio.spec.channels * sdl->audio.sample_size) + 1;
+  size_t samples = buffer_bytes / (AUDIO_CHANNELS * AUDIO_SAMPLE_SIZE) + 1;
   return (uint32_t)((double)samples * APU_CYCLES_PER_SECOND /
                     sdl->audio.spec.freq) *
          SOUND_OUTPUT_COUNT;
@@ -4447,27 +4397,16 @@ static void sdl_synchronize(struct SDL* sdl, struct Emulator* e) {
 }
 
 /* Returns TRUE if there was overflow. */
-/* TODO: use function pointers? */
 static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
-                                        union SDLBufferPointer* dst,
-                                        union SDLBufferPointer dst_buf,
-                                        union SDLBufferPointer dst_buf_end,
                                         uint16_t sample) {
   if (audio->buffer_available < audio->buffer_capacity) {
-    switch (audio->spec.format) {
-      case AUDIO_U8: *dst->u8 = sample >> 8; break;
-      case AUDIO_S8: *dst->s8 = (sample >> 8) - 128; break;
-      case AUDIO_U16LSB: *dst->u16 = sample; break;
-      case AUDIO_S16LSB: *dst->s16 = sample - 32768; break;
-      /* TODO */
-      case AUDIO_U16MSB: *dst->u16 = sample; break;
-      case AUDIO_S16MSB: *dst->s16 = sample - 32768; break;
-    }
-    audio->buffer_available += audio->sample_size;
-    dst->u8 += audio->sample_size;
-    assert(dst->v <= dst_buf_end.v);
-    if (dst->v == dst_buf_end.v) {
-      dst->v = dst_buf.v;
+    AudioBufferSample* dst = (AudioBufferSample*)audio->write_pos;
+    *dst = AUDIO_CONVERT_SAMPLE_U16SYS(sample);
+    audio->buffer_available += AUDIO_SAMPLE_SIZE;
+    audio->write_pos += AUDIO_SAMPLE_SIZE;
+    assert(audio->write_pos <= audio->buffer_end);
+    if (audio->write_pos == audio->buffer_end) {
+      audio->write_pos = audio->buffer;
     }
     return FALSE;
   } else {
@@ -4477,35 +4416,30 @@ static enum Bool sdl_write_audio_sample(struct SDLAudio* audio,
 
 static void sdl_render_audio(struct SDL* sdl, struct Emulator* e) {
   const uint32_t freq = sdl->audio.spec.freq;
-  const uint32_t channels = sdl->audio.spec.channels;
-  /* TODO support audio spec with different output channel count. */
-  assert(channels == SOUND_OUTPUT_COUNT);
+  assert(AUDIO_CHANNELS == SOUND_OUTPUT_COUNT);
 
   enum Bool overflow = FALSE;
   struct SDLAudio* audio = &sdl->audio;
-  uint32_t accumulator[AUDIO_MAX_CHANNELS];
+  uint32_t accumulator[AUDIO_CHANNELS];
   ZERO_MEMORY(accumulator);
   uint32_t divisor = 0;
 
   uint16_t* src = e->apu.buffer->data;
   uint16_t* src_end = e->apu.buffer->position;
-  union SDLBufferPointer dst_buf = audio->buffer;
-  union SDLBufferPointer dst_buf_end = audio->buffer_end;
-  union SDLBufferPointer* dst = &audio->write_pos;
 
   SDL_LockAudio();
   size_t old_buffer_available = audio->buffer_available;
   size_t i;
-  for (; src < src_end; src += channels) {
+  for (; src < src_end; src += AUDIO_CHANNELS) {
     sdl->audio.freq_counter += freq;
-    for (i = 0; i < channels; ++i) {
+    for (i = 0; i < AUDIO_CHANNELS; ++i) {
       accumulator[i] += src[i];
     }
     divisor++;
     if (VALUE_WRAPPED(sdl->audio.freq_counter, APU_CYCLES_PER_SECOND)) {
-      for (i = 0; i < channels; ++i) {
+      for (i = 0; i < AUDIO_CHANNELS; ++i) {
         uint16_t sample = accumulator[i] / divisor;
-        if (sdl_write_audio_sample(audio, dst, dst_buf, dst_buf_end, sample)) {
+        if (sdl_write_audio_sample(audio, sample)) {
           overflow = TRUE;
           break;
         }
