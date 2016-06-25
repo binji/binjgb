@@ -141,6 +141,7 @@ typedef uint16_t AudioBufferSample;
 #define PPU_LINE_CYCLES 456
 #define PPU_VBLANK_CYCLES 4560
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
+#define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
 #define DMA_CYCLES 648
 #define DMA_DELAY_CYCLES 8
 #define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
@@ -1003,6 +1004,7 @@ typedef struct {
   uint8_t win_y;  /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
   Bool new_frame_edge;
+  uint8_t display_delay_frames; /* Wait this many frames before displaying. */
 } PPU;
 
 typedef struct {
@@ -2077,6 +2079,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
         if (lcdc->display) {
           DEBUG(ppu, "Enabling display.\n");
           e->ppu.stat.mode = PPU_MODE_USING_OAM;
+          e->ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           update_ly_eq_lyc(e);
         } else {
           DEBUG(ppu, "Disabling display.\n");
@@ -2751,7 +2754,11 @@ static void ppu_mcycle(Emulator* e) {
       /* VBlank interrupt is only triggered once (unlike STAT vblank). */
       if (ppu->line_y == SCREEN_HEIGHT) {
         e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
-        ppu->new_frame_edge = TRUE;
+        if (ppu->display_delay_frames == 0) {
+          ppu->new_frame_edge = TRUE;
+        } else {
+          ppu->display_delay_frames--;
+        }
         ppu->frame++;
       }
     }
