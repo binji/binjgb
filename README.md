@@ -32,6 +32,8 @@ Keys:
 | Disable Window layer | w |
 | Disable OBJ (sprites) | o |
 | Fast-forward | tab |
+| Pause | space |
+| Step one frame | n |
 
 ## Test status
 

@@ -1019,6 +1019,8 @@ typedef struct {
   Bool disable_window;
   Bool disable_obj;
   Bool no_sync;
+  Bool paused;
+  Bool step;
 } EmulatorConfig;
 
 typedef struct Emulator {
@@ -2734,14 +2736,11 @@ static void ppu_mcycle(Emulator* e) {
   ppu->line_cycles += CPU_MCYCLE;
   if (VALUE_WRAPPED(ppu->line_cycles, PPU_LINE_CYCLES)) {
     ++ppu->line_y;
-    ppu->LY = ppu->line_y;
-    ppu->new_frame_edge = VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK);
-    if (ppu->new_frame_edge) {
-      ppu->frame++;
-      ppu->LY = 0;
+    if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
       ppu->frame_WY = ppu->WY;
       ppu->win_y = 0;
     }
+    ppu->LY = ppu->line_y;
     update_ly_eq_lyc(e);
     if (ppu->line_y < SCREEN_HEIGHT) {
       DEBUG(ppu, "USING_OAM @ %u\n", cycles);
@@ -2752,6 +2751,8 @@ static void ppu_mcycle(Emulator* e) {
       /* VBlank interrupt is only triggered once (unlike STAT vblank). */
       if (ppu->line_y == SCREEN_HEIGHT) {
         e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
+        ppu->new_frame_edge = TRUE;
+        ppu->frame++;
       }
     }
   } else if (ppu->line_y == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
@@ -4342,6 +4343,13 @@ static Bool sdl_poll_events(Emulator* e) {
           case SDLK_BACKSPACE: e->joypad.select = set; break;
           case SDLK_ESCAPE: running = FALSE; break;
           case SDLK_TAB: e->config.no_sync = set; break;
+          case SDLK_SPACE: if (set) e->config.paused ^= 1; break;
+          case SDLK_n:
+            if (set) {
+              e->config.step = 1;
+              e->config.paused = 0;
+            }
+            break;
           default: break;
         }
         break;
@@ -4592,6 +4600,15 @@ int main(int argc, char** argv) {
   double next_flip_ms = now_ms + VIDEO_FRAME_MS;
   EmulatorEvent event = 0;
   while (TRUE) {
+    if (e->config.paused) {
+      if (!sdl_poll_events(e)) {
+        break;
+      }
+      SDL_PauseAudio(e->config.paused || !sdl.audio.ready);
+      SDL_Delay(VIDEO_FRAME_MS);
+      continue;
+    }
+
     size_t buffer_needed =
         sdl.audio.spec.size - sdl.audio.buffer_available % sdl.audio.spec.size;
     uint32_t requested_samples = get_gb_channel_samples(&sdl, buffer_needed);
@@ -4615,6 +4632,10 @@ int main(int argc, char** argv) {
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       sdl_render_surface(&sdl, e);
+      if (e->config.step) {
+        e->config.paused = TRUE;
+        e->config.step = FALSE;
+      }
     }
     sdl_render_audio(&sdl, e);
     reset_audio_buffer(e);
