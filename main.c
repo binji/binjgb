@@ -21,6 +21,8 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 #ifndef NDEBUG
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -86,6 +88,12 @@ typedef uint16_t AudioBufferSample;
  * instead just forcibly resync. */
 #define AUDIO_MAX_SLOW_DESYNC_MS (0.5 * AUDIO_BUFFER_REFILL_MS)
 #define AUDIO_MAX_FAST_DESYNC_MS (2 * AUDIO_BUFFER_REFILL_MS)
+/* Run this many instructions before checking for timeout. */
+#define EMULATOR_INSTRUCTION_QUANTA 2000
+#define POLL_EVENT_MS 10.0
+#define VIDEO_FRAME_MS \
+  ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
+#define SDL_SURFACE_COUNT 2
 #define SAVE_EXTENSION ".sav"
 
 /* ROM header stuff */
@@ -132,6 +140,7 @@ typedef uint16_t AudioBufferSample;
 #define PPU_HBLANK_CYCLES 204 /* TODO: this should vary on SCX, # of sprites */
 #define PPU_LINE_CYCLES 456
 #define PPU_VBLANK_CYCLES 4560
+#define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
 #define DMA_CYCLES 648
 #define DMA_DELAY_CYCLES 8
 #define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
@@ -4121,15 +4130,32 @@ typedef uint32_t EmulatorEvent;
 enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
+  EMULATOR_EVENT_TIMEOUT = 0x4,
 };
 
 static void reset_audio_buffer(Emulator* e) {
   e->apu.buffer->position = e->apu.buffer->data;
 }
 
+/* TODO: remove this global */
+static struct timespec s_start_time;
+static double get_time_ms(void) {
+  struct timespec from = s_start_time;
+  struct timespec to;
+  int result = clock_gettime(CLOCK_MONOTONIC, &to);
+  assert(result == 0);
+  double ms = (double)(to.tv_sec - from.tv_sec) * 1000;
+  if (to.tv_nsec < from.tv_nsec) {
+    ms -= 1000;
+    to.tv_nsec += 1000000000;
+  }
+  return ms + (double)(to.tv_nsec - from.tv_nsec) / 1000000;
+}
+
 static EmulatorEvent run_emulator_until_event(Emulator* e,
                                               EmulatorEvent last_event,
-                                              uint32_t requested_samples) {
+                                              uint32_t requested_samples,
+                                              double until_ms) {
   if (last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->ppu.new_frame_edge = FALSE;
   }
@@ -4143,16 +4169,23 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
   EmulatorEvent result = 0;
   Bool running = TRUE;
   while (running) {
-    if (e->ppu.new_frame_edge) {
-      result |= EMULATOR_EVENT_NEW_FRAME;
+    int i;
+    for (i = 0; running && i < EMULATOR_INSTRUCTION_QUANTA; ++i) {
+      if (e->ppu.new_frame_edge) {
+        result |= EMULATOR_EVENT_NEW_FRAME;
+        running = FALSE;
+      }
+      size_t samples = buffer->position - buffer->data;
+      if (samples >= requested_samples) {
+        result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
+        running = FALSE;
+      }
+      step_emulator(e);
+    }
+    if (get_time_ms() >= until_ms) {
+      result |= EMULATOR_EVENT_TIMEOUT;
       running = FALSE;
     }
-    size_t samples = buffer->position - buffer->data;
-    if (samples >= requested_samples) {
-      result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
-      running = FALSE;
-    }
-    step_emulator(e);
   }
   return result;
 }
@@ -4172,37 +4205,39 @@ typedef struct {
 } SDLAudio;
 
 typedef struct {
-  SDL_Surface* surface;
+  SDL_Surface* surface[SDL_SURFACE_COUNT];
+  uint8_t used_surfaces;
   SDLAudio audio;
   uint32_t last_event_cycles; /* GB CPU cycle count of last event. */
   double last_event_real_ms;  /* Wall clock time of last event. */
 } SDL;
 
-/* TODO: remove this global */
-static struct timespec s_start_time;
-static double get_time_ms(void) {
-  struct timespec from = s_start_time;
-  struct timespec to;
-  int result = clock_gettime(CLOCK_MONOTONIC, &to);
-  assert(result == 0);
-  double ms = (double)(to.tv_sec - from.tv_sec) * 1000;
-  if (to.tv_nsec < from.tv_nsec) {
-    ms -= 1000;
-    to.tv_nsec += 1000000000;
+static void sdl_destroy(SDL* sdl) {
+  int i;
+  for (i = 0; i < SDL_SURFACE_COUNT; ++i) {
+    if (sdl->surface[i]) {
+      SDL_FreeSurface(sdl->surface[i]);
+    }
+    sdl->surface[i] = NULL;
   }
-  return ms + (double)(to.tv_nsec - from.tv_nsec) / 1000000;
+  SDL_Quit();
 }
 
 static Result sdl_init_video(SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
-  sdl->surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
-  CHECK_MSG(sdl->surface != NULL, "SDL_SetVideoMode failed.\n");
+  SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
+  CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
+  sdl->surface[0] = surface;
+  int i;
+  for (i = 1; i < SDL_SURFACE_COUNT; ++i) {
+    sdl->surface[i] = SDL_CreateRGBSurface(
+        SDL_SWSURFACE, surface->w, surface->h, 32, surface->format->Rmask,
+        surface->format->Gmask, surface->format->Bmask, surface->format->Amask);
+    CHECK_MSG(sdl->surface[i], "SDL_CreateRGBSurface failed.\n");
+  }
   return OK;
 error:
-  if (sdl->surface) {
-    SDL_FreeSurface(sdl->surface);
-    sdl->surface = NULL;
-  }
+  sdl_destroy(sdl);
   return ERROR;
 }
 
@@ -4281,13 +4316,6 @@ error:
   return ERROR;
 }
 
-static void sdl_destroy(SDL* sdl) {
-  if (sdl->surface) {
-    SDL_FreeSurface(sdl->surface);
-  }
-  SDL_Quit();
-}
-
 static Bool sdl_poll_events(Emulator* e) {
   Bool running = TRUE;
   SDL_Event event;
@@ -4325,8 +4353,26 @@ static Bool sdl_poll_events(Emulator* e) {
   return running;
 }
 
+static void sdl_flip_surface(SDL* sdl, Bool force) {
+  if (sdl->used_surfaces > 0 &&
+      (force || sdl->used_surfaces == SDL_SURFACE_COUNT)) {
+    DEBUG(sdl, "@@@ %.1f: flip surface\n", get_time_ms());
+    SDL_Flip(sdl->surface[0]);
+    sdl->used_surfaces--;
+    /* Cycle the surfaces */
+    SDL_Surface* temp = sdl->surface[0];
+    int i;
+    for (i = 1; i < SDL_SURFACE_COUNT - 1; ++i) {
+      sdl->surface[i - 1] = sdl->surface[i];
+    }
+    sdl->surface[SDL_SURFACE_COUNT - 1] = temp;
+  }
+}
+
 static void sdl_render_surface(SDL* sdl, Emulator* e) {
-  SDL_Surface* surface = sdl->surface;
+  sdl_flip_surface(sdl, FALSE);
+  assert(sdl->used_surfaces < SDL_SURFACE_COUNT);
+  SDL_Surface* surface = sdl->surface[sdl->used_surfaces];
   if (SDL_LockSurface(surface) == 0) {
     uint32_t* pixels = surface->pixels;
     int sx, sy;
@@ -4348,8 +4394,8 @@ static void sdl_render_surface(SDL* sdl, Emulator* e) {
       }
     }
     SDL_UnlockSurface(surface);
+    sdl->used_surfaces++;
   }
-  SDL_Flip(surface);
 }
 
 static void sdl_synchronize(SDL* sdl, Emulator* e) {
@@ -4541,16 +4587,32 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(init_emulator(e, &rom_data, &audio_buffer)));
   read_external_ram_from_file(e, save_filename);
 
+  double now_ms = get_time_ms();
+  double next_poll_event_ms = now_ms + POLL_EVENT_MS;
+  double next_flip_ms = now_ms + VIDEO_FRAME_MS;
   EmulatorEvent event = 0;
   while (TRUE) {
-    if (!sdl_poll_events(e)) {
-      break;
-    }
-
     size_t buffer_needed =
         sdl.audio.spec.size - sdl.audio.buffer_available % sdl.audio.spec.size;
     uint32_t requested_samples = get_gb_channel_samples(&sdl, buffer_needed);
-    event = run_emulator_until_event(e, event, requested_samples);
+    double timeout_ms = MIN(next_poll_event_ms, next_flip_ms);
+    event = run_emulator_until_event(e, event, requested_samples, timeout_ms);
+    now_ms = get_time_ms();
+    if (event & EMULATOR_EVENT_TIMEOUT) {
+      if (now_ms >= next_flip_ms) {
+        sdl_flip_surface(&sdl, TRUE);
+        while (next_flip_ms <= now_ms) {
+          next_flip_ms = now_ms + VIDEO_FRAME_MS;
+        }
+      } else if (now_ms >= next_poll_event_ms) {
+        if (!sdl_poll_events(e)) {
+          break;
+        }
+        while (next_poll_event_ms <= now_ms) {
+          next_poll_event_ms = now_ms + POLL_EVENT_MS;
+        }
+      }
+    }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       sdl_render_surface(&sdl, e);
     }
