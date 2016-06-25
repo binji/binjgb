@@ -13,9 +13,6 @@
 #include <stdint.h>
 #include <time.h>
 
-#include <SDL/SDL.h>
-#include <SDL/SDL_main.h>
-
 #define SUCCESS(x) ((x) == OK)
 #define FAIL(x) ((x) != OK)
 
@@ -66,35 +63,8 @@ typedef uint32_t RGBA;
 #define RGBA_LIGHT_GRAY 0xffaaaaaau
 #define RGBA_DARK_GRAY 0xff555555u
 #define RGBA_BLACK 0xff000000u
-#define RENDER_SCALE 4
-#define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
-#define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
-#define AUDIO_FREQUENCY 44100
-#define AUDIO_FORMAT AUDIO_U16SYS
-#define AUDIO_CONVERT_SAMPLE_U16SYS(X) (X)
-#define AUDIO_CHANNELS 2
-#define AUDIO_SAMPLES 4096
-#define AUDIO_SAMPLE_SIZE 2
-typedef uint16_t AudioBufferSample;
-/* Try to keep the audio buffer filled to |number of samples| *
- * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
-#define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
-#define AUDIO_MAX_BUFFER_SIZE_MULTIPLIER 4
-/* One buffer will be requested every AUDIO_BUFFER_REFILL_MS milliseconds. */
-#define AUDIO_BUFFER_REFILL_MS \
-  ((AUDIO_SAMPLES / AUDIO_CHANNELS) * MILLISECONDS_PER_SECOND / AUDIO_FREQUENCY)
-/* If the emulator is running behind by AUDIO_MAX_FAST_DESYNC_MS milliseconds
- * (or ahead by AUDIO_MAX_FAST_DESYNC_MS), it won't try to catch up, and
- * instead just forcibly resync. */
-#define AUDIO_MAX_SLOW_DESYNC_MS (0.5 * AUDIO_BUFFER_REFILL_MS)
-#define AUDIO_MAX_FAST_DESYNC_MS (2 * AUDIO_BUFFER_REFILL_MS)
 /* Run this many instructions before checking for timeout. */
 #define EMULATOR_INSTRUCTION_QUANTA 2000
-#define POLL_EVENT_MS 10.0
-#define VIDEO_FRAME_MS \
-  ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
-#define SDL_SURFACE_COUNT 2
-#define SAVE_EXTENSION ".sav"
 
 /* ROM header stuff */
 #define ROM_U8(type, addr) ((type) * (rom_data->data + addr))
@@ -1053,7 +1023,6 @@ static int s_log_level_ppu = 1;
 static int s_log_level_apu = 1;
 static int s_log_level_io = 1;
 static int s_log_level_interrupt = 1;
-static int s_log_level_sdl = 1;
 
 static void print_emulator_info(Emulator*);
 static void write_apu(Emulator*, Address, uint8_t);
@@ -4198,6 +4167,43 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
   return result;
 }
 
+/* SDL stuff */
+
+#ifndef NO_SDL
+
+#include <SDL/SDL.h>
+#include <SDL/SDL_main.h>
+
+#define RENDER_SCALE 4
+#define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
+#define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
+#define AUDIO_FREQUENCY 44100
+#define AUDIO_FORMAT AUDIO_U16SYS
+#define AUDIO_CONVERT_SAMPLE_U16SYS(X) (X)
+#define AUDIO_CHANNELS 2
+#define AUDIO_SAMPLES 4096
+#define AUDIO_SAMPLE_SIZE 2
+typedef uint16_t AudioBufferSample;
+/* Try to keep the audio buffer filled to |number of samples| *
+ * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
+#define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
+#define AUDIO_MAX_BUFFER_SIZE_MULTIPLIER 4
+/* One buffer will be requested every AUDIO_BUFFER_REFILL_MS milliseconds. */
+#define AUDIO_BUFFER_REFILL_MS \
+  ((AUDIO_SAMPLES / AUDIO_CHANNELS) * MILLISECONDS_PER_SECOND / AUDIO_FREQUENCY)
+/* If the emulator is running behind by AUDIO_MAX_FAST_DESYNC_MS milliseconds
+ * (or ahead by AUDIO_MAX_FAST_DESYNC_MS), it won't try to catch up, and
+ * instead just forcibly resync. */
+#define AUDIO_MAX_SLOW_DESYNC_MS (0.5 * AUDIO_BUFFER_REFILL_MS)
+#define AUDIO_MAX_FAST_DESYNC_MS (2 * AUDIO_BUFFER_REFILL_MS)
+#define POLL_EVENT_MS 10.0
+#define VIDEO_FRAME_MS \
+  ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
+#define SDL_SURFACE_COUNT 2
+#define SAVE_EXTENSION ".sav"
+
+static int s_log_level_sdl = 1;
+
 typedef struct {
   SDL_AudioSpec spec;
   uint8_t* buffer;
@@ -4657,3 +4663,5 @@ error:
   sdl_destroy(&sdl);
   return result;
 }
+
+#endif /* NO_SDL */
