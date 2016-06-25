@@ -2,6 +2,7 @@ all: binjgb
 .PHONY: binjgb
 binjgb: debug
 	ln -sf Debug/binjgb out/binjgb
+	ln -sf Debug/tester out/tester
 
 define BUILD
 out/$1:
@@ -12,6 +13,7 @@ out/$1/Makefile: | out/$1
 $2: out/$1/Makefile
 	$(MAKE) --no-print-directory -C out/$1
 	ln -sf $1/binjgb out/binjgb-$2
+	ln -sf $1/tester out/tester-$2
 endef
 
 $(eval $(call BUILD,Debug,debug))

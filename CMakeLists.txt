@@ -9,9 +9,8 @@ add_definitions(
   -Wno-unused-function
   -Wno-unused-variable
 )
-include_directories(${SDL_INCLUDE_DIR})
-add_executable(
-  binjgb
-  main.c
-)
+add_executable(binjgb binjgb.c)
+target_include_directories(binjgb PUBLIC ${SDL_INCLUDE_DIR})
 target_link_libraries(binjgb ${SDL_LIBRARY})
+add_executable(tester tester.c)
+target_compile_definitions(tester PRIVATE NO_SDL)
