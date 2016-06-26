@@ -105,10 +105,12 @@ typedef uint32_t RGBA;
 #define CPU_MCYCLE 4
 #define APU_CYCLES_PER_SECOND (CPU_CYCLES_PER_SECOND / APU_CYCLES)
 #define APU_CYCLES 2 /* APU runs at 2MHz */
-#define PPU_LINE_153_CYCLES 8 /* Line 153 is short; line 0 starts early. */
 #define PPU_USING_OAM_CYCLES 80
-#define PPU_HBLANK_CYCLES 204 /* TODO: this should vary on SCX, # of sprites */
-#define PPU_LINE_CYCLES 456
+#define PPU_USING_OAM_VRAM_CYCLES 172 /* TODO: This and HBLANK are not */
+#define PPU_HBLANK_CYCLES 204         /* correct, they need to vary based on */
+#define PPU_LINE_CYCLES 456           /* SCX, window, sprites, etc. */
+#define PPU_LINE_0_CYCLES 452
+#define PPU_LINE_153_CYCLES 4
 #define PPU_VBLANK_CYCLES 4560
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
 #define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
@@ -969,6 +971,7 @@ typedef struct {
   PPUMode mode;
   /* Internal state */
   PPUMode new_mode;
+  Bool trigger_oam_intr;
 } LCDStatus;
 
 typedef struct {
@@ -982,6 +985,7 @@ typedef struct {
   uint8_t WX;      /* Window X */
   Palette bgp;     /* BG Palette */
   /* Internal state */
+  uint32_t line_total_cycles;
   uint32_t line_cycles;
   uint32_t frame;
   uint8_t line_y; /* The currently rendering line. Can be different than LY. */
@@ -1403,7 +1407,7 @@ static Result init_emulator(Emulator* e,
   e->reg.HL = 0x014d;
   e->reg.SP = 0xfffe;
   e->reg.PC = 0x0100;
-  e->interrupts.IME = TRUE;
+  e->interrupts.IME = FALSE;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
@@ -1969,15 +1973,18 @@ static void write_div_counter(Emulator* e, uint16_t div_counter) {
 
 static void check_if_lcd_stat(Emulator* e) {
   if (e->ppu.lcdc.display) {
-    Bool set =
-        (e->ppu.stat.y_compare_intr && e->ppu.stat.ly_eq_lyc) ||
-        (e->ppu.stat.using_oam_intr &&
-         (e->ppu.stat.new_mode == PPU_MODE_USING_OAM ||
-          (e->ppu.stat.new_mode == PPU_MODE_VBLANK &&
-           e->ppu.stat.mode != PPU_MODE_VBLANK))) ||
-        (e->ppu.stat.vblank_intr && e->ppu.stat.new_mode == PPU_MODE_VBLANK) ||
+    Bool y_compare = (e->ppu.stat.y_compare_intr && e->ppu.stat.ly_eq_lyc);
+    Bool using_oam =
+        (e->ppu.stat.using_oam_intr && e->ppu.stat.trigger_oam_intr);
+    Bool vblank =
+        (e->ppu.stat.vblank_intr && e->ppu.stat.new_mode == PPU_MODE_VBLANK);
+    Bool hblank =
         (e->ppu.stat.hblank_intr && e->ppu.stat.new_mode == PPU_MODE_HBLANK);
+    Bool set = y_compare || using_oam || vblank || hblank;
     if (!e->interrupts.if_lcd_stat && set) {
+      DEBUG(interrupt, "%s: setting LCD_STAT %c%c%c%c\n", __func__,
+            y_compare ? 'Y' : '.', using_oam ? 'O' : '.', vblank ? 'V' : '.',
+            hblank ? 'H' : '.');
       e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
     }
     e->interrupts.if_lcd_stat = set;
@@ -2056,16 +2063,16 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       lcdc->obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
       lcdc->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
       if (was_enabled ^ lcdc->display) {
-        e->ppu.line_cycles = 0;
         e->ppu.LY = e->ppu.line_y = 0;
         if (lcdc->display) {
           DEBUG(ppu, "Enabling display.\n");
-          e->ppu.stat.mode = PPU_MODE_USING_OAM;
+          e->ppu.line_total_cycles = e->ppu.line_cycles = PPU_LINE_0_CYCLES;
+          e->ppu.stat.mode = e->ppu.stat.new_mode = PPU_MODE_USING_OAM;
           e->ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           update_ly_eq_lyc(e);
         } else {
           DEBUG(ppu, "Disabling display.\n");
-          e->ppu.stat.mode = PPU_MODE_HBLANK;
+          e->ppu.stat.mode = e->ppu.stat.new_mode = PPU_MODE_HBLANK;
           /* Clear the framebuffer. */
           size_t i;
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
@@ -2128,6 +2135,8 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       e->ppu.WX = value;
       break;
     case IO_IE_ADDR:
+      s_trace = 0;
+      s_trace_counter = 300;
       e->interrupts.IE = value;
       break;
     default:
@@ -2714,51 +2723,54 @@ static void ppu_mcycle(Emulator* e) {
    * debugging. */
   uint32_t cycles = e->cycles + CPU_MCYCLE;
   if (ppu->stat.new_mode != ppu->stat.mode) {
-    DEBUG(ppu, "MODE%u @ %u\n", ppu->stat.new_mode, cycles);
+    DEBUG(ppu, "MODE%u[LY %u] @ %u\n", ppu->stat.new_mode, ppu->LY, cycles);
     ppu->stat.mode = ppu->stat.new_mode;
   }
-
-  ppu->line_cycles += CPU_MCYCLE;
-  if (VALUE_WRAPPED(ppu->line_cycles, PPU_LINE_CYCLES)) {
+  ppu->stat.trigger_oam_intr = FALSE;
+  ppu->line_cycles -= CPU_MCYCLE;
+  if (ppu->line_cycles == 0) {
     ++ppu->line_y;
-    if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
+    if (ppu->line_y == SCREEN_HEIGHT_WITH_VBLANK - 1) {
+      ppu->line_total_cycles = ppu->line_cycles = PPU_LINE_153_CYCLES;
+    } else if (ppu->line_y == SCREEN_HEIGHT_WITH_VBLANK) {
+      ppu->line_y = 0;
+      ppu->line_total_cycles = ppu->line_cycles = PPU_LINE_0_CYCLES;
       ppu->frame_WY = ppu->WY;
       ppu->win_y = 0;
+    } else {
+      ppu->line_total_cycles = ppu->line_cycles = PPU_LINE_CYCLES;
     }
     ppu->LY = ppu->line_y;
     update_ly_eq_lyc(e);
-    if (ppu->line_y < SCREEN_HEIGHT) {
-      DEBUG(ppu, "USING_OAM @ %u\n", cycles);
+    if (ppu->line_y <= SCREEN_HEIGHT) {
+      DEBUG(ppu, "USING_OAM[LY %u] @ %u\n", ppu->LY, cycles);
       ppu->stat.new_mode = PPU_MODE_USING_OAM;
-    } else {
-      DEBUG(ppu, "VBLANK @ %u\n", cycles);
-      ppu->stat.new_mode = PPU_MODE_VBLANK;
-      /* VBlank interrupt is only triggered once (unlike STAT vblank). */
-      if (ppu->line_y == SCREEN_HEIGHT) {
-        e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
-        if (ppu->display_delay_frames == 0) {
-          ppu->new_frame_edge = TRUE;
-        } else {
-          ppu->display_delay_frames--;
-        }
-        ppu->frame++;
-      }
+      ppu->stat.trigger_oam_intr = TRUE;
     }
-  } else if (ppu->line_y == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
-             ppu->line_cycles == PPU_LINE_153_CYCLES) {
-    ppu->LY = 0;
-    update_ly_eq_lyc(e);
-    DEBUG(ppu, "LYC[%u?=%u] @ %u\n", ppu->LY, ppu->LYC, cycles);
   } else if (ppu->line_y < SCREEN_HEIGHT) {
-    if (ppu->line_cycles == PPU_USING_OAM_CYCLES) {
+    if (ppu->line_cycles == ppu->line_total_cycles - PPU_USING_OAM_CYCLES) {
       render_line(e, ppu->line_y);
       ppu->stat.new_mode = PPU_MODE_USING_OAM_VRAM;
-    } else if (ppu->line_cycles == PPU_LINE_CYCLES - PPU_HBLANK_CYCLES) {
+    } else if (ppu->line_cycles ==
+               ppu->line_total_cycles - PPU_USING_OAM_CYCLES -
+                   PPU_USING_OAM_VRAM_CYCLES) {
       /* TODO: this is inaccurate, HBlank starts at different times depending
        * on how long mode3 took. */
-      DEBUG(ppu, "HBLANK @ %u\n", cycles);
+      DEBUG(ppu, "HBLANK[LY %u] @ %u\n", ppu->LY, cycles);
       ppu->stat.new_mode = PPU_MODE_HBLANK;
     }
+  } else if (ppu->stat.mode == PPU_MODE_USING_OAM &&
+             ppu->line_y == SCREEN_HEIGHT) {
+    /* VBlank interrupt is only triggered once (unlike STAT vblank). */
+    DEBUG(ppu, "VBLANK[LY %u] @ %u\n", ppu->LY, cycles);
+    ppu->stat.new_mode = PPU_MODE_VBLANK;
+    e->interrupts.IF |= INTERRUPT_VBLANK_MASK;
+    if (ppu->display_delay_frames == 0) {
+      ppu->new_frame_edge = TRUE;
+    } else {
+      ppu->display_delay_frames--;
+    }
+    ppu->frame++;
   }
   check_if_lcd_stat(e);
 }
