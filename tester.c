@@ -59,6 +59,13 @@ int main(int argc, char** argv) {
   Emulator* e = &emulator;
   AudioBuffer audio_buffer;
 
+  s_never_trace = 1;
+  s_log_level_memory = 0;
+  s_log_level_ppu = 0;
+  s_log_level_apu = 0;
+  s_log_level_io = 0;
+  s_log_level_interrupt = 0;
+
   ZERO_MEMORY(rom_data);
   ZERO_MEMORY(emulator);
   ZERO_MEMORY(audio_buffer);
