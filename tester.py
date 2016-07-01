@@ -73,13 +73,13 @@ TESTS = [
   (GPU + 'ly143_144_mode3_0.gb', 6, 'c28a76dccba07a034401f11a4b8c7e67a27087b9'),
   (GPU + 'ly_lyc-GS.gb', 6, 'b6fe1abb95ad4e8cc8320c38c14f0802c8e0f618'),
   (GPU + 'ly_lyc_0-GS.gb', 24, '8025aa05fc0e2122c5e34194101947c240e5f44a'),
-  (GPU + 'ly_lyc_0_write-GS.gb', 10, ''),
+  (GPU + 'ly_lyc_0_write-GS.gb', 10, '!d2ef6951caea69d6c284229abe97693a768bdb29'),
   (GPU + 'ly_lyc_144-GS.gb', 6, 'f27220994fdb33d69d0e0cbde01f91bbc9140167'),
   (GPU + 'ly_lyc_153-GS.gb', 12, 'd1218303206175b9a64363db5fbaf72b97d5d038'),
-  (GPU + 'ly_lyc_153_write-GS.gb', 10, ''),
-  (GPU + 'ly_lyc_write-GS.gb', 10, ''),
+  (GPU + 'ly_lyc_153_write-GS.gb', 10, '!562af9c96db0f07d9bd9787a55df0223fb1aaa7b'),
+  (GPU + 'ly_lyc_write-GS.gb', 10, '!9610cf73ee9f0218fc72b33237c94b6aee2a8c49'),
   (GPU + 'ly_new_frame-GS.gb', 12, '407bff6902e048c307868b1feddcdc4cfa79d3f8'),
-  (GPU + 'stat_write_if-GS.gb', 300, ''),
+  (GPU + 'stat_write_if-GS.gb', 300, '!f3c4caff133aeab1199f009c1c7731ad0ef4e7b8'),
   (GPU + 'stat_irq_blocking.gb', 6, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
   (GPU + 'vblank_if_timing.gb', 6, 'dbd9b17120938b29f38da7d6b0004afff70b0419'),
   (GPU + 'vblank_stat_intr-GS.gb', 6, '1f9d2db67edbce5952e0ad85cd28839aab7390c7'),
@@ -95,9 +95,9 @@ TESTS = [
   (TIMER + 'tim11_div_trigger.gb', 1, '245aea6bc6462ff810e4ed6e4398def1480613b8'),
   (TIMER + 'tim11.gb', 1, '245aea6bc6462ff810e4ed6e4398def1480613b8'),
   (TIMER + 'tima_reload.gb', 1, '23c9a0b2139784fc457c39dc6b730702a85d506f'),
-  (TIMER + 'tima_write_reloading.gb', 10, ''),
+  (TIMER + 'tima_write_reloading.gb', 10, '!14426f81f0ffc484e3a69621b47d093e5d304d6f'),
   (TIMER + 'timer_if.gb', 1, '2ff8a38f7421feb1e86de059ed47fb908501ed8a'),
-  (TIMER + 'tma_write_reloading.gb', 10, ''),
+  (TIMER + 'tma_write_reloading.gb', 10, '!62c33e844d66361037fc8e6e34546927e7e21c38'),
 
   ('test/mooneye/emulator-only/mbc1_rom_4banks.gb', 1, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
   ('test/mooneye/manual-only/sprite_priority.gb', 1, 'e055a00339efdde563ba1d0698809abfbed8ff82'),
@@ -106,7 +106,7 @@ TESTS = [
   ('test/blargg/dmg_sound-2/dmg_sound.gb', 2200, 'f68479b3c0de0e8d749a695541422bd29f62e1a3'),
   ('test/blargg/instr_timing/instr_timing.gb', 42, '98e64480d3637d51683cc0d5ae1a3fa266e634e3'),
   ('test/blargg/mem_timing-2/mem_timing.gb', 170, 'f2f2cd0a196587d7b77a762eafd6a26bd95a68c1'),
-  ('test/blargg/oam_bug-2/oam_bug.gb', 1000, ''),
+  ('test/blargg/oam_bug-2/oam_bug.gb', 1000, '!33fe95494d7eb02b36a4d19a1dbf949dcab25c1c'),
 
   ('test/oam_count_v5.gb', 6, '9046cd1217fd36ef9ab715bd0983bcbd3d058c73'),
 ]
@@ -139,7 +139,12 @@ def RunTest(rom, frames, expected):
   ppm = os.path.basename(os.path.splitext(rom)[0]) + '.ppm'
   Run('out/tester', rom, str(frames), ppm)
   actual = HashFile(ppm)
-  if actual == expected:
+  if expected.startswith('!'):
+    expect_fail = True
+    expected = expected[1:]
+  else:
+    expect_fail = False
+  if actual == expected and not expect_fail:
     print '[OK] %s' % rom
     os.remove(ppm)
     return True
