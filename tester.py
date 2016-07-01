@@ -79,8 +79,8 @@ TESTS = [
   (GPU + 'ly_lyc_153_write-GS.gb', 10, ''),
   (GPU + 'ly_lyc_write-GS.gb', 10, ''),
   (GPU + 'ly_new_frame-GS.gb', 12, '407bff6902e048c307868b1feddcdc4cfa79d3f8'),
-  (GPU + 'stat_write_if-GS.gb', 6, ''),
-  (GPU + 'stat_irq_blocking.gb', 6, ''),
+  (GPU + 'stat_write_if-GS.gb', 300, ''),
+  (GPU + 'stat_irq_blocking.gb', 6, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
   (GPU + 'vblank_if_timing.gb', 6, 'dbd9b17120938b29f38da7d6b0004afff70b0419'),
   (GPU + 'vblank_stat_intr-GS.gb', 6, '1f9d2db67edbce5952e0ad85cd28839aab7390c7'),
 

@@ -831,7 +831,6 @@ typedef struct {
   Bool enable;      /* Set after EI instruction. This delays updating IME. */
   Bool halt;        /* Halted, waiting for an interrupt. */
   Bool halt_DI;     /* Halted w/ disabled interrupts. */
-  Bool if_lcd_stat; /* Internal interrupt flag for LCD STAT. */
 } Interrupts;
 
 typedef struct {
@@ -976,10 +975,12 @@ typedef struct {
   LCDStatusInterrupt hblank;
   PPUMode mode;
   /* Internal state */
+  Bool IF; /* Internal interrupt flag. */
   PPUMode next_mode;
   PPUMode trigger_mode;
   uint32_t mode_cycles;
   Bool ly_eq_lyc;
+  Bool new_ly_eq_lyc;
 } LCDStatus;
 
 typedef struct {
@@ -1999,12 +2000,14 @@ static void write_stat(Emulator* e, uint8_t value) {
         e->ppu.stat.trigger_mode == PPU_MODE_HBLANK && !e->ppu.stat.hblank.irq;
     Bool vblank =
         e->ppu.stat.trigger_mode == PPU_MODE_VBLANK && !e->ppu.stat.vblank.irq;
-    Bool set = hblank || vblank;
-    if (!e->interrupts.if_lcd_stat && set) {
+    if (!e->ppu.stat.IF && (hblank || vblank)) {
+      INFO(ppu, ">> trigger STAT from write [%c%c] [LY: %u] [cy: %u]\n",
+           vblank ? 'V' : '.', hblank ? 'H' : '.', e->ppu.LY,
+           e->cycles + CPU_MCYCLE);
       e->interrupts.new_IF |= INTERRUPT_LCD_STAT_MASK;
       e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+      e->ppu.stat.IF = TRUE;
     }
-    e->interrupts.if_lcd_stat = set;
   }
   e->ppu.stat.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
   e->ppu.stat.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
@@ -2012,14 +2015,40 @@ static void write_stat(Emulator* e, uint8_t value) {
   e->ppu.stat.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
 }
 
-static void trigger_stat(Emulator* e, LCDStatusInterrupt* intr, Bool delay) {
+static void check_stat(Emulator* e) {
   if (e->ppu.lcdc.display) {
-    Bool set = intr->irq && intr->trigger;
-    if (!e->interrupts.if_lcd_stat && set) {
+    Bool hblank =
+        e->ppu.stat.trigger_mode == PPU_MODE_HBLANK && e->ppu.stat.hblank.irq;
+    Bool vblank =
+        e->ppu.stat.trigger_mode == PPU_MODE_VBLANK && e->ppu.stat.vblank.irq;
+    Bool mode2 = e->ppu.stat.trigger_mode == PPU_MODE2 && e->ppu.stat.mode2.irq;
+    Bool mode2_edge = e->ppu.stat.mode2.trigger && e->ppu.stat.mode2.irq;
+    Bool y_compare = e->ppu.stat.new_ly_eq_lyc && e->ppu.stat.y_compare.irq;
+    Bool y_compare_edge =
+        e->ppu.stat.y_compare.trigger && e->ppu.stat.y_compare.irq;
+    if (!e->ppu.stat.IF && (hblank || vblank || mode2_edge || y_compare_edge)) {
+      INFO(ppu, ">> trigger STAT [%c%c%c%c] [LY: %u] [cy: %u]\n",
+           y_compare_edge ? 'Y' : '.', mode2_edge ? 'O' : '.',
+           vblank ? 'V' : '.', hblank ? 'H' : '.', e->ppu.LY,
+           e->cycles + CPU_MCYCLE);
       e->interrupts.new_IF |= INTERRUPT_LCD_STAT_MASK;
-      if (!delay) {
+      if (hblank || mode2_edge) {
         e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
       }
+    } else if (!(hblank || vblank || mode2 || y_compare)) {
+      if (e->ppu.stat.IF) {
+        INFO(ppu,
+             ">> clear internal STAT IF tmode:%u [%c%c%c%c%c%c] [LY: %u] [cy: "
+             "%u]\n",
+             e->ppu.stat.trigger_mode, e->ppu.stat.y_compare.trigger ? 'y' : '.',
+             e->ppu.stat.y_compare.irq ? 'Y' : '.',
+             e->ppu.stat.mode2.trigger ? 'o' : '.',
+             e->ppu.stat.mode2.irq ? 'O' : '.',
+             e->ppu.stat.vblank.irq ? 'V' : '.',
+             e->ppu.stat.hblank.irq ? 'H' : '.', e->ppu.LY,
+             e->cycles + CPU_MCYCLE);
+      }
+      e->ppu.stat.IF = FALSE;
     }
   }
 }
@@ -2030,11 +2059,11 @@ static void check_ly_eq_lyc(Emulator* e) {
       INFO(ppu, ">> trigger Y compare [LY: %u] [cy: %u]\n", e->ppu.LY,
            e->cycles + CPU_MCYCLE);
       e->ppu.stat.y_compare.trigger = TRUE;
+      e->ppu.stat.new_ly_eq_lyc = TRUE;
     } else {
       e->ppu.stat.y_compare.trigger = FALSE;
-      e->ppu.stat.ly_eq_lyc = FALSE;
+      e->ppu.stat.ly_eq_lyc = e->ppu.stat.new_ly_eq_lyc = FALSE;
     }
-    trigger_stat(e, &e->ppu.stat.y_compare, TRUE);
   }
 }
 
@@ -2777,9 +2806,11 @@ static void ppu_mcycle(Emulator* e) {
   }
 
   uint32_t cycle = e->cycles + CPU_MCYCLE;
+  PPUMode last_trigger_mode = ppu->stat.trigger_mode;
+  Bool last_mode2_trigger = ppu->stat.mode2.trigger;
+  Bool last_y_compare_trigger = ppu->stat.y_compare.trigger;
 
   /* hblank interrupt */
-  ppu->stat.hblank.trigger = FALSE;
   if (ppu->stat.next_mode == PPU_MODE_HBLANK) {
     ppu->stat.hblank.cycles -= CPU_MCYCLE;
     if (ppu->stat.hblank.cycles <= 0) {
@@ -2787,26 +2818,12 @@ static void ppu_mcycle(Emulator* e) {
         ppu->stat.hblank.delay -= CPU_MCYCLE;
       } else {
         INFO(ppu, ">> trigger mode 0 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
-        ppu->stat.hblank.trigger = TRUE;
         ppu->stat.trigger_mode = PPU_MODE_HBLANK;
         /* Add an aribtrary value so it doesn't retrigger; this value will be
          * reset before the next hblank should occur. */
         ppu->stat.hblank.cycles += PPU_FRAME_CYCLES;
-        trigger_stat(e, &ppu->stat.hblank, FALSE);
       }
     }
-  }
-
-  /* vblank interrupt */
-  ppu->stat.vblank.trigger = FALSE;
-  ppu->stat.vblank.cycles -= CPU_MCYCLE;
-  if (ppu->stat.vblank.cycles == 0) {
-    INFO(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
-    ppu->stat.vblank.trigger = TRUE;
-    ppu->stat.trigger_mode = PPU_MODE_VBLANK;
-    ppu->stat.vblank.cycles += PPU_FRAME_CYCLES;
-    trigger_vblank(e);
-    trigger_stat(e, &ppu->stat.vblank, TRUE);
   }
 
   /* mode2 interrupt */
@@ -2818,8 +2835,16 @@ static void ppu_mcycle(Emulator* e) {
       INFO(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
       ppu->stat.mode2.trigger = TRUE;
       ppu->stat.trigger_mode = PPU_MODE2;
-      trigger_stat(e, &ppu->stat.mode2, FALSE);
     }
+  }
+
+  /* vblank interrupt */
+  ppu->stat.vblank.cycles -= CPU_MCYCLE;
+  if (ppu->stat.vblank.cycles == 0) {
+    INFO(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
+    ppu->stat.trigger_mode = PPU_MODE_VBLANK;
+    ppu->stat.vblank.cycles += PPU_FRAME_CYCLES;
+    trigger_vblank(e);
   }
 
   /* STAT mode */
@@ -2856,7 +2881,8 @@ static void ppu_mcycle(Emulator* e) {
   }
 
   /* LYC */
-  e->ppu.stat.ly_eq_lyc = e->ppu.stat.y_compare.trigger;
+  e->ppu.stat.ly_eq_lyc = e->ppu.stat.new_ly_eq_lyc;
+  e->ppu.stat.y_compare.trigger = FALSE;
   if (ppu->stat.y_compare.delay > 0) {
     ppu->stat.y_compare.delay -= CPU_MCYCLE;
     if (ppu->stat.y_compare.delay == 0) {
@@ -2900,6 +2926,12 @@ static void ppu_mcycle(Emulator* e) {
       ppu->frame_WY = ppu->WY;
       ppu->win_y = 0;
     }
+  }
+
+  if (ppu->stat.trigger_mode != last_trigger_mode ||
+      ppu->stat.mode2.trigger != last_mode2_trigger ||
+      ppu->stat.y_compare.trigger != last_y_compare_trigger) {
+    check_stat(e);
   }
 }
 
@@ -4740,7 +4772,7 @@ int main(int argc, char** argv) {
   --argc; ++argv;
   int result = 1;
 
-#if 1
+#if 0
   s_never_trace = 1;
   s_log_level_memory = 0;
   s_log_level_ppu = 0;
