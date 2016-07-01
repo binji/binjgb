@@ -977,7 +977,9 @@ typedef struct {
   PPUMode mode;
   /* Internal state */
   PPUMode next_mode;
+  PPUMode trigger_mode;
   uint32_t mode_cycles;
+  Bool ly_eq_lyc;
 } LCDStatus;
 
 typedef struct {
@@ -1587,8 +1589,8 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
       return SC_UNUSED | READ_REG(e->serial.transferring, SC_TRANSFER_START) |
              READ_REG(e->serial.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
-      INFO(io, "%s(0x%04x [%s]) [cy: %u].\n", __func__, addr,
-           get_io_reg_string(addr), e->cycles);
+      INFO(io, "%s(0x%04x [%s]) = 0x%02x [cy: %u].\n", __func__, addr,
+           get_io_reg_string(addr), e->timer.div_counter >> 8, e->cycles);
       return e->timer.div_counter >> 8;
     case IO_TIMA_ADDR:
       return e->timer.TIMA;
@@ -1597,10 +1599,12 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
     case IO_TAC_ADDR:
       return TAC_UNUSED | READ_REG(e->timer.on, TAC_TIMER_ON) |
              READ_REG(e->timer.clock_select, TAC_CLOCK_SELECT);
-    case IO_IF_ADDR:
-      INFO(io, "%s(0x%04x [%s]) [cy: %u].\n", __func__, addr,
-           get_io_reg_string(addr), e->cycles);
-      return INTERRUPT_UNUSED | e->interrupts.IF;
+    case IO_IF_ADDR: {
+      uint8_t result = INTERRUPT_UNUSED | e->interrupts.IF;
+      INFO(io, "%s(0x%04x [%s]) = 0x%02x [cy: %u].\n", __func__, addr,
+           get_io_reg_string(addr), result, e->cycles);
+      return result;
+    }
     case IO_LCDC_ADDR:
       return READ_REG(e->ppu.lcdc.display, LCDC_DISPLAY) |
              READ_REG(e->ppu.lcdc.window_tile_map_select,
@@ -1612,16 +1616,18 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
              READ_REG(e->ppu.lcdc.obj_size, LCDC_OBJ_SIZE) |
              READ_REG(e->ppu.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
              READ_REG(e->ppu.lcdc.bg_display, LCDC_BG_DISPLAY);
-    case IO_STAT_ADDR:
-      INFO(io, "%s(0x%04x [%s]) [cy: %u].\n", __func__, addr,
-           get_io_reg_string(addr), e->cycles);
-      return STAT_UNUSED |
-             READ_REG(e->ppu.stat.y_compare.irq, STAT_YCOMPARE_INTR) |
-             READ_REG(e->ppu.stat.mode2.irq, STAT_MODE2_INTR) |
-             READ_REG(e->ppu.stat.vblank.irq, STAT_VBLANK_INTR) |
-             READ_REG(e->ppu.stat.hblank.irq, STAT_HBLANK_INTR) |
-             READ_REG(e->ppu.stat.y_compare.trigger, STAT_YCOMPARE) |
-             READ_REG(e->ppu.stat.mode, STAT_MODE);
+    case IO_STAT_ADDR: {
+      uint8_t result = STAT_UNUSED |
+                       READ_REG(e->ppu.stat.y_compare.irq, STAT_YCOMPARE_INTR) |
+                       READ_REG(e->ppu.stat.mode2.irq, STAT_MODE2_INTR) |
+                       READ_REG(e->ppu.stat.vblank.irq, STAT_VBLANK_INTR) |
+                       READ_REG(e->ppu.stat.hblank.irq, STAT_HBLANK_INTR) |
+                       READ_REG(e->ppu.stat.ly_eq_lyc, STAT_YCOMPARE) |
+                       READ_REG(e->ppu.stat.mode, STAT_MODE);
+      INFO(io, "%s(0x%04x [%s]) = 0x%02x [cy: %u].\n", __func__, addr,
+           get_io_reg_string(addr), result, e->cycles);
+      return result;
+    }
     case IO_SCY_ADDR:
       return e->ppu.SCY;
     case IO_SCX_ADDR:
@@ -1987,30 +1993,48 @@ static void write_div_counter(Emulator* e, uint16_t div_counter) {
   e->timer.div_counter = div_counter;
 }
 
-static void check_if_lcd_stat(Emulator* e) {
+static void write_stat(Emulator* e, uint8_t value) {
   if (e->ppu.lcdc.display) {
-    Bool y_compare =
-        (e->ppu.stat.y_compare.irq && e->ppu.stat.y_compare.trigger);
-    Bool mode2 = (e->ppu.stat.mode2.irq && e->ppu.stat.mode2.trigger);
-    Bool vblank = (e->ppu.stat.vblank.irq && e->ppu.stat.vblank.trigger);
-    Bool hblank = (e->ppu.stat.hblank.irq && e->ppu.stat.hblank.trigger);
-    Bool set = y_compare || mode2 || vblank || hblank;
+    Bool hblank =
+        e->ppu.stat.trigger_mode == PPU_MODE_HBLANK && !e->ppu.stat.hblank.irq;
+    Bool vblank =
+        e->ppu.stat.trigger_mode == PPU_MODE_VBLANK && !e->ppu.stat.vblank.irq;
+    Bool set = hblank || vblank;
     if (!e->interrupts.if_lcd_stat && set) {
-      DEBUG(interrupt, "%s: setting LCD_STAT %c%c%c%c\n", __func__,
-            y_compare ? 'Y' : '.', mode2 ? 'O' : '.', vblank ? 'V' : '.',
-            hblank ? 'H' : '.');
       e->interrupts.new_IF |= INTERRUPT_LCD_STAT_MASK;
-      if (!vblank) {
-        e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
-      }
+      e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
     }
     e->interrupts.if_lcd_stat = set;
   }
+  e->ppu.stat.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
+  e->ppu.stat.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
+  e->ppu.stat.vblank.irq = WRITE_REG(value, STAT_VBLANK_INTR);
+  e->ppu.stat.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
 }
 
-static void update_ly_eq_lyc(Emulator* e) {
+static void trigger_stat(Emulator* e, LCDStatusInterrupt* intr, Bool delay) {
   if (e->ppu.lcdc.display) {
-    e->ppu.stat.y_compare.trigger = e->ppu.LY == e->ppu.LYC;
+    Bool set = intr->irq && intr->trigger;
+    if (!e->interrupts.if_lcd_stat && set) {
+      e->interrupts.new_IF |= INTERRUPT_LCD_STAT_MASK;
+      if (!delay) {
+        e->interrupts.IF |= INTERRUPT_LCD_STAT_MASK;
+      }
+    }
+  }
+}
+
+static void check_ly_eq_lyc(Emulator* e) {
+  if (e->ppu.lcdc.display) {
+    if (e->ppu.LY == e->ppu.LYC) {
+      INFO(ppu, ">> trigger Y compare [LY: %u] [cy: %u]\n", e->ppu.LY,
+           e->cycles + CPU_MCYCLE);
+      e->ppu.stat.y_compare.trigger = TRUE;
+    } else {
+      e->ppu.stat.y_compare.trigger = FALSE;
+      e->ppu.stat.ly_eq_lyc = FALSE;
+    }
+    trigger_stat(e, &e->ppu.stat.y_compare, TRUE);
   }
 }
 
@@ -2034,8 +2058,6 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_DIV_ADDR:
       write_div_counter(e, 0);
-      s_trace = 1;
-      s_trace_counter = 300;
       break;
     case IO_TIMA_ADDR:
       e->timer.TIMA = value;
@@ -2067,8 +2089,6 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case IO_IF_ADDR:
-      s_trace = 1;
-      s_trace_counter = 300;
       e->interrupts.new_IF = e->interrupts.IF = value;
       break;
     case IO_LCDC_ADDR: {
@@ -2089,6 +2109,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
           e->ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           e->ppu.stat.mode = PPU_MODE_HBLANK;
           e->ppu.stat.next_mode = PPU_MODE3;
+          e->ppu.stat.trigger_mode = PPU_MODE2;
           e->ppu.stat.hblank.delay = CPU_MCYCLE;
           e->ppu.stat.vblank.cycles =
               PPU_FRAME_CYCLES - PPU_VBLANK_CYCLES - CPU_MCYCLE;
@@ -2098,9 +2119,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
           e->ppu.LY_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
           e->ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
           e->ppu.LY = e->ppu.line_y = 0;
-          update_ly_eq_lyc(e);
-          s_trace = 1;
-          s_trace_counter = 300;
+          check_ly_eq_lyc(e);
         } else {
           DEBUG(ppu, "Disabling display. [cy: %u]\n", e->cycles);
           e->ppu.stat.mode = PPU_MODE_HBLANK;
@@ -2116,11 +2135,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case IO_STAT_ADDR:
-      e->ppu.stat.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
-      e->ppu.stat.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
-      e->ppu.stat.vblank.irq = WRITE_REG(value, STAT_VBLANK_INTR);
-      e->ppu.stat.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
-      check_if_lcd_stat(e);
+      write_stat(e, value);
       break;
     case IO_SCY_ADDR:
       e->ppu.SCY = value;
@@ -2132,8 +2147,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     case IO_LYC_ADDR:
       e->ppu.LYC = value;
-      update_ly_eq_lyc(e);
-      check_if_lcd_stat(e);
+      check_ly_eq_lyc(e);
       break;
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
@@ -2167,8 +2181,6 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       e->ppu.WX = value;
       break;
     case IO_IE_ADDR:
-      s_trace = 0;
-      s_trace_counter = 300;
       e->interrupts.IE = value;
       break;
     default:
@@ -2764,6 +2776,8 @@ static void ppu_mcycle(Emulator* e) {
     return;
   }
 
+  uint32_t cycle = e->cycles + CPU_MCYCLE;
+
   /* hblank interrupt */
   ppu->stat.hblank.trigger = FALSE;
   if (ppu->stat.next_mode == PPU_MODE_HBLANK) {
@@ -2772,12 +2786,13 @@ static void ppu_mcycle(Emulator* e) {
       if (ppu->stat.hblank.delay > 0) {
         ppu->stat.hblank.delay -= CPU_MCYCLE;
       } else {
-        INFO(ppu, ">> trigger mode 0 [LY: %u] [cy: %u]\n", ppu->LY,
-             e->cycles + CPU_MCYCLE);
+        INFO(ppu, ">> trigger mode 0 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
         ppu->stat.hblank.trigger = TRUE;
+        ppu->stat.trigger_mode = PPU_MODE_HBLANK;
         /* Add an aribtrary value so it doesn't retrigger; this value will be
          * reset before the next hblank should occur. */
         ppu->stat.hblank.cycles += PPU_FRAME_CYCLES;
+        trigger_stat(e, &ppu->stat.hblank, FALSE);
       }
     }
   }
@@ -2786,10 +2801,12 @@ static void ppu_mcycle(Emulator* e) {
   ppu->stat.vblank.trigger = FALSE;
   ppu->stat.vblank.cycles -= CPU_MCYCLE;
   if (ppu->stat.vblank.cycles == 0) {
-    INFO(ppu, ">> trigger mode 1 [cy: %u]\n", e->cycles + CPU_MCYCLE);
+    INFO(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
     ppu->stat.vblank.trigger = TRUE;
+    ppu->stat.trigger_mode = PPU_MODE_VBLANK;
     ppu->stat.vblank.cycles += PPU_FRAME_CYCLES;
     trigger_vblank(e);
+    trigger_stat(e, &ppu->stat.vblank, TRUE);
   }
 
   /* mode2 interrupt */
@@ -2798,15 +2815,18 @@ static void ppu_mcycle(Emulator* e) {
   if (ppu->stat.mode2.cycles == 0) {
     ppu->stat.mode2.cycles = PPU_LINE_CYCLES;
     if (ppu->LY < SCREEN_HEIGHT) {
-      INFO(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY,
-           e->cycles + CPU_MCYCLE);
+      INFO(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
       ppu->stat.mode2.trigger = TRUE;
+      ppu->stat.trigger_mode = PPU_MODE2;
+      trigger_stat(e, &ppu->stat.mode2, FALSE);
     }
   }
 
   /* STAT mode */
   ppu->stat.mode_cycles -= CPU_MCYCLE;
   if (ppu->stat.mode_cycles == 0) {
+    INFO(ppu, ">> mode %u => %u [cy: %u]\n", ppu->stat.mode,
+         ppu->stat.next_mode, cycle);
     PPUMode last_mode = ppu->stat.mode;
     ppu->stat.mode = ppu->stat.next_mode;
     switch (ppu->stat.mode) {
@@ -2826,11 +2846,21 @@ static void ppu_mcycle(Emulator* e) {
         ppu->stat.next_mode = PPU_MODE3;
         break;
       case PPU_MODE3:
+        ppu->stat.trigger_mode = PPU_MODE3;
         ppu->stat.mode_cycles = PPU_MODE3_CYCLES;
         ppu->stat.next_mode = PPU_MODE_HBLANK;
         ppu->stat.hblank.cycles = PPU_MODE3_CYCLES - CPU_MCYCLE;
         render_line(e, ppu->line_y);
         break;
+    }
+  }
+
+  /* LYC */
+  e->ppu.stat.ly_eq_lyc = e->ppu.stat.y_compare.trigger;
+  if (ppu->stat.y_compare.delay > 0) {
+    ppu->stat.y_compare.delay -= CPU_MCYCLE;
+    if (ppu->stat.y_compare.delay == 0) {
+      check_ly_eq_lyc(e);
     }
   }
 
@@ -2854,7 +2884,11 @@ static void ppu_mcycle(Emulator* e) {
     } else {
       ppu->LY_cycles = PPU_LINE_CYCLES;
     }
-    update_ly_eq_lyc(e);
+    if (ppu->LY == 0) {
+      ppu->stat.y_compare.delay = CPU_MCYCLE;
+    } else {
+      check_ly_eq_lyc(e);
+    }
   }
 
   /* line_y */
@@ -2867,8 +2901,6 @@ static void ppu_mcycle(Emulator* e) {
       ppu->win_y = 0;
     }
   }
-
-  check_if_lcd_stat(e);
 }
 
 static void timer_mcycle(Emulator* e) {
@@ -4143,7 +4175,7 @@ static void execute_instruction(Emulator* e) {
       case 0xf0: LD_R_MFF00_N(A); break;
       case 0xf1: POP_AF; break;
       case 0xf2: LD_R_MFF00_R(A, C); break;
-      case 0xf3: s_trace = 1; s_trace_counter = 300; DI; break;
+      case 0xf3: DI; break;
       case 0xf4: INVALID; break;
       case 0xf5: PUSH_AF; break;
       case 0xf6: OR_N; break;
@@ -4151,7 +4183,7 @@ static void execute_instruction(Emulator* e) {
       case 0xf8: LD_HL_SP_N; break;
       case 0xf9: LD_RR_RR(SP, HL); break;
       case 0xfa: LD_R_MN(A); break;
-      case 0xfb: s_trace = 1; s_trace_counter = 700; EI; break;
+      case 0xfb: EI; break;
       case 0xfc: INVALID; break;
       case 0xfd: INVALID; break;
       case 0xfe: CP_N; break;
@@ -4707,6 +4739,15 @@ int main(int argc, char** argv) {
   clock_gettime(CLOCK_MONOTONIC, &s_start_time);
   --argc; ++argv;
   int result = 1;
+
+#if 1
+  s_never_trace = 1;
+  s_log_level_memory = 0;
+  s_log_level_ppu = 0;
+  s_log_level_apu = 0;
+  s_log_level_io = 0;
+  s_log_level_interrupt = 0;
+#endif
 
   RomData rom_data;
   Emulator emulator;
