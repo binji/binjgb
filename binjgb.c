@@ -4399,6 +4399,8 @@ typedef struct {
   size_t buffer_target_available; /* Try to keep the buffer this size. */
   uint32_t freq_counter;          /* Counter used for resampling
                                      [0..APU_CYCLES_PER_SECOND). */
+  uint32_t accumulator[AUDIO_CHANNELS];
+  uint32_t divisor;
   Bool ready; /* Set to TRUE when audio is first rendered. */
 } SDLAudio;
 
@@ -4665,9 +4667,6 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
 
   Bool overflow = FALSE;
   SDLAudio* audio = &sdl->audio;
-  uint32_t accumulator[AUDIO_CHANNELS];
-  ZERO_MEMORY(accumulator);
-  uint32_t divisor = 0;
 
   uint16_t* src = e->apu.buffer->data;
   uint16_t* src_end = e->apu.buffer->position;
@@ -4676,24 +4675,24 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   size_t old_buffer_available = audio->buffer_available;
   size_t i;
   for (; src < src_end; src += AUDIO_CHANNELS) {
-    sdl->audio.freq_counter += freq;
+    audio->freq_counter += freq;
     for (i = 0; i < AUDIO_CHANNELS; ++i) {
-      accumulator[i] += src[i];
+      audio->accumulator[i] += src[i];
     }
-    divisor++;
-    if (VALUE_WRAPPED(sdl->audio.freq_counter, APU_CYCLES_PER_SECOND)) {
+    audio->divisor++;
+    if (VALUE_WRAPPED(audio->freq_counter, APU_CYCLES_PER_SECOND)) {
       for (i = 0; i < AUDIO_CHANNELS; ++i) {
-        uint16_t sample = accumulator[i] / divisor;
+        uint16_t sample = audio->accumulator[i] / audio->divisor;
         if (sdl_write_audio_sample(audio, sample)) {
           overflow = TRUE;
           break;
         }
-        accumulator[i] = 0;
+        audio->accumulator[i] = 0;
       }
       if (overflow) {
         break;
       }
-      divisor = 0;
+      audio->divisor = 0;
     }
   }
   size_t new_buffer_available = audio->buffer_available;
@@ -4773,6 +4772,7 @@ int main(int argc, char** argv) {
   s_log_level_apu = 0;
   s_log_level_io = 0;
   s_log_level_interrupt = 0;
+  s_log_level_sdl = 0;
 #endif
 
   RomData rom_data;
