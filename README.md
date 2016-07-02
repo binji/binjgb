@@ -111,6 +111,8 @@ Keys:
 
 [Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):
 
+| Test | Result |
+| --- | --- |
 | acceptance/gpu/hblank\_ly\_scx\_timing\_nops | :x: |
 | acceptance/gpu/intr\_0\_timing | :ok: |
 | acceptance/gpu/intr\_1\_timing | :ok: |
