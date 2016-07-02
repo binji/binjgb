@@ -144,15 +144,18 @@ def RunTest(rom, frames, expected):
     expected = expected[1:]
   else:
     expect_fail = False
-  if actual == expected and not expect_fail:
-    print '[OK] %s' % rom
-    os.remove(ppm)
-    return True
-  else:
-    if expected != '':
+  if actual == expected:
+    if expect_fail:
       print '[X]  %s => %s' % (rom, actual)
     else:
+      print '[OK] %s' % rom
+      os.remove(ppm)
+      return True
+  else:
+    if expected == '' or expect_fail:
       print '[?]  %s => %s' % (rom, actual)
+    else:
+      print '[X]  %s => %s' % (rom, actual)
     return False
 
 
