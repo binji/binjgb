@@ -2040,7 +2040,8 @@ static void check_stat(Emulator* e) {
         INFO(ppu,
              ">> clear internal STAT IF tmode:%u [%c%c%c%c%c%c] [LY: %u] [cy: "
              "%u]\n",
-             e->ppu.stat.trigger_mode, e->ppu.stat.y_compare.trigger ? 'y' : '.',
+             e->ppu.stat.trigger_mode,
+             e->ppu.stat.y_compare.trigger ? 'y' : '.',
              e->ppu.stat.y_compare.irq ? 'Y' : '.',
              e->ppu.stat.mode2.trigger ? 'o' : '.',
              e->ppu.stat.mode2.irq ? 'O' : '.',
@@ -2140,10 +2141,6 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
           e->ppu.stat.next_mode = PPU_MODE3;
           e->ppu.stat.trigger_mode = PPU_MODE2;
           e->ppu.stat.hblank.delay = CPU_MCYCLE;
-          e->ppu.stat.vblank.cycles =
-              PPU_FRAME_CYCLES - PPU_VBLANK_CYCLES - CPU_MCYCLE;
-          e->ppu.stat.vblank.delay = 0;
-          e->ppu.stat.mode2.cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
           e->ppu.stat.mode_cycles = PPU_MODE2_CYCLES;
           e->ppu.LY_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
           e->ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
@@ -2826,27 +2823,6 @@ static void ppu_mcycle(Emulator* e) {
     }
   }
 
-  /* mode2 interrupt */
-  ppu->stat.mode2.trigger = FALSE;
-  ppu->stat.mode2.cycles -= CPU_MCYCLE;
-  if (ppu->stat.mode2.cycles == 0) {
-    ppu->stat.mode2.cycles = PPU_LINE_CYCLES;
-    if (ppu->LY < SCREEN_HEIGHT) {
-      INFO(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
-      ppu->stat.mode2.trigger = TRUE;
-      ppu->stat.trigger_mode = PPU_MODE2;
-    }
-  }
-
-  /* vblank interrupt */
-  ppu->stat.vblank.cycles -= CPU_MCYCLE;
-  if (ppu->stat.vblank.cycles == 0) {
-    INFO(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
-    ppu->stat.trigger_mode = PPU_MODE_VBLANK;
-    ppu->stat.vblank.cycles += PPU_FRAME_CYCLES;
-    trigger_vblank(e);
-  }
-
   /* STAT mode */
   ppu->stat.mode_cycles -= CPU_MCYCLE;
   if (ppu->stat.mode_cycles == 0) {
@@ -2890,17 +2866,37 @@ static void ppu_mcycle(Emulator* e) {
     }
   }
 
+  /* line_y */
+  ppu->stat.mode2.trigger = FALSE;
+  ppu->line_cycles -= CPU_MCYCLE;
+  if (ppu->line_cycles == 0) {
+    ppu->line_cycles = PPU_LINE_CYCLES;
+    ppu->line_y++;
+    if (ppu->LY < SCREEN_HEIGHT) {
+      INFO(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
+      ppu->stat.mode2.trigger = TRUE;
+      ppu->stat.trigger_mode = PPU_MODE2;
+    }
+    if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
+      ppu->frame_WY = ppu->WY;
+      ppu->win_y = 0;
+    }
+  }
+
   /* LY */
   ppu->LY_cycles -= CPU_MCYCLE;
   if (ppu->LY_cycles == 0) {
     ++ppu->LY;
-    if (ppu->LY <= SCREEN_HEIGHT) {
+    if (ppu->LY < SCREEN_HEIGHT) {
       ppu->stat.next_mode = PPU_MODE2;
       ppu->stat.mode_cycles = CPU_MCYCLE;
     }
     if (ppu->LY == SCREEN_HEIGHT) {
+      INFO(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
       ppu->stat.next_mode = PPU_MODE_VBLANK;
       ppu->stat.mode_cycles = CPU_MCYCLE;
+      ppu->stat.trigger_mode = PPU_MODE_VBLANK;
+      trigger_vblank(e);
     }
     if (ppu->LY == SCREEN_HEIGHT_WITH_VBLANK - 1) {
       ppu->LY_cycles = CPU_MCYCLE;
@@ -2914,17 +2910,6 @@ static void ppu_mcycle(Emulator* e) {
       ppu->stat.y_compare.delay = CPU_MCYCLE;
     } else {
       check_ly_eq_lyc(e);
-    }
-  }
-
-  /* line_y */
-  ppu->line_cycles -= CPU_MCYCLE;
-  if (ppu->line_cycles == 0) {
-    ppu->line_cycles = PPU_LINE_CYCLES;
-    ppu->line_y++;
-    if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
-      ppu->frame_WY = ppu->WY;
-      ppu->win_y = 0;
     }
   }
 
