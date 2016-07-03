@@ -3684,265 +3684,69 @@ static void execute_instruction(Emulator* e) {
   }
   new_pc = e->reg.PC + s_opcode_bytes[opcode];
 
+#define REG_OPS(code, name)            \
+  case code + 0: name##_R(B); break;   \
+  case code + 1: name##_R(C); break;   \
+  case code + 2: name##_R(D); break;   \
+  case code + 3: name##_R(E); break;   \
+  case code + 4: name##_R(H); break;   \
+  case code + 5: name##_R(L); break;   \
+  case code + 6: name##_MR(HL); break; \
+  case code + 7: name##_R(A); break;
+#define REG_OPS_N(code, name, N)          \
+  case code + 0: name##_R(N, B); break;   \
+  case code + 1: name##_R(N, C); break;   \
+  case code + 2: name##_R(N, D); break;   \
+  case code + 3: name##_R(N, E); break;   \
+  case code + 4: name##_R(N, H); break;   \
+  case code + 5: name##_R(N, L); break;   \
+  case code + 6: name##_MR(N, HL); break; \
+  case code + 7: name##_R(N, A); break;
+#define LD_R_OPS(code, R) \
+  case code + 0: LD_R_R(R, B); break;   \
+  case code + 1: LD_R_R(R, C); break;   \
+  case code + 2: LD_R_R(R, D); break;   \
+  case code + 3: LD_R_R(R, E); break;   \
+  case code + 4: LD_R_R(R, H); break;   \
+  case code + 5: LD_R_R(R, L); break;   \
+  case code + 6: LD_R_MR(R, HL); break; \
+  case code + 7: LD_R_R(R, A); break;
+
   if (opcode == 0xcb) {
     uint8_t opcode = read_u8_cy(e, e->reg.PC + 1);
     switch (opcode) {
-      case 0x00: RLC_R(B); break;
-      case 0x01: RLC_R(C); break;
-      case 0x02: RLC_R(D); break;
-      case 0x03: RLC_R(E); break;
-      case 0x04: RLC_R(H); break;
-      case 0x05: RLC_R(L); break;
-      case 0x06: RLC_MR(HL); break;
-      case 0x07: RLC_R(A); break;
-      case 0x08: RRC_R(B); break;
-      case 0x09: RRC_R(C); break;
-      case 0x0a: RRC_R(D); break;
-      case 0x0b: RRC_R(E); break;
-      case 0x0c: RRC_R(H); break;
-      case 0x0d: RRC_R(L); break;
-      case 0x0e: RRC_MR(HL); break;
-      case 0x0f: RRC_R(A); break;
-      case 0x10: RL_R(B); break;
-      case 0x11: RL_R(C); break;
-      case 0x12: RL_R(D); break;
-      case 0x13: RL_R(E); break;
-      case 0x14: RL_R(H); break;
-      case 0x15: RL_R(L); break;
-      case 0x16: RL_MR(HL); break;
-      case 0x17: RL_R(A); break;
-      case 0x18: RR_R(B); break;
-      case 0x19: RR_R(C); break;
-      case 0x1a: RR_R(D); break;
-      case 0x1b: RR_R(E); break;
-      case 0x1c: RR_R(H); break;
-      case 0x1d: RR_R(L); break;
-      case 0x1e: RR_MR(HL); break;
-      case 0x1f: RR_R(A); break;
-      case 0x20: SLA_R(B); break;
-      case 0x21: SLA_R(C); break;
-      case 0x22: SLA_R(D); break;
-      case 0x23: SLA_R(E); break;
-      case 0x24: SLA_R(H); break;
-      case 0x25: SLA_R(L); break;
-      case 0x26: SLA_MR(HL); break;
-      case 0x27: SLA_R(A); break;
-      case 0x28: SRA_R(B); break;
-      case 0x29: SRA_R(C); break;
-      case 0x2a: SRA_R(D); break;
-      case 0x2b: SRA_R(E); break;
-      case 0x2c: SRA_R(H); break;
-      case 0x2d: SRA_R(L); break;
-      case 0x2e: SRA_MR(HL); break;
-      case 0x2f: SRA_R(A); break;
-      case 0x30: SWAP_R(B); break;
-      case 0x31: SWAP_R(C); break;
-      case 0x32: SWAP_R(D); break;
-      case 0x33: SWAP_R(E); break;
-      case 0x34: SWAP_R(H); break;
-      case 0x35: SWAP_R(L); break;
-      case 0x36: SWAP_MR(HL); break;
-      case 0x37: SWAP_R(A); break;
-      case 0x38: SRL_R(B); break;
-      case 0x39: SRL_R(C); break;
-      case 0x3a: SRL_R(D); break;
-      case 0x3b: SRL_R(E); break;
-      case 0x3c: SRL_R(H); break;
-      case 0x3d: SRL_R(L); break;
-      case 0x3e: SRL_MR(HL); break;
-      case 0x3f: SRL_R(A); break;
-      case 0x40: BIT_R(0, B); break;
-      case 0x41: BIT_R(0, C); break;
-      case 0x42: BIT_R(0, D); break;
-      case 0x43: BIT_R(0, E); break;
-      case 0x44: BIT_R(0, H); break;
-      case 0x45: BIT_R(0, L); break;
-      case 0x46: BIT_MR(0, HL); break;
-      case 0x47: BIT_R(0, A); break;
-      case 0x48: BIT_R(1, B); break;
-      case 0x49: BIT_R(1, C); break;
-      case 0x4a: BIT_R(1, D); break;
-      case 0x4b: BIT_R(1, E); break;
-      case 0x4c: BIT_R(1, H); break;
-      case 0x4d: BIT_R(1, L); break;
-      case 0x4e: BIT_MR(1, HL); break;
-      case 0x4f: BIT_R(1, A); break;
-      case 0x50: BIT_R(2, B); break;
-      case 0x51: BIT_R(2, C); break;
-      case 0x52: BIT_R(2, D); break;
-      case 0x53: BIT_R(2, E); break;
-      case 0x54: BIT_R(2, H); break;
-      case 0x55: BIT_R(2, L); break;
-      case 0x56: BIT_MR(2, HL); break;
-      case 0x57: BIT_R(2, A); break;
-      case 0x58: BIT_R(3, B); break;
-      case 0x59: BIT_R(3, C); break;
-      case 0x5a: BIT_R(3, D); break;
-      case 0x5b: BIT_R(3, E); break;
-      case 0x5c: BIT_R(3, H); break;
-      case 0x5d: BIT_R(3, L); break;
-      case 0x5e: BIT_MR(3, HL); break;
-      case 0x5f: BIT_R(3, A); break;
-      case 0x60: BIT_R(4, B); break;
-      case 0x61: BIT_R(4, C); break;
-      case 0x62: BIT_R(4, D); break;
-      case 0x63: BIT_R(4, E); break;
-      case 0x64: BIT_R(4, H); break;
-      case 0x65: BIT_R(4, L); break;
-      case 0x66: BIT_MR(4, HL); break;
-      case 0x67: BIT_R(4, A); break;
-      case 0x68: BIT_R(5, B); break;
-      case 0x69: BIT_R(5, C); break;
-      case 0x6a: BIT_R(5, D); break;
-      case 0x6b: BIT_R(5, E); break;
-      case 0x6c: BIT_R(5, H); break;
-      case 0x6d: BIT_R(5, L); break;
-      case 0x6e: BIT_MR(5, HL); break;
-      case 0x6f: BIT_R(5, A); break;
-      case 0x70: BIT_R(6, B); break;
-      case 0x71: BIT_R(6, C); break;
-      case 0x72: BIT_R(6, D); break;
-      case 0x73: BIT_R(6, E); break;
-      case 0x74: BIT_R(6, H); break;
-      case 0x75: BIT_R(6, L); break;
-      case 0x76: BIT_MR(6, HL); break;
-      case 0x77: BIT_R(6, A); break;
-      case 0x78: BIT_R(7, B); break;
-      case 0x79: BIT_R(7, C); break;
-      case 0x7a: BIT_R(7, D); break;
-      case 0x7b: BIT_R(7, E); break;
-      case 0x7c: BIT_R(7, H); break;
-      case 0x7d: BIT_R(7, L); break;
-      case 0x7e: BIT_MR(7, HL); break;
-      case 0x7f: BIT_R(7, A); break;
-      case 0x80: RES_R(0, B); break;
-      case 0x81: RES_R(0, C); break;
-      case 0x82: RES_R(0, D); break;
-      case 0x83: RES_R(0, E); break;
-      case 0x84: RES_R(0, H); break;
-      case 0x85: RES_R(0, L); break;
-      case 0x86: RES_MR(0, HL); break;
-      case 0x87: RES_R(0, A); break;
-      case 0x88: RES_R(1, B); break;
-      case 0x89: RES_R(1, C); break;
-      case 0x8a: RES_R(1, D); break;
-      case 0x8b: RES_R(1, E); break;
-      case 0x8c: RES_R(1, H); break;
-      case 0x8d: RES_R(1, L); break;
-      case 0x8e: RES_MR(1, HL); break;
-      case 0x8f: RES_R(1, A); break;
-      case 0x90: RES_R(2, B); break;
-      case 0x91: RES_R(2, C); break;
-      case 0x92: RES_R(2, D); break;
-      case 0x93: RES_R(2, E); break;
-      case 0x94: RES_R(2, H); break;
-      case 0x95: RES_R(2, L); break;
-      case 0x96: RES_MR(2, HL); break;
-      case 0x97: RES_R(2, A); break;
-      case 0x98: RES_R(3, B); break;
-      case 0x99: RES_R(3, C); break;
-      case 0x9a: RES_R(3, D); break;
-      case 0x9b: RES_R(3, E); break;
-      case 0x9c: RES_R(3, H); break;
-      case 0x9d: RES_R(3, L); break;
-      case 0x9e: RES_MR(3, HL); break;
-      case 0x9f: RES_R(3, A); break;
-      case 0xa0: RES_R(4, B); break;
-      case 0xa1: RES_R(4, C); break;
-      case 0xa2: RES_R(4, D); break;
-      case 0xa3: RES_R(4, E); break;
-      case 0xa4: RES_R(4, H); break;
-      case 0xa5: RES_R(4, L); break;
-      case 0xa6: RES_MR(4, HL); break;
-      case 0xa7: RES_R(4, A); break;
-      case 0xa8: RES_R(5, B); break;
-      case 0xa9: RES_R(5, C); break;
-      case 0xaa: RES_R(5, D); break;
-      case 0xab: RES_R(5, E); break;
-      case 0xac: RES_R(5, H); break;
-      case 0xad: RES_R(5, L); break;
-      case 0xae: RES_MR(5, HL); break;
-      case 0xaf: RES_R(5, A); break;
-      case 0xb0: RES_R(6, B); break;
-      case 0xb1: RES_R(6, C); break;
-      case 0xb2: RES_R(6, D); break;
-      case 0xb3: RES_R(6, E); break;
-      case 0xb4: RES_R(6, H); break;
-      case 0xb5: RES_R(6, L); break;
-      case 0xb6: RES_MR(6, HL); break;
-      case 0xb7: RES_R(6, A); break;
-      case 0xb8: RES_R(7, B); break;
-      case 0xb9: RES_R(7, C); break;
-      case 0xba: RES_R(7, D); break;
-      case 0xbb: RES_R(7, E); break;
-      case 0xbc: RES_R(7, H); break;
-      case 0xbd: RES_R(7, L); break;
-      case 0xbe: RES_MR(7, HL); break;
-      case 0xbf: RES_R(7, A); break;
-      case 0xc0: SET_R(0, B); break;
-      case 0xc1: SET_R(0, C); break;
-      case 0xc2: SET_R(0, D); break;
-      case 0xc3: SET_R(0, E); break;
-      case 0xc4: SET_R(0, H); break;
-      case 0xc5: SET_R(0, L); break;
-      case 0xc6: SET_MR(0, HL); break;
-      case 0xc7: SET_R(0, A); break;
-      case 0xc8: SET_R(1, B); break;
-      case 0xc9: SET_R(1, C); break;
-      case 0xca: SET_R(1, D); break;
-      case 0xcb: SET_R(1, E); break;
-      case 0xcc: SET_R(1, H); break;
-      case 0xcd: SET_R(1, L); break;
-      case 0xce: SET_MR(1, HL); break;
-      case 0xcf: SET_R(1, A); break;
-      case 0xd0: SET_R(2, B); break;
-      case 0xd1: SET_R(2, C); break;
-      case 0xd2: SET_R(2, D); break;
-      case 0xd3: SET_R(2, E); break;
-      case 0xd4: SET_R(2, H); break;
-      case 0xd5: SET_R(2, L); break;
-      case 0xd6: SET_MR(2, HL); break;
-      case 0xd7: SET_R(2, A); break;
-      case 0xd8: SET_R(3, B); break;
-      case 0xd9: SET_R(3, C); break;
-      case 0xda: SET_R(3, D); break;
-      case 0xdb: SET_R(3, E); break;
-      case 0xdc: SET_R(3, H); break;
-      case 0xdd: SET_R(3, L); break;
-      case 0xde: SET_MR(3, HL); break;
-      case 0xdf: SET_R(3, A); break;
-      case 0xe0: SET_R(4, B); break;
-      case 0xe1: SET_R(4, C); break;
-      case 0xe2: SET_R(4, D); break;
-      case 0xe3: SET_R(4, E); break;
-      case 0xe4: SET_R(4, H); break;
-      case 0xe5: SET_R(4, L); break;
-      case 0xe6: SET_MR(4, HL); break;
-      case 0xe7: SET_R(4, A); break;
-      case 0xe8: SET_R(5, B); break;
-      case 0xe9: SET_R(5, C); break;
-      case 0xea: SET_R(5, D); break;
-      case 0xeb: SET_R(5, E); break;
-      case 0xec: SET_R(5, H); break;
-      case 0xed: SET_R(5, L); break;
-      case 0xee: SET_MR(5, HL); break;
-      case 0xef: SET_R(5, A); break;
-      case 0xf0: SET_R(6, B); break;
-      case 0xf1: SET_R(6, C); break;
-      case 0xf2: SET_R(6, D); break;
-      case 0xf3: SET_R(6, E); break;
-      case 0xf4: SET_R(6, H); break;
-      case 0xf5: SET_R(6, L); break;
-      case 0xf6: SET_MR(6, HL); break;
-      case 0xf7: SET_R(6, A); break;
-      case 0xf8: SET_R(7, B); break;
-      case 0xf9: SET_R(7, C); break;
-      case 0xfa: SET_R(7, D); break;
-      case 0xfb: SET_R(7, E); break;
-      case 0xfc: SET_R(7, H); break;
-      case 0xfd: SET_R(7, L); break;
-      case 0xfe: SET_MR(7, HL); break;
-      case 0xff: SET_R(7, A); break;
+      REG_OPS(0x00, RLC)
+      REG_OPS(0x08, RRC)
+      REG_OPS(0x10, RL)
+      REG_OPS(0x18, RR)
+      REG_OPS(0x20, SLA)
+      REG_OPS(0x28, SRA)
+      REG_OPS(0x30, SWAP)
+      REG_OPS(0x38, SRL)
+      REG_OPS_N(0x40, BIT, 0)
+      REG_OPS_N(0x48, BIT, 1)
+      REG_OPS_N(0x50, BIT, 2)
+      REG_OPS_N(0x58, BIT, 3)
+      REG_OPS_N(0x60, BIT, 4)
+      REG_OPS_N(0x68, BIT, 5)
+      REG_OPS_N(0x70, BIT, 6)
+      REG_OPS_N(0x78, BIT, 7)
+      REG_OPS_N(0x80, RES, 0)
+      REG_OPS_N(0x88, RES, 1)
+      REG_OPS_N(0x90, RES, 2)
+      REG_OPS_N(0x98, RES, 3)
+      REG_OPS_N(0xa0, RES, 4)
+      REG_OPS_N(0xa8, RES, 5)
+      REG_OPS_N(0xb0, RES, 6)
+      REG_OPS_N(0xb8, RES, 7)
+      REG_OPS_N(0xc0, SET, 0)
+      REG_OPS_N(0xc8, SET, 1)
+      REG_OPS_N(0xd0, SET, 2)
+      REG_OPS_N(0xd8, SET, 3)
+      REG_OPS_N(0xe0, SET, 4)
+      REG_OPS_N(0xe8, SET, 5)
+      REG_OPS_N(0xf0, SET, 6)
+      REG_OPS_N(0xf8, SET, 7)
     }
   } else {
     switch (opcode) {
@@ -4010,54 +3814,12 @@ static void execute_instruction(Emulator* e) {
       case 0x3d: DEC_R(A); break;
       case 0x3e: LD_R_N(A); break;
       case 0x3f: CCF; break;
-      case 0x40: LD_R_R(B, B); break;
-      case 0x41: LD_R_R(B, C); break;
-      case 0x42: LD_R_R(B, D); break;
-      case 0x43: LD_R_R(B, E); break;
-      case 0x44: LD_R_R(B, H); break;
-      case 0x45: LD_R_R(B, L); break;
-      case 0x46: LD_R_MR(B, HL); break;
-      case 0x47: LD_R_R(B, A); break;
-      case 0x48: LD_R_R(C, B); break;
-      case 0x49: LD_R_R(C, C); break;
-      case 0x4a: LD_R_R(C, D); break;
-      case 0x4b: LD_R_R(C, E); break;
-      case 0x4c: LD_R_R(C, H); break;
-      case 0x4d: LD_R_R(C, L); break;
-      case 0x4e: LD_R_MR(C, HL); break;
-      case 0x4f: LD_R_R(C, A); break;
-      case 0x50: LD_R_R(D, B); break;
-      case 0x51: LD_R_R(D, C); break;
-      case 0x52: LD_R_R(D, D); break;
-      case 0x53: LD_R_R(D, E); break;
-      case 0x54: LD_R_R(D, H); break;
-      case 0x55: LD_R_R(D, L); break;
-      case 0x56: LD_R_MR(D, HL); break;
-      case 0x57: LD_R_R(D, A); break;
-      case 0x58: LD_R_R(E, B); break;
-      case 0x59: LD_R_R(E, C); break;
-      case 0x5a: LD_R_R(E, D); break;
-      case 0x5b: LD_R_R(E, E); break;
-      case 0x5c: LD_R_R(E, H); break;
-      case 0x5d: LD_R_R(E, L); break;
-      case 0x5e: LD_R_MR(E, HL); break;
-      case 0x5f: LD_R_R(E, A); break;
-      case 0x60: LD_R_R(H, B); break;
-      case 0x61: LD_R_R(H, C); break;
-      case 0x62: LD_R_R(H, D); break;
-      case 0x63: LD_R_R(H, E); break;
-      case 0x64: LD_R_R(H, H); break;
-      case 0x65: LD_R_R(H, L); break;
-      case 0x66: LD_R_MR(H, HL); break;
-      case 0x67: LD_R_R(H, A); break;
-      case 0x68: LD_R_R(L, B); break;
-      case 0x69: LD_R_R(L, C); break;
-      case 0x6a: LD_R_R(L, D); break;
-      case 0x6b: LD_R_R(L, E); break;
-      case 0x6c: LD_R_R(L, H); break;
-      case 0x6d: LD_R_R(L, L); break;
-      case 0x6e: LD_R_MR(L, HL); break;
-      case 0x6f: LD_R_R(L, A); break;
+      LD_R_OPS(0x40, B)
+      LD_R_OPS(0x48, C)
+      LD_R_OPS(0x50, D)
+      LD_R_OPS(0x58, E)
+      LD_R_OPS(0x60, H)
+      LD_R_OPS(0x68, L)
       case 0x70: LD_MR_R(HL, B); break;
       case 0x71: LD_MR_R(HL, C); break;
       case 0x72: LD_MR_R(HL, D); break;
@@ -4066,78 +3828,15 @@ static void execute_instruction(Emulator* e) {
       case 0x75: LD_MR_R(HL, L); break;
       case 0x76: HALT; break;
       case 0x77: LD_MR_R(HL, A); break;
-      case 0x78: LD_R_R(A, B); break;
-      case 0x79: LD_R_R(A, C); break;
-      case 0x7a: LD_R_R(A, D); break;
-      case 0x7b: LD_R_R(A, E); break;
-      case 0x7c: LD_R_R(A, H); break;
-      case 0x7d: LD_R_R(A, L); break;
-      case 0x7e: LD_R_MR(A, HL); break;
-      case 0x7f: LD_R_R(A, A); break;
-      case 0x80: ADD_R(B); break;
-      case 0x81: ADD_R(C); break;
-      case 0x82: ADD_R(D); break;
-      case 0x83: ADD_R(E); break;
-      case 0x84: ADD_R(H); break;
-      case 0x85: ADD_R(L); break;
-      case 0x86: ADD_MR(HL); break;
-      case 0x87: ADD_R(A); break;
-      case 0x88: ADC_R(B); break;
-      case 0x89: ADC_R(C); break;
-      case 0x8a: ADC_R(D); break;
-      case 0x8b: ADC_R(E); break;
-      case 0x8c: ADC_R(H); break;
-      case 0x8d: ADC_R(L); break;
-      case 0x8e: ADC_MR(HL); break;
-      case 0x8f: ADC_R(A); break;
-      case 0x90: SUB_R(B); break;
-      case 0x91: SUB_R(C); break;
-      case 0x92: SUB_R(D); break;
-      case 0x93: SUB_R(E); break;
-      case 0x94: SUB_R(H); break;
-      case 0x95: SUB_R(L); break;
-      case 0x96: SUB_MR(HL); break;
-      case 0x97: SUB_R(A); break;
-      case 0x98: SBC_R(B); break;
-      case 0x99: SBC_R(C); break;
-      case 0x9a: SBC_R(D); break;
-      case 0x9b: SBC_R(E); break;
-      case 0x9c: SBC_R(H); break;
-      case 0x9d: SBC_R(L); break;
-      case 0x9e: SBC_MR(HL); break;
-      case 0x9f: SBC_R(A); break;
-      case 0xa0: AND_R(B); break;
-      case 0xa1: AND_R(C); break;
-      case 0xa2: AND_R(D); break;
-      case 0xa3: AND_R(E); break;
-      case 0xa4: AND_R(H); break;
-      case 0xa5: AND_R(L); break;
-      case 0xa6: AND_MR(HL); break;
-      case 0xa7: AND_R(A); break;
-      case 0xa8: XOR_R(B); break;
-      case 0xa9: XOR_R(C); break;
-      case 0xaa: XOR_R(D); break;
-      case 0xab: XOR_R(E); break;
-      case 0xac: XOR_R(H); break;
-      case 0xad: XOR_R(L); break;
-      case 0xae: XOR_MR(HL); break;
-      case 0xaf: XOR_R(A); break;
-      case 0xb0: OR_R(B); break;
-      case 0xb1: OR_R(C); break;
-      case 0xb2: OR_R(D); break;
-      case 0xb3: OR_R(E); break;
-      case 0xb4: OR_R(H); break;
-      case 0xb5: OR_R(L); break;
-      case 0xb6: OR_MR(HL); break;
-      case 0xb7: OR_R(A); break;
-      case 0xb8: CP_R(B); break;
-      case 0xb9: CP_R(C); break;
-      case 0xba: CP_R(D); break;
-      case 0xbb: CP_R(E); break;
-      case 0xbc: CP_R(H); break;
-      case 0xbd: CP_R(L); break;
-      case 0xbe: CP_MR(HL); break;
-      case 0xbf: CP_R(A); break;
+      LD_R_OPS(0x78, A)
+      REG_OPS(0x80, ADD)
+      REG_OPS(0x88, ADC)
+      REG_OPS(0x90, SUB)
+      REG_OPS(0x98, SBC)
+      REG_OPS(0xa0, AND)
+      REG_OPS(0xa8, XOR)
+      REG_OPS(0xb0, OR)
+      REG_OPS(0xb8, CP)
       case 0xc0: RET_F(COND_NZ); break;
       case 0xc1: POP_RR(BC); break;
       case 0xc2: JP_F_NN(COND_NZ); break;
