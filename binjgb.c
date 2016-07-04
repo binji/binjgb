@@ -6,7 +6,6 @@
  */
 #include <assert.h>
 #include <inttypes.h>
-#include <sched.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1960,7 +1959,7 @@ static void write_oam(Emulator* e, MaskedAddress addr, uint8_t value) {
 
 static void increment_tima(Emulator* e) {
   if (++e->timer.TIMA == 0) {
-    INFO(interrupt, ">> trigger TIMER [cy: %u]\n", e->cycles + CPU_MCYCLE);
+    DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n", e->cycles + CPU_MCYCLE);
     e->timer.tima_overflow = TRUE;
     e->interrupts.new_IF |= IF_TIMER;
   }
@@ -4307,11 +4306,7 @@ static void sdl_synchronize(SDL* sdl, Emulator* e) {
       DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
             delta_ms, gb_ms, real_ms);
       do {
-        if (delta_ms > 1) {
-          SDL_Delay(delta_ms - 0.1);
-        } else {
-          sched_yield();
-        }
+        SDL_Delay(delta_ms);
         now_ms = get_time_ms();
         delta_ms = delay_until_ms - now_ms;
       } while (delta_ms > 0);
