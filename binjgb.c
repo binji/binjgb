@@ -13,12 +13,10 @@
 #include <time.h>
 
 #define SUCCESS(x) ((x) == OK)
-#define FAIL(x) ((x) != OK)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
-#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 #ifndef NDEBUG
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -70,10 +68,6 @@ typedef uint32_t RGBA;
 #define ROM_U16_BE(addr) \
   ((uint16_t)((ROM_U8(uint16_t, addr) << 8) | ROM_U8(uint16_t, addr + 1)))
 
-#define ENTRY_POINT_START_ADDR 0x100
-#define ENTRY_POINT_END_ADDR 0x103
-#define LOGO_START_ADDR 0x104
-#define LOGO_END_ADDR 0x133
 #define TITLE_START_ADDR 0x134
 #define TITLE_END_ADDR 0x143
 #define CGB_FLAG_ADDR 0x143
@@ -120,7 +114,6 @@ typedef uint32_t RGBA;
 #define ADDR_MASK_4K 0x0fff
 #define ADDR_MASK_8K 0x1fff
 #define ADDR_MASK_16K 0x3fff
-#define ADDR_MASK_32K 0x7fff
 
 #define MBC_RAM_ENABLED_MASK 0xf
 #define MBC_RAM_ENABLED_VALUE 0xa
@@ -164,7 +157,6 @@ typedef uint32_t RGBA;
 #define TILE_MAP_HEIGHT 32
 
 #define WINDOW_MAX_X 166
-#define WINDOW_MAX_Y 143
 #define WINDOW_X_OFFSET 7
 
 #define OBJ_COUNT 40
@@ -194,10 +186,8 @@ typedef uint32_t RGBA;
  * of the slowest instruction. */
 #define AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES 256
 
-/* TODO hack to make dmg_sound-2 tests pass. */
+/* TODO hack (?) to make dmg_sound-2 tests pass. */
 #define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
-#define WAVE_SAMPLE_READ_OFFSET_CYCLES 0
-#define WAVE_SAMPLE_WRITE_OFFSET_CYCLES 0
 
 #define FRAME_SEQUENCER_COUNT 8
 #define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
@@ -455,9 +445,7 @@ DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT)
 DEFINE_NAMED_ENUM(BOOL, Bool, bool, FOREACH_BOOL)
 DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG)
 DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG)
-DEFINE_NAMED_ENUM(CARTRIDGE_TYPE,
-                  CartridgeType,
-                  cartridge_type,
+DEFINE_NAMED_ENUM(CARTRIDGE_TYPE, CartridgeType, cartridge_type,
                   FOREACH_CARTRIDGE_TYPE)
 DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE)
 DEFINE_NAMED_ENUM(EXT_RAM_SIZE, ExtRamSize, ext_ram_size, FOREACH_EXT_RAM_SIZE)
@@ -501,7 +489,6 @@ static uint32_t s_ext_ram_addr_mask[] = {
     FOREACH_EXT_RAM_SIZE(V)
 #undef V
 };
-
 
 typedef enum {
   MBC_TYPE_NO_MBC,
@@ -715,12 +702,8 @@ typedef struct {
 } WorkRam;
 
 typedef struct {
-  const char* start;
-  size_t length;
-} StringSlice;
-
-typedef struct {
-  StringSlice title;
+  const char* title_start;
+  size_t title_length;
   CgbFlag cgb_flag;
   SgbFlag sgb_flag;
   CartridgeType cartridge_type;
@@ -1083,7 +1066,9 @@ error:
   return ERROR;
 }
 
-static void get_rom_title(RomData* rom_data, StringSlice* out_title) {
+static void get_rom_title(RomData* rom_data,
+                          const char** out_title_start,
+                          size_t* out_title_length) {
   const char* start = (char*)rom_data->data + TITLE_START_ADDR;
   const char* end = start + TITLE_END_ADDR;
   const char* p = start;
@@ -1092,8 +1077,8 @@ static void get_rom_title(RomData* rom_data, StringSlice* out_title) {
     length++;
     p++;
   }
-  out_title->start = start;
-  out_title->length = length;
+  *out_title_start = start;
+  *out_title_length = length;
 }
 
 static Result validate_header_checksum(RomData* rom_data) {
@@ -1124,53 +1109,45 @@ static uint32_t get_rom_byte_size(RomSize rom_size) {
   return rom_bank_count << ROM_BANK_SHIFT;
 }
 
-static Result get_rom_info(RomData* rom_data, RomInfo* out_rom_info) {
-  RomInfo rom_info;
-  ZERO_MEMORY(rom_info);
-
-  rom_info.rom_size = ROM_U8(RomSize, ROM_SIZE_ADDR);
-  uint32_t rom_byte_size = get_rom_byte_size(rom_info.rom_size);
+static Result get_rom_info(RomData* rom_data, RomInfo* rom_info) {
+  rom_info->rom_size = ROM_U8(RomSize, ROM_SIZE_ADDR);
+  uint32_t rom_byte_size = get_rom_byte_size(rom_info->rom_size);
   CHECK_MSG(rom_data->size == rom_byte_size,
             "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
             rom_data->size);
 
-  get_rom_title(rom_data, &rom_info.title);
-  rom_info.cgb_flag = ROM_U8(CgbFlag, CGB_FLAG_ADDR);
-  rom_info.sgb_flag = ROM_U8(SgbFlag, SGB_FLAG_ADDR);
-  rom_info.cartridge_type = ROM_U8(CartridgeType, CARTRIDGE_TYPE_ADDR);
-  CHECK_MSG(is_cartridge_type_valid(rom_info.cartridge_type),
-            "Invalid cartridge type: %u\n", rom_info.cartridge_type);
-  rom_info.ext_ram_size = ROM_U8(ExtRamSize, EXT_RAM_SIZE_ADDR);
-  CHECK_MSG(is_ext_ram_size_valid(rom_info.ext_ram_size),
-            "Invalid ext ram size: %u\n", rom_info.ext_ram_size);
-  rom_info.header_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
-  rom_info.header_checksum_valid = validate_header_checksum(rom_data);
-  rom_info.global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
-  rom_info.global_checksum_valid = validate_global_checksum(rom_data);
+  get_rom_title(rom_data, &rom_info->title_start, &rom_info->title_length);
+  rom_info->cgb_flag = ROM_U8(CgbFlag, CGB_FLAG_ADDR);
+  rom_info->sgb_flag = ROM_U8(SgbFlag, SGB_FLAG_ADDR);
+  rom_info->cartridge_type = ROM_U8(CartridgeType, CARTRIDGE_TYPE_ADDR);
+  CHECK_MSG(is_cartridge_type_valid(rom_info->cartridge_type),
+            "Invalid cartridge type: %u\n", rom_info->cartridge_type);
+  rom_info->ext_ram_size = ROM_U8(ExtRamSize, EXT_RAM_SIZE_ADDR);
+  CHECK_MSG(is_ext_ram_size_valid(rom_info->ext_ram_size),
+            "Invalid ext ram size: %u\n", rom_info->ext_ram_size);
+  rom_info->header_checksum = ROM_U8(uint8_t, HEADER_CHECKSUM_ADDR);
+  rom_info->global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
 
-  *out_rom_info = rom_info;
+  LOG("title: \"%.*s\"\n", (int)rom_info->title_length, rom_info->title_start);
+  LOG("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
+  LOG("sgb flag: %s\n", get_sgb_flag_string(rom_info->sgb_flag));
+  LOG("cartridge type: %s\n",
+      get_cartridge_type_string(rom_info->cartridge_type));
+  LOG("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
+  LOG("ext ram size: %s\n", get_ext_ram_size_string(rom_info->ext_ram_size));
+  LOG("header checksum: 0x%02x [%s]\n", rom_info->header_checksum,
+      get_result_string(validate_header_checksum(rom_data)));
+  LOG("global checksum: 0x%04x [%s]\n", rom_info->global_checksum,
+      get_result_string(validate_global_checksum(rom_data)));
   return OK;
 error:
   return ERROR;
 }
 
-static void print_rom_info(RomInfo* rom_info) {
-  printf("title: \"%.*s\"\n", (int)rom_info->title.length,
-         rom_info->title.start);
-  printf("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
-  printf("sgb flag: %s\n", get_sgb_flag_string(rom_info->sgb_flag));
-  printf("cartridge type: %s\n",
-         get_cartridge_type_string(rom_info->cartridge_type));
-  printf("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
-  printf("ext ram size: %s\n", get_ext_ram_size_string(rom_info->ext_ram_size));
+static void dummy_write(Emulator* e, MaskedAddress addr, uint8_t value) {}
 
-  printf("header checksum: 0x%02x [%s]\n", rom_info->header_checksum,
-         get_result_string(rom_info->header_checksum_valid));
-  printf("global checksum: 0x%04x [%s]\n", rom_info->global_checksum,
-         get_result_string(rom_info->global_checksum_valid));
-}
-
-static void rom_only_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
+static uint8_t dummy_read(Emulator* e, MaskedAddress addr) {
+  return 0;
 }
 
 static uint8_t gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
@@ -1202,9 +1179,6 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
     case 3: /* 6000-7fff */
       mbc1->bank_mode = (BankMode)(value & 1);
       break;
-    default:
-      UNREACHABLE("invalid addr: 0x%04x\n", addr);
-      break;
   }
 
   memory_map->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_SELECT_MASK;
@@ -1226,14 +1200,6 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
           "mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
           value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
 }
-
-static uint8_t dummy_read_ext_ram(Emulator* e, MaskedAddress addr) {
-  return 0;
-}
-
-static void dummy_write_ext_ram(Emulator* e,
-                                MaskedAddress addr,
-                                uint8_t value) {}
 
 static uint32_t get_ext_ram_address(Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_8K);
@@ -1354,15 +1320,15 @@ static Result init_memory_map(Emulator* e) {
       break;
     default:
     case EXT_RAM_TYPE_NO_RAM:
-      memory_map->read_ext_ram = dummy_read_ext_ram;
-      memory_map->write_ext_ram = dummy_write_ext_ram;
+      memory_map->read_ext_ram = dummy_read;
+      memory_map->write_ext_ram = dummy_write;
       e->ext_ram.size = 0;
       break;
   }
 
   switch (s_mbc_type[e->rom_info.cartridge_type]) {
     case MBC_TYPE_NO_MBC:
-      memory_map->write_rom = rom_only_write_rom;
+      memory_map->write_rom = dummy_write;
       break;
     case MBC_TYPE_MBC1:
       memory_map->write_rom = mbc1_write_rom;
@@ -1387,15 +1353,10 @@ static Result init_memory_map(Emulator* e) {
   return OK;
 }
 
-static uint8_t get_f_reg(Registers* reg) {
-  return READ_REG(reg->F.Z, CPU_FLAG_Z) |
-         READ_REG(reg->F.N, CPU_FLAG_N) |
-         READ_REG(reg->F.H, CPU_FLAG_H) |
-         READ_REG(reg->F.C, CPU_FLAG_C);
-}
-
 static uint16_t get_af_reg(Registers* reg) {
-  return (reg->A << 8) | get_f_reg(reg);
+  return (reg->A << 8) | READ_REG(reg->F.Z, CPU_FLAG_Z) |
+         READ_REG(reg->F.N, CPU_FLAG_N) | READ_REG(reg->F.H, CPU_FLAG_H) |
+         READ_REG(reg->F.C, CPU_FLAG_C);
 }
 
 static void set_af_reg(Registers* reg, uint16_t af) {
@@ -1413,7 +1374,6 @@ static Result init_emulator(Emulator* e,
   e->rom_data = *rom_data;
   e->apu.buffer = audio_buffer;
   CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
-  print_rom_info(&e->rom_info);
   CHECK(SUCCESS(init_memory_map(e)));
   set_af_reg(&e->reg, 0x01b0);
   e->reg.BC = 0x0013;
