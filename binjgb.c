@@ -813,10 +813,7 @@ typedef struct {
   uint8_t palette;
 } Obj;
 
-typedef struct {
-  Obj objs[OBJ_COUNT];
-  Palette obp[OBJ_PALETTE_COUNT];
-} OAM;
+typedef Obj OAM[OBJ_COUNT];
 
 typedef struct {
   Bool down, up, left, right;
@@ -986,15 +983,16 @@ typedef struct {
 } LCDStatus;
 
 typedef struct {
-  LCDControl lcdc; /* LCD control */
-  LCDStatus stat;  /* LCD status */
-  uint8_t SCY;     /* Screen Y */
-  uint8_t SCX;     /* Screen X */
-  uint8_t LY;      /* Line Y */
-  uint8_t LYC;     /* Line Y Compare */
-  uint8_t WY;      /* Window Y */
-  uint8_t WX;      /* Window X */
-  Palette bgp;     /* BG Palette */
+  LCDControl lcdc;                /* LCD control */
+  LCDStatus stat;                 /* LCD status */
+  uint8_t SCY;                    /* Screen Y */
+  uint8_t SCX;                    /* Screen X */
+  uint8_t LY;                     /* Line Y */
+  uint8_t LYC;                    /* Line Y Compare */
+  uint8_t WY;                     /* Window Y */
+  uint8_t WX;                     /* Window X */
+  Palette bgp;                    /* BG Palette */
+  Palette obp[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
   /* Internal state */
   uint32_t frame;       /* The currently rendering frame. */
   uint8_t last_LY;      /* LY from the previous M-cycle. */
@@ -1556,7 +1554,7 @@ static uint8_t read_oam(Emulator* e, MaskedAddress addr) {
   }
 
   uint8_t obj_index = addr >> 2;
-  Obj* obj = &e->oam.objs[obj_index];
+  Obj* obj = &e->oam[obj_index];
   switch (addr & 3) {
     case 0: return obj->y + OBJ_Y_OFFSET;
     case 1: return obj->x + OBJ_X_OFFSET;
@@ -1642,15 +1640,15 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
              READ_REG(e->ppu.bgp.color[1], PALETTE_COLOR1) |
              READ_REG(e->ppu.bgp.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return READ_REG(e->oam.obp[0].color[3], PALETTE_COLOR3) |
-             READ_REG(e->oam.obp[0].color[2], PALETTE_COLOR2) |
-             READ_REG(e->oam.obp[0].color[1], PALETTE_COLOR1) |
-             READ_REG(e->oam.obp[0].color[0], PALETTE_COLOR0);
+      return READ_REG(e->ppu.obp[0].color[3], PALETTE_COLOR3) |
+             READ_REG(e->ppu.obp[0].color[2], PALETTE_COLOR2) |
+             READ_REG(e->ppu.obp[0].color[1], PALETTE_COLOR1) |
+             READ_REG(e->ppu.obp[0].color[0], PALETTE_COLOR0);
     case IO_OBP1_ADDR:
-      return READ_REG(e->oam.obp[1].color[3], PALETTE_COLOR3) |
-             READ_REG(e->oam.obp[1].color[2], PALETTE_COLOR2) |
-             READ_REG(e->oam.obp[1].color[1], PALETTE_COLOR1) |
-             READ_REG(e->oam.obp[1].color[0], PALETTE_COLOR0);
+      return READ_REG(e->ppu.obp[1].color[3], PALETTE_COLOR3) |
+             READ_REG(e->ppu.obp[1].color[2], PALETTE_COLOR2) |
+             READ_REG(e->ppu.obp[1].color[1], PALETTE_COLOR1) |
+             READ_REG(e->ppu.obp[1].color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
       return e->ppu.WY;
     case IO_WX_ADDR:
@@ -1938,7 +1936,7 @@ static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
 static void write_oam_no_mode_check(Emulator* e,
                                     MaskedAddress addr,
                                     uint8_t value) {
-  Obj* obj = &e->oam.objs[addr >> 2];
+  Obj* obj = &e->oam[addr >> 2];
   switch (addr & 3) {
     case 0: obj->y = value - OBJ_Y_OFFSET; break;
     case 1: obj->x = value - OBJ_X_OFFSET; break;
@@ -2179,16 +2177,16 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       e->ppu.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
-      e->oam.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->oam.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->oam.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->oam.obp[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->ppu.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->ppu.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->ppu.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->ppu.obp[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP1_ADDR:
-      e->oam.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->oam.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->oam.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->oam.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->ppu.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->ppu.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->ppu.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->ppu.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_WY_ADDR:
       e->ppu.WY = value;
@@ -2693,7 +2691,7 @@ static void render_line(Emulator* e, uint8_t line_y) {
      * smaller X-coordinates are earlier. Also, store the Y-coordinate relative
      * to the line being drawn, range [0..obj_height). */
     for (n = 0; n < OBJ_COUNT && dst < OBJ_PER_LINE_COUNT; ++n) {
-      Obj *src = &e->oam.objs[n];
+      Obj *src = &e->oam[n];
       uint8_t rel_y = line_y - src->y;
       if (rel_y < obj_height) {
         int j = dst;
@@ -2727,7 +2725,7 @@ static void render_line(Emulator* e, uint8_t line_y) {
         tile_data = &e->vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
       }
 
-      Palette* palette = &e->oam.obp[o->palette];
+      Palette* palette = &e->ppu.obp[o->palette];
       int d = 1;
       uint8_t sx = o->x;
       if (o->xflip) {
