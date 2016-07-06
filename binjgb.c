@@ -764,12 +764,7 @@ typedef struct {
   REGISTER_PAIR(H, L);
   uint16_t SP;
   uint16_t PC;
-  struct {
-    Bool Z;
-    Bool N;
-    Bool H;
-    Bool C;
-  } F;
+  struct { Bool Z, N, H, C; } F;
 } Registers;
 
 typedef uint8_t Tile[TILE_WIDTH * TILE_HEIGHT];
@@ -928,7 +923,6 @@ typedef struct {
   uint8_t frame;         /* 0..FRAME_SEQUENCER_COUNT */
   uint32_t frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
   uint32_t cycles;       /* Raw cycle counter */
-  AudioBuffer* buffer;
 } APU;
 
 typedef struct {
@@ -1006,11 +1000,7 @@ typedef struct {
   Bool step;
 } EmulatorConfig;
 
-typedef struct Emulator {
-  EmulatorConfig config;
-  RomInfo rom_info;
-  RomData rom_data;
-  MemoryMap memory_map;
+typedef struct {
   MemoryMapState memory_map_state;
   Registers reg;
   VideoRam vram;
@@ -1025,8 +1015,17 @@ typedef struct Emulator {
   PPU ppu;
   DMA dma;
   uint8_t hram[HIGH_RAM_SIZE];
-  FrameBuffer frame_buffer;
   uint32_t cycles;
+} EmulatorState;
+
+typedef struct Emulator {
+  EmulatorConfig config;
+  RomInfo rom_info;
+  RomData rom_data;
+  MemoryMap memory_map;
+  EmulatorState state;
+  FrameBuffer frame_buffer;
+  AudioBuffer* audio_buffer;
 } Emulator;
 
 static Bool s_never_trace = 0;
@@ -1152,18 +1151,18 @@ static uint8_t dummy_read(Emulator* e, MaskedAddress addr) {
 
 static uint8_t gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_4K);
-  return e->ram.data[0x1000 + addr];
+  return e->state.ram.data[0x1000 + addr];
 }
 
 static void gb_write_work_ram_bank_switch(Emulator* e,
                                           MaskedAddress addr,
                                           uint8_t value) {
   assert(addr <= ADDR_MASK_4K);
-  e->ram.data[0x1000 + addr] = value;
+  e->state.ram.data[0x1000 + addr] = value;
 }
 
 static void mbc1_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
-  MemoryMapState* memory_map = &e->memory_map_state;
+  MemoryMapState* memory_map = &e->state.memory_map_state;
   MBC1* mbc1 = &memory_map->mbc1;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
@@ -1203,11 +1202,11 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
 
 static uint32_t get_ext_ram_address(Emulator* e, MaskedAddress addr) {
   assert(addr <= ADDR_MASK_8K);
-  uint8_t ram_bank = e->memory_map_state.ext_ram_bank;
+  uint8_t ram_bank = e->state.memory_map_state.ext_ram_bank;
   uint32_t ram_addr = ((ram_bank << EXT_RAM_BANK_SHIFT) &
-                       e->memory_map_state.ext_ram_addr_mask) |
+                       e->state.memory_map_state.ext_ram_addr_mask) |
                       addr;
-  assert(ram_addr < e->ext_ram.size);
+  assert(ram_addr < e->state.ext_ram.size);
   return ram_addr;
 }
 
@@ -1218,8 +1217,8 @@ static uint32_t get_ext_ram_address(Emulator* e, MaskedAddress addr) {
        value);
 
 static uint8_t gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
-  if (e->memory_map_state.ext_ram_enabled) {
-    return e->ext_ram.data[get_ext_ram_address(e, addr)];
+  if (e->state.memory_map_state.ext_ram_enabled) {
+    return e->state.ext_ram.data[get_ext_ram_address(e, addr)];
   } else {
     INFO_READ_RAM_DISABLED;
     return INVALID_READ_BYTE;
@@ -1229,15 +1228,15 @@ static uint8_t gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
 static void gb_write_ext_ram(Emulator* e,
                                   MaskedAddress addr,
                                   uint8_t value) {
-  if (e->memory_map_state.ext_ram_enabled) {
-    e->ext_ram.data[get_ext_ram_address(e, addr)] = value;
+  if (e->state.memory_map_state.ext_ram_enabled) {
+    e->state.ext_ram.data[get_ext_ram_address(e, addr)] = value;
   } else {
     INFO_WRITE_RAM_DISABLED;
   }
 }
 
 static void mbc2_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
-  MemoryMapState* memory_map = &e->memory_map_state;
+  MemoryMapState* memory_map = &e->state.memory_map_state;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       if ((addr & MBC2_ADDR_SELECT_BIT_MASK) == 0) {
@@ -1262,8 +1261,8 @@ static void mbc2_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static uint8_t mbc2_read_ram(Emulator* e, MaskedAddress addr) {
-  if (e->memory_map_state.ext_ram_enabled) {
-    return e->ext_ram.data[addr & MBC2_RAM_ADDR_MASK];
+  if (e->state.memory_map_state.ext_ram_enabled) {
+    return e->state.ext_ram.data[addr & MBC2_RAM_ADDR_MASK];
   } else {
     INFO_READ_RAM_DISABLED;
     return INVALID_READ_BYTE;
@@ -1271,15 +1270,16 @@ static uint8_t mbc2_read_ram(Emulator* e, MaskedAddress addr) {
 }
 
 static void mbc2_write_ram(Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (e->memory_map_state.ext_ram_enabled) {
-    e->ext_ram.data[addr & MBC2_RAM_ADDR_MASK] = value & MBC2_RAM_VALUE_MASK;
+  if (e->state.memory_map_state.ext_ram_enabled) {
+    e->state.ext_ram.data[addr & MBC2_RAM_ADDR_MASK] =
+        value & MBC2_RAM_VALUE_MASK;
   } else {
     INFO_WRITE_RAM_DISABLED;
   }
 }
 
 static void mbc3_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
-  MemoryMapState* memory_map = &e->memory_map_state;
+  MemoryMapState* memory_map = &e->state.memory_map_state;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
       memory_map->ext_ram_enabled =
@@ -1302,7 +1302,7 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
 
 static Result init_memory_map(Emulator* e) {
   MemoryMap* memory_map = &e->memory_map;
-  MemoryMapState* memory_map_state = &e->memory_map_state;
+  MemoryMapState* memory_map_state = &e->state.memory_map_state;
   ZERO_MEMORY(*memory_map);
   memory_map_state->rom_bank = 1;
   memory_map_state->rom_bank_mask = s_rom_bank_mask[e->rom_info.rom_size];
@@ -1316,13 +1316,13 @@ static Result init_memory_map(Emulator* e) {
       assert(is_ext_ram_size_valid(e->rom_info.ext_ram_size));
       memory_map->read_ext_ram = gb_read_ext_ram;
       memory_map->write_ext_ram = gb_write_ext_ram;
-      e->ext_ram.size = s_ext_ram_byte_size[e->rom_info.ext_ram_size];
+      e->state.ext_ram.size = s_ext_ram_byte_size[e->rom_info.ext_ram_size];
       break;
     default:
     case EXT_RAM_TYPE_NO_RAM:
       memory_map->read_ext_ram = dummy_read;
       memory_map->write_ext_ram = dummy_write;
-      e->ext_ram.size = 0;
+      e->state.ext_ram.size = 0;
       break;
   }
 
@@ -1337,7 +1337,7 @@ static Result init_memory_map(Emulator* e) {
       memory_map->write_rom = mbc2_write_rom;
       memory_map->read_ext_ram = mbc2_read_ram;
       memory_map->write_ext_ram = mbc2_write_ram;
-      e->ext_ram.size = MBC2_RAM_SIZE;
+      e->state.ext_ram.size = MBC2_RAM_SIZE;
       break;
     case MBC_TYPE_MBC3:
       memory_map->write_rom = mbc3_write_rom;
@@ -1349,7 +1349,7 @@ static Result init_memory_map(Emulator* e) {
       return ERROR;
   }
 
-  e->ext_ram.battery_type = s_battery_type[e->rom_info.cartridge_type];
+  e->state.ext_ram.battery_type = s_battery_type[e->rom_info.cartridge_type];
   return OK;
 }
 
@@ -1372,16 +1372,16 @@ static Result init_emulator(Emulator* e,
                             AudioBuffer* audio_buffer) {
   ZERO_MEMORY(*e);
   e->rom_data = *rom_data;
-  e->apu.buffer = audio_buffer;
+  e->audio_buffer = audio_buffer;
   CHECK(SUCCESS(get_rom_info(rom_data, &e->rom_info)));
   CHECK(SUCCESS(init_memory_map(e)));
-  set_af_reg(&e->reg, 0x01b0);
-  e->reg.BC = 0x0013;
-  e->reg.DE = 0x00d8;
-  e->reg.HL = 0x014d;
-  e->reg.SP = 0xfffe;
-  e->reg.PC = 0x0100;
-  e->interrupts.IME = FALSE;
+  set_af_reg(&e->state.reg, 0x01b0);
+  e->state.reg.BC = 0x0013;
+  e->state.reg.DE = 0x00d8;
+  e->state.reg.HL = 0x014d;
+  e->state.reg.SP = 0xfffe;
+  e->state.reg.PC = 0x0100;
+  e->state.interrupts.IME = FALSE;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
@@ -1392,7 +1392,7 @@ static Result init_emulator(Emulator* e,
   /* Turn down the volume on channel1, it is playing by default (because of the
    * GB startup sound), but we don't want to hear it when starting the
    * emulator. */
-  e->apu.channel[CHANNEL1].envelope.volume = 0;
+  e->state.apu.channel[CHANNEL1].envelope.volume = 0;
   write_io(e, IO_LCDC_ADDR, 0x91);
   write_io(e, IO_SCY_ADDR, 0x00);
   write_io(e, IO_SCX_ADDR, 0x00);
@@ -1493,18 +1493,18 @@ static MemoryTypeAddressPair map_address(Address addr) {
 }
 
 static uint8_t read_vram(Emulator* e, MaskedAddress addr) {
-  if (e->ppu.stat.mode == PPU_MODE_MODE3) {
+  if (e->state.ppu.stat.mode == PPU_MODE_MODE3) {
     DEBUG(ppu, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
-    return e->vram.data[addr];
+    return e->state.vram.data[addr];
   }
 }
 
 static Bool is_using_oam(Emulator* e) {
-  return e->ppu.stat.mode == PPU_MODE_MODE2 ||
-         e->ppu.stat.mode == PPU_MODE_MODE3;
+  return e->state.ppu.stat.mode == PPU_MODE_MODE2 ||
+         e->state.ppu.stat.mode == PPU_MODE_MODE3;
 }
 
 static uint8_t read_oam(Emulator* e, MaskedAddress addr) {
@@ -1514,7 +1514,7 @@ static uint8_t read_oam(Emulator* e, MaskedAddress addr) {
   }
 
   uint8_t obj_index = addr >> 2;
-  Obj* obj = &e->oam[obj_index];
+  Obj* obj = &e->state.oam[obj_index];
   switch (addr & 3) {
     case 0: return obj->y + OBJ_Y_OFFSET;
     case 1: return obj->x + OBJ_X_OFFSET;
@@ -1528,93 +1528,95 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR: {
       uint8_t result = 0;
-      if (e->joypad.joypad_select == JOYPAD_SELECT_BUTTONS ||
-          e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= READ_REG(e->joypad.start, JOYP_BUTTON_START) |
-                  READ_REG(e->joypad.select, JOYP_BUTTON_SELECT) |
-                  READ_REG(e->joypad.B, JOYP_BUTTON_B) |
-                  READ_REG(e->joypad.A, JOYP_BUTTON_A);
+      if (e->state.joypad.joypad_select == JOYPAD_SELECT_BUTTONS ||
+          e->state.joypad.joypad_select == JOYPAD_SELECT_BOTH) {
+        result |= READ_REG(e->state.joypad.start, JOYP_BUTTON_START) |
+                  READ_REG(e->state.joypad.select, JOYP_BUTTON_SELECT) |
+                  READ_REG(e->state.joypad.B, JOYP_BUTTON_B) |
+                  READ_REG(e->state.joypad.A, JOYP_BUTTON_A);
       }
 
-      if (e->joypad.joypad_select == JOYPAD_SELECT_DPAD ||
-          e->joypad.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= READ_REG(e->joypad.down, JOYP_DPAD_DOWN) |
-                  READ_REG(e->joypad.up, JOYP_DPAD_UP) |
-                  READ_REG(e->joypad.left, JOYP_DPAD_LEFT) |
-                  READ_REG(e->joypad.right, JOYP_DPAD_RIGHT);
+      if (e->state.joypad.joypad_select == JOYPAD_SELECT_DPAD ||
+          e->state.joypad.joypad_select == JOYPAD_SELECT_BOTH) {
+        result |= READ_REG(e->state.joypad.down, JOYP_DPAD_DOWN) |
+                  READ_REG(e->state.joypad.up, JOYP_DPAD_UP) |
+                  READ_REG(e->state.joypad.left, JOYP_DPAD_LEFT) |
+                  READ_REG(e->state.joypad.right, JOYP_DPAD_RIGHT);
       }
 
       /* The bits are low when the buttons are pressed. */
       return JOYP_UNUSED |
-             READ_REG(e->joypad.joypad_select, JOYP_JOYPAD_SELECT) |
+             READ_REG(e->state.joypad.joypad_select, JOYP_JOYPAD_SELECT) |
              (~result & JOYP_RESULT_MASK);
     }
     case IO_SB_ADDR:
-      return e->serial.SB;
+      return e->state.serial.SB;
     case IO_SC_ADDR:
-      return SC_UNUSED | READ_REG(e->serial.transferring, SC_TRANSFER_START) |
-             READ_REG(e->serial.clock, SC_SHIFT_CLOCK);
+      return SC_UNUSED |
+             READ_REG(e->state.serial.transferring, SC_TRANSFER_START) |
+             READ_REG(e->state.serial.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
-      return e->timer.div_counter >> 8;
+      return e->state.timer.div_counter >> 8;
     case IO_TIMA_ADDR:
-      return e->timer.TIMA;
+      return e->state.timer.TIMA;
     case IO_TMA_ADDR:
-      return e->timer.TMA;
+      return e->state.timer.TMA;
     case IO_TAC_ADDR:
-      return TAC_UNUSED | READ_REG(e->timer.on, TAC_TIMER_ON) |
-             READ_REG(e->timer.clock_select, TAC_CLOCK_SELECT);
+      return TAC_UNUSED | READ_REG(e->state.timer.on, TAC_TIMER_ON) |
+             READ_REG(e->state.timer.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
-      return IF_UNUSED | e->interrupts.IF;
+      return IF_UNUSED | e->state.interrupts.IF;
     case IO_LCDC_ADDR:
-      return READ_REG(e->ppu.lcdc.display, LCDC_DISPLAY) |
-             READ_REG(e->ppu.lcdc.window_tile_map_select,
+      return READ_REG(e->state.ppu.lcdc.display, LCDC_DISPLAY) |
+             READ_REG(e->state.ppu.lcdc.window_tile_map_select,
                       LCDC_WINDOW_TILE_MAP_SELECT) |
-             READ_REG(e->ppu.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
-             READ_REG(e->ppu.lcdc.bg_tile_data_select,
+             READ_REG(e->state.ppu.lcdc.window_display, LCDC_WINDOW_DISPLAY) |
+             READ_REG(e->state.ppu.lcdc.bg_tile_data_select,
                       LCDC_BG_TILE_DATA_SELECT) |
-             READ_REG(e->ppu.lcdc.bg_tile_map_select, LCDC_BG_TILE_MAP_SELECT) |
-             READ_REG(e->ppu.lcdc.obj_size, LCDC_OBJ_SIZE) |
-             READ_REG(e->ppu.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
-             READ_REG(e->ppu.lcdc.bg_display, LCDC_BG_DISPLAY);
+             READ_REG(e->state.ppu.lcdc.bg_tile_map_select,
+                      LCDC_BG_TILE_MAP_SELECT) |
+             READ_REG(e->state.ppu.lcdc.obj_size, LCDC_OBJ_SIZE) |
+             READ_REG(e->state.ppu.lcdc.obj_display, LCDC_OBJ_DISPLAY) |
+             READ_REG(e->state.ppu.lcdc.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
       return STAT_UNUSED |
-             READ_REG(e->ppu.stat.y_compare.irq, STAT_YCOMPARE_INTR) |
-             READ_REG(e->ppu.stat.mode2.irq, STAT_MODE2_INTR) |
-             READ_REG(e->ppu.stat.vblank.irq, STAT_VBLANK_INTR) |
-             READ_REG(e->ppu.stat.hblank.irq, STAT_HBLANK_INTR) |
-             READ_REG(e->ppu.stat.ly_eq_lyc, STAT_YCOMPARE) |
-             READ_REG(e->ppu.stat.mode, STAT_MODE);
+             READ_REG(e->state.ppu.stat.y_compare.irq, STAT_YCOMPARE_INTR) |
+             READ_REG(e->state.ppu.stat.mode2.irq, STAT_MODE2_INTR) |
+             READ_REG(e->state.ppu.stat.vblank.irq, STAT_VBLANK_INTR) |
+             READ_REG(e->state.ppu.stat.hblank.irq, STAT_HBLANK_INTR) |
+             READ_REG(e->state.ppu.stat.ly_eq_lyc, STAT_YCOMPARE) |
+             READ_REG(e->state.ppu.stat.mode, STAT_MODE);
     case IO_SCY_ADDR:
-      return e->ppu.SCY;
+      return e->state.ppu.SCY;
     case IO_SCX_ADDR:
-      return e->ppu.SCX;
+      return e->state.ppu.SCX;
     case IO_LY_ADDR:
-      return e->ppu.LY;
+      return e->state.ppu.LY;
     case IO_LYC_ADDR:
-      return e->ppu.LYC;
+      return e->state.ppu.LYC;
     case IO_DMA_ADDR:
       return INVALID_READ_BYTE; /* Write only. */
     case IO_BGP_ADDR:
-      return READ_REG(e->ppu.bgp.color[3], PALETTE_COLOR3) |
-             READ_REG(e->ppu.bgp.color[2], PALETTE_COLOR2) |
-             READ_REG(e->ppu.bgp.color[1], PALETTE_COLOR1) |
-             READ_REG(e->ppu.bgp.color[0], PALETTE_COLOR0);
+      return READ_REG(e->state.ppu.bgp.color[3], PALETTE_COLOR3) |
+             READ_REG(e->state.ppu.bgp.color[2], PALETTE_COLOR2) |
+             READ_REG(e->state.ppu.bgp.color[1], PALETTE_COLOR1) |
+             READ_REG(e->state.ppu.bgp.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return READ_REG(e->ppu.obp[0].color[3], PALETTE_COLOR3) |
-             READ_REG(e->ppu.obp[0].color[2], PALETTE_COLOR2) |
-             READ_REG(e->ppu.obp[0].color[1], PALETTE_COLOR1) |
-             READ_REG(e->ppu.obp[0].color[0], PALETTE_COLOR0);
+      return READ_REG(e->state.ppu.obp[0].color[3], PALETTE_COLOR3) |
+             READ_REG(e->state.ppu.obp[0].color[2], PALETTE_COLOR2) |
+             READ_REG(e->state.ppu.obp[0].color[1], PALETTE_COLOR1) |
+             READ_REG(e->state.ppu.obp[0].color[0], PALETTE_COLOR0);
     case IO_OBP1_ADDR:
-      return READ_REG(e->ppu.obp[1].color[3], PALETTE_COLOR3) |
-             READ_REG(e->ppu.obp[1].color[2], PALETTE_COLOR2) |
-             READ_REG(e->ppu.obp[1].color[1], PALETTE_COLOR1) |
-             READ_REG(e->ppu.obp[1].color[0], PALETTE_COLOR0);
+      return READ_REG(e->state.ppu.obp[1].color[3], PALETTE_COLOR3) |
+             READ_REG(e->state.ppu.obp[1].color[2], PALETTE_COLOR2) |
+             READ_REG(e->state.ppu.obp[1].color[1], PALETTE_COLOR1) |
+             READ_REG(e->state.ppu.obp[1].color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
-      return e->ppu.WY;
+      return e->state.ppu.WY;
     case IO_WX_ADDR:
-      return e->ppu.WX;
+      return e->state.ppu.WX;
     case IO_IE_ADDR:
-      return e->interrupts.IE;
+      return e->state.interrupts.IE;
     default:
       INFO(io, "%s(0x%04x [%s]) ignored.\n", __func__, addr,
            get_io_reg_string(addr));
@@ -1651,7 +1653,7 @@ static uint8_t read_apu(Emulator* e, MaskedAddress addr) {
   assert(addr < ARRAY_SIZE(mask));
   uint8_t result = mask[addr];
 
-  APU* apu = &e->apu;
+  APU* apu = &e->state.apu;
   Channel* channel1 = &apu->channel[CHANNEL1];
   Channel* channel2 = &apu->channel[CHANNEL2];
   Channel* channel3 = &apu->channel[CHANNEL3];
@@ -1743,7 +1745,7 @@ static uint8_t read_apu(Emulator* e, MaskedAddress addr) {
                 READ_REG(channel3->status, NR52_SOUND3_ON) |
                 READ_REG(channel2->status, NR52_SOUND2_ON) |
                 READ_REG(channel1->status, NR52_SOUND1_ON);
-      VERBOSE(apu, "read nr52: 0x%02x de=0x%04x\n", result, e->reg.DE);
+      VERBOSE(apu, "read nr52: 0x%02x de=0x%04x\n", result, e->state.reg.DE);
       break;
     default:
       break;
@@ -1754,10 +1756,10 @@ static uint8_t read_apu(Emulator* e, MaskedAddress addr) {
 
 static WaveSample* is_concurrent_wave_ram_access(Emulator* e,
                                                  uint8_t offset_cycles) {
-  Wave* wave = &e->apu.wave;
+  Wave* wave = &e->state.apu.wave;
   size_t i;
   for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
-    if (wave->sample[i].time == e->cycles + offset_cycles) {
+    if (wave->sample[i].time == e->state.cycles + offset_cycles) {
       return &wave->sample[i];
     }
   }
@@ -1765,8 +1767,8 @@ static WaveSample* is_concurrent_wave_ram_access(Emulator* e,
 }
 
 static uint8_t read_wave_ram(Emulator* e, MaskedAddress addr) {
-  Wave* wave = &e->apu.wave;
-  if (e->apu.channel[CHANNEL3].status) {
+  Wave* wave = &e->state.apu.wave;
+  if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel.  */
@@ -1775,11 +1777,11 @@ static uint8_t read_wave_ram(Emulator* e, MaskedAddress addr) {
     if (sample) {
       result = sample->byte;
       DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
-            addr, result, e->cycles);
+            addr, result, e->state.cycles);
     } else {
       result = INVALID_READ_BYTE;
       DEBUG(apu, "%s(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
-            __func__, addr, e->cycles);
+            __func__, addr, e->state.cycles);
     }
     return result;
   } else {
@@ -1789,7 +1791,7 @@ static uint8_t read_wave_ram(Emulator* e, MaskedAddress addr) {
 
 static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
   /* TODO: need to figure out bus conflicts during DMA for non-OAM accesses. */
-  return e->dma.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
+  return e->state.dma.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
 }
 
 static uint8_t read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
@@ -1797,7 +1799,7 @@ static uint8_t read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
     case MEMORY_MAP_ROM:
       return e->rom_data.data[pair.addr];
     case MEMORY_MAP_ROM_BANK_SWITCH: {
-      uint8_t rom_bank = e->memory_map_state.rom_bank;
+      uint8_t rom_bank = e->state.memory_map_state.rom_bank;
       uint32_t rom_addr = (rom_bank << ROM_BANK_SHIFT) | pair.addr;
       assert(rom_addr < e->rom_data.size);
       return e->rom_data.data[rom_addr];
@@ -1807,7 +1809,7 @@ static uint8_t read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
     case MEMORY_MAP_EXT_RAM:
       return e->memory_map.read_ext_ram(e, pair.addr);
     case MEMORY_MAP_WORK_RAM:
-      return e->ram.data[pair.addr];
+      return e->state.ram.data[pair.addr];
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
       return e->memory_map.read_work_ram_bank_switch(e, pair.addr);
     case MEMORY_MAP_OAM:
@@ -1825,7 +1827,7 @@ static uint8_t read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
     case MEMORY_MAP_WAVE_RAM:
       return read_wave_ram(e, pair.addr);
     case MEMORY_MAP_HIGH_RAM:
-      return e->hram[pair.addr];
+      return e->state.hram[pair.addr];
     default:
       UNREACHABLE("invalid address: %u 0x%04x.\n", pair.type, pair.addr);
   }
@@ -1849,7 +1851,7 @@ static void write_vram_tile_data(Emulator* e,
   VERBOSE(ppu, "write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
           value);
   assert(index < TILE_COUNT);
-  Tile* tile = &e->vram.tile[index];
+  Tile* tile = &e->state.vram.tile[index];
   uint32_t data_index = y * TILE_WIDTH;
   assert(data_index < TILE_WIDTH * TILE_HEIGHT);
   uint8_t* data = &(*tile)[data_index];
@@ -1862,7 +1864,7 @@ static void write_vram_tile_data(Emulator* e,
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (e->ppu.stat.mode == PPU_MODE_MODE3) {
+  if (e->state.ppu.stat.mode == PPU_MODE_MODE3) {
     DEBUG(ppu, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
           value);
     return;
@@ -1870,7 +1872,7 @@ static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
 
   assert(addr <= ADDR_MASK_8K);
   /* Store the raw data so it doesn't have to be re-packed when reading. */
-  e->vram.data[addr] = value;
+  e->state.vram.data[addr] = value;
 
   if (addr < 0x1800) {
     /* 0x8000-0x97ff: Tile data */
@@ -1889,14 +1891,14 @@ static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
     addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
     uint32_t map_index = addr >> 10;
     assert(map_index < TILE_MAP_COUNT);
-    e->vram.map[map_index][addr & ADDR_MASK_1K] = value;
+    e->state.vram.map[map_index][addr & ADDR_MASK_1K] = value;
   }
 }
 
 static void write_oam_no_mode_check(Emulator* e,
                                     MaskedAddress addr,
                                     uint8_t value) {
-  Obj* obj = &e->oam[addr >> 2];
+  Obj* obj = &e->state.oam[addr >> 2];
   switch (addr & 3) {
     case 0: obj->y = value - OBJ_Y_OFFSET; break;
     case 1: obj->x = value - OBJ_X_OFFSET; break;
@@ -1922,22 +1924,23 @@ static void write_oam(Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static void increment_tima(Emulator* e) {
-  if (++e->timer.TIMA == 0) {
-    DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n", e->cycles + CPU_MCYCLE);
-    e->timer.tima_overflow = TRUE;
-    e->interrupts.new_IF |= IF_TIMER;
+  if (++e->state.timer.TIMA == 0) {
+    DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n",
+          e->state.cycles + CPU_MCYCLE);
+    e->state.timer.tima_overflow = TRUE;
+    e->state.interrupts.new_IF |= IF_TIMER;
   }
 }
 
 static void write_div_counter(Emulator* e, uint16_t div_counter) {
-  if (e->timer.on) {
+  if (e->state.timer.on) {
     uint16_t falling_edge =
-        ((e->timer.div_counter ^ div_counter) & ~div_counter);
-    if ((falling_edge & s_tima_mask[e->timer.clock_select]) != 0) {
+        ((e->state.timer.div_counter ^ div_counter) & ~div_counter);
+    if ((falling_edge & s_tima_mask[e->state.timer.clock_select]) != 0) {
       increment_tima(e);
     }
   }
-  e->timer.div_counter = div_counter;
+  e->state.timer.div_counter = div_counter;
 }
 
 /* Trigger is only TRUE on the cycle where it transitioned to the new state;
@@ -1957,13 +1960,13 @@ static void write_div_counter(Emulator* e, uint16_t div_counter) {
   (TRIGGER_HBLANK || TRIGGER_VBLANK || TRIGGER_MODE2 || TRIGGER_Y_COMPARE)
 
 static void check_stat(Emulator* e) {
-  LCDStatus* stat = &e->ppu.stat;
+  LCDStatus* stat = &e->state.ppu.stat;
   if (!stat->IF && SHOULD_TRIGGER_STAT) {
-    VERBOSE(ppu, ">> trigger STAT [LY: %u] [cy: %u]\n", e->ppu.LY,
-            e->cycles + CPU_MCYCLE);
-    e->interrupts.new_IF |= IF_STAT;
+    VERBOSE(ppu, ">> trigger STAT [LY: %u] [cy: %u]\n", e->state.ppu.LY,
+            e->state.cycles + CPU_MCYCLE);
+    e->state.interrupts.new_IF |= IF_STAT;
     if (!(TRIGGER_VBLANK || TRIGGER_Y_COMPARE)) {
-      e->interrupts.IF |= IF_STAT;
+      e->state.interrupts.IF |= IF_STAT;
     }
     stat->IF = TRUE;
   } else if (!(TRIGGER_HBLANK || TRIGGER_VBLANK || CHECK_MODE2 ||
@@ -1973,12 +1976,12 @@ static void check_stat(Emulator* e) {
 }
 
 static void check_ly_eq_lyc(Emulator* e, Bool write) {
-  LCDStatus* stat = &e->ppu.stat;
-  if (e->ppu.LY == e->ppu.LYC ||
-      (write && e->ppu.last_LY == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
-       e->ppu.last_LY == e->ppu.LYC)) {
-    VERBOSE(ppu, ">> trigger Y compare [LY: %u] [cy: %u]\n", e->ppu.LY,
-            e->cycles + CPU_MCYCLE);
+  LCDStatus* stat = &e->state.ppu.stat;
+  if (e->state.ppu.LY == e->state.ppu.LYC ||
+      (write && e->state.ppu.last_LY == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
+       e->state.ppu.last_LY == e->state.ppu.LYC)) {
+    VERBOSE(ppu, ">> trigger Y compare [LY: %u] [cy: %u]\n", e->state.ppu.LY,
+            e->state.cycles + CPU_MCYCLE);
     stat->y_compare.trigger = TRUE;
     stat->new_ly_eq_lyc = TRUE;
   } else {
@@ -1987,10 +1990,10 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
     if (write) {
       /* If STAT was triggered this frame due to Y compare, cancel it.
        * There's probably a nicer way to do this. */
-      if ((e->interrupts.new_IF ^ e->interrupts.IF) & e->interrupts.new_IF &
-          IF_STAT) {
+      if ((e->state.interrupts.new_IF ^ e->state.interrupts.IF) &
+          e->state.interrupts.new_IF & IF_STAT) {
         if (!SHOULD_TRIGGER_STAT) {
-          e->interrupts.new_IF &= ~IF_STAT;
+          e->state.interrupts.new_IF &= ~IF_STAT;
         }
       }
     }
@@ -1999,47 +2002,47 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
 
 static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG(io, "%s(0x%04x [%s], 0x%02x) [cy: %u]\n", __func__, addr,
-        get_io_reg_string(addr), value, e->cycles);
+        get_io_reg_string(addr), value, e->state.cycles);
   switch (addr) {
     case IO_JOYP_ADDR:
-      e->joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
+      e->state.joypad.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
       break;
     case IO_SB_ADDR:
-      e->serial.SB = value;
+      e->state.serial.SB = value;
       break;
     case IO_SC_ADDR:
-      e->serial.transferring = WRITE_REG(value, SC_TRANSFER_START);
-      e->serial.clock = WRITE_REG(value, SC_SHIFT_CLOCK);
-      if (e->serial.transferring) {
-        e->serial.cycles = 0;
-        e->serial.transferred_bits = 0;
+      e->state.serial.transferring = WRITE_REG(value, SC_TRANSFER_START);
+      e->state.serial.clock = WRITE_REG(value, SC_SHIFT_CLOCK);
+      if (e->state.serial.transferring) {
+        e->state.serial.cycles = 0;
+        e->state.serial.transferred_bits = 0;
       }
       break;
     case IO_DIV_ADDR:
       write_div_counter(e, 0);
       break;
     case IO_TIMA_ADDR:
-      e->timer.TIMA = value;
+      e->state.timer.TIMA = value;
       break;
     case IO_TMA_ADDR:
-      e->timer.TMA = value;
+      e->state.timer.TMA = value;
       break;
     case IO_TAC_ADDR: {
-      Bool old_timer_on = e->timer.on;
-      uint16_t old_tima_mask = s_tima_mask[e->timer.clock_select];
-      e->timer.clock_select = WRITE_REG(value, TAC_CLOCK_SELECT);
-      e->timer.on = WRITE_REG(value, TAC_TIMER_ON);
+      Bool old_timer_on = e->state.timer.on;
+      uint16_t old_tima_mask = s_tima_mask[e->state.timer.clock_select];
+      e->state.timer.clock_select = WRITE_REG(value, TAC_CLOCK_SELECT);
+      e->state.timer.on = WRITE_REG(value, TAC_TIMER_ON);
       /* TIMA is incremented when a specific bit of div_counter transitions
        * from 1 to 0. This can happen as a result of writing to DIV, or in this
        * case modifying which bit we're looking at. */
       Bool tima_tick = FALSE;
       if (!old_timer_on) {
-        uint16_t tima_mask = s_tima_mask[e->timer.clock_select];
-        if (e->timer.on) {
-          tima_tick = (e->timer.div_counter & old_tima_mask) != 0;
+        uint16_t tima_mask = s_tima_mask[e->state.timer.clock_select];
+        if (e->state.timer.on) {
+          tima_tick = (e->state.timer.div_counter & old_tima_mask) != 0;
         } else {
-          tima_tick = (e->timer.div_counter & old_tima_mask) != 0 &&
-                      (e->timer.div_counter & tima_mask) == 0;
+          tima_tick = (e->state.timer.div_counter & old_tima_mask) != 0 &&
+                      (e->state.timer.div_counter & tima_mask) == 0;
         }
         if (tima_tick) {
           increment_tima(e);
@@ -2048,10 +2051,10 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case IO_IF_ADDR:
-      e->interrupts.new_IF = e->interrupts.IF = value;
+      e->state.interrupts.new_IF = e->state.interrupts.IF = value;
       break;
     case IO_LCDC_ADDR: {
-      LCDControl* lcdc = &e->ppu.lcdc;
+      LCDControl* lcdc = &e->state.ppu.lcdc;
       Bool was_enabled = lcdc->display;
       lcdc->display = WRITE_REG(value, LCDC_DISPLAY);
       lcdc->window_tile_map_select =
@@ -2064,98 +2067,99 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       lcdc->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
       if (was_enabled ^ lcdc->display) {
         if (lcdc->display) {
-          DEBUG(ppu, "Enabling display. [cy: %u]\n", e->cycles);
-          e->ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
-          e->ppu.stat.mode = PPU_MODE_HBLANK;
-          e->ppu.stat.next_mode = PPU_MODE_MODE3;
-          e->ppu.stat.trigger_mode = PPU_MODE_MODE2;
-          e->ppu.stat.hblank.delay = CPU_MCYCLE;
-          e->ppu.stat.mode_cycles = PPU_MODE2_CYCLES;
-          e->ppu.LY_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
-          e->ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
-          e->ppu.LY = e->ppu.line_y = 0;
+          DEBUG(ppu, "Enabling display. [cy: %u]\n", e->state.cycles);
+          e->state.ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
+          e->state.ppu.stat.mode = PPU_MODE_HBLANK;
+          e->state.ppu.stat.next_mode = PPU_MODE_MODE3;
+          e->state.ppu.stat.trigger_mode = PPU_MODE_MODE2;
+          e->state.ppu.stat.hblank.delay = CPU_MCYCLE;
+          e->state.ppu.stat.mode_cycles = PPU_MODE2_CYCLES;
+          e->state.ppu.LY_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
+          e->state.ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
+          e->state.ppu.LY = e->state.ppu.line_y = 0;
         } else {
-          DEBUG(ppu, "Disabling display. [cy: %u]\n", e->cycles);
-          e->ppu.stat.mode = PPU_MODE_HBLANK;
-          e->ppu.LY = e->ppu.line_y = 0;
+          DEBUG(ppu, "Disabling display. [cy: %u]\n", e->state.cycles);
+          e->state.ppu.stat.mode = PPU_MODE_HBLANK;
+          e->state.ppu.LY = e->state.ppu.line_y = 0;
           /* Clear the framebuffer. */
           size_t i;
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
             e->frame_buffer[i] = RGBA_WHITE;
           }
-          e->ppu.new_frame_edge = TRUE;
+          e->state.ppu.new_frame_edge = TRUE;
         }
       }
       break;
     }
     case IO_STAT_ADDR: {
-      LCDStatus* stat = &e->ppu.stat;
-      if (e->ppu.lcdc.display) {
+      LCDStatus* stat = &e->state.ppu.stat;
+      if (e->state.ppu.lcdc.display) {
         Bool hblank = TRIGGER_MODE_IS(HBLANK) && !stat->hblank.irq;
         Bool vblank = TRIGGER_MODE_IS(VBLANK) && !stat->vblank.irq;
         if (!stat->IF && (hblank || vblank)) {
           VERBOSE(ppu, ">> trigger STAT from write [%c%c] [LY: %u] [cy: %u]\n",
-                  vblank ? 'V' : '.', hblank ? 'H' : '.', e->ppu.LY,
-                  e->cycles + CPU_MCYCLE);
-          e->interrupts.new_IF |= IF_STAT;
-          e->interrupts.IF |= IF_STAT;
+                  vblank ? 'V' : '.', hblank ? 'H' : '.', e->state.ppu.LY,
+                  e->state.cycles + CPU_MCYCLE);
+          e->state.interrupts.new_IF |= IF_STAT;
+          e->state.interrupts.IF |= IF_STAT;
           stat->IF = TRUE;
         }
       }
-      e->ppu.stat.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
-      e->ppu.stat.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
-      e->ppu.stat.vblank.irq = WRITE_REG(value, STAT_VBLANK_INTR);
-      e->ppu.stat.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
+      e->state.ppu.stat.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
+      e->state.ppu.stat.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
+      e->state.ppu.stat.vblank.irq = WRITE_REG(value, STAT_VBLANK_INTR);
+      e->state.ppu.stat.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
       break;
     }
     case IO_SCY_ADDR:
-      e->ppu.SCY = value;
+      e->state.ppu.SCY = value;
       break;
     case IO_SCX_ADDR:
-      e->ppu.SCX = value;
+      e->state.ppu.SCX = value;
       break;
     case IO_LY_ADDR:
       break;
     case IO_LYC_ADDR:
-      e->ppu.LYC = value;
-      if (e->ppu.lcdc.display) {
+      e->state.ppu.LYC = value;
+      if (e->state.ppu.lcdc.display) {
         check_ly_eq_lyc(e, TRUE);
         check_stat(e);
       }
       break;
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
-      e->dma.state =
-          (e->dma.state != DMA_INACTIVE ? e->dma.state : DMA_TRIGGERED);
-      e->dma.source = map_address(value << 8);
-      e->dma.cycles = 0;
+      e->state.dma.state =
+          (e->state.dma.state != DMA_INACTIVE ? e->state.dma.state
+                                              : DMA_TRIGGERED);
+      e->state.dma.source = map_address(value << 8);
+      e->state.dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
-      e->ppu.bgp.color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->ppu.bgp.color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->ppu.bgp.color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->ppu.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.bgp.color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->state.ppu.bgp.color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->state.ppu.bgp.color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->state.ppu.bgp.color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
-      e->ppu.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->ppu.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->ppu.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->ppu.obp[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.obp[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->state.ppu.obp[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->state.ppu.obp[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->state.ppu.obp[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_OBP1_ADDR:
-      e->ppu.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->ppu.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->ppu.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->ppu.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.obp[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
+      e->state.ppu.obp[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
+      e->state.ppu.obp[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
+      e->state.ppu.obp[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
       break;
     case IO_WY_ADDR:
-      e->ppu.WY = value;
+      e->state.ppu.WY = value;
       break;
     case IO_WX_ADDR:
-      e->ppu.WX = value;
+      e->state.ppu.WX = value;
       break;
     case IO_IE_ADDR:
-      e->interrupts.IE = value;
+      e->state.interrupts.IE = value;
       break;
     default:
       INFO(memory, "%s(0x%04x, 0x%02x) ignored.\n", __func__, addr, value);
@@ -2163,10 +2167,10 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
-#define CHANNEL_INDEX(c) ((c) - e->apu.channel)
+#define CHANNEL_INDEX(c) ((c) - e->state.apu.channel)
 
 static void write_nrx1_reg(Emulator* e, Channel* channel, uint8_t value) {
-  if (e->apu.enabled) {
+  if (e->state.apu.enabled) {
     channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
   }
   channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
@@ -2211,7 +2215,7 @@ static Bool write_nrx4_reg(Emulator* e,
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
    * enabled. */
-  Bool next_frame_is_length = (e->apu.frame & 1) == 1;
+  Bool next_frame_is_length = (e->state.apu.frame & 1) == 1;
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
@@ -2248,7 +2252,7 @@ static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope) {
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = envelope->period != 0;
   /* If the next APU frame will update the envelope, increment the timer. */
-  if (e->apu.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
+  if (e->state.apu.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
   }
   DEBUG(apu, "%s: volume=%u, timer=%u\n", __func__, envelope->volume,
@@ -2298,9 +2302,10 @@ static void trigger_nr34_reg(Emulator* e, Channel* channel, Wave* wave) {
           memcpy(&wave->ram[0], &wave->ram[(sample->position >> 1) & 12], 4);
           break;
       }
-      DEBUG(apu, "%s: corrupting wave ram. (cy: %u)\n", __func__, e->cycles);
+      DEBUG(apu, "%s: corrupting wave ram. (cy: %u)\n", __func__,
+            e->state.cycles);
     } else {
-      DEBUG(apu, "%s: ignoring write (cy: %u)\n", __func__, e->cycles);
+      DEBUG(apu, "%s: ignoring write (cy: %u)\n", __func__, e->state.cycles);
     }
   }
   wave->playing = TRUE;
@@ -2333,7 +2338,7 @@ static void write_noise_period(Channel* channel, Noise* noise) {
 }
 
 static void write_apu(Emulator* e, MaskedAddress addr, uint8_t value) {
-  if (!e->apu.enabled) {
+  if (!e->state.apu.enabled) {
     if (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
         addr == APU_NR31_ADDR || addr == APU_NR41_ADDR) {
       /* DMG allows writes to the length counters when power is disabled. */
@@ -2347,7 +2352,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, uint8_t value) {
     }
   }
 
-  APU* apu = &e->apu;
+  APU* apu = &e->state.apu;
   Channel* channel1 = &apu->channel[CHANNEL1];
   Channel* channel2 = &apu->channel[CHANNEL2];
   Channel* channel3 = &apu->channel[CHANNEL3];
@@ -2497,8 +2502,8 @@ static void write_apu(Emulator* e, MaskedAddress addr, uint8_t value) {
 }
 
 static void write_wave_ram(Emulator* e, MaskedAddress addr, uint8_t value) {
-  Wave* wave = &e->apu.wave;
-  if (e->apu.channel[CHANNEL3].status) {
+  Wave* wave = &e->state.apu.wave;
+  if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
@@ -2508,7 +2513,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, uint8_t value) {
       DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__, addr, value);
     }
   } else {
-    e->apu.wave.ram[addr] = value;
+    e->state.apu.wave.ram[addr] = value;
     DEBUG(apu, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
   }
 }
@@ -2534,7 +2539,7 @@ static void write_u8(Emulator* e, Address addr, uint8_t value) {
       e->memory_map.write_ext_ram(e, pair.addr, value);
       break;
     case MEMORY_MAP_WORK_RAM:
-      e->ram.data[pair.addr] = value;
+      e->state.ram.data[pair.addr] = value;
       break;
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
       e->memory_map.write_work_ram_bank_switch(e, pair.addr, value);
@@ -2555,23 +2560,23 @@ static void write_u8(Emulator* e, Address addr, uint8_t value) {
       break;
     case MEMORY_MAP_HIGH_RAM:
       VERBOSE(memory, "write_hram(0x%04x, 0x%02x)\n", addr, value);
-      e->hram[pair.addr] = value;
+      e->state.hram[pair.addr] = value;
       break;
   }
 }
 
 static TileMap* get_tile_map(Emulator* e, TileMapSelect select) {
   switch (select) {
-    case TILE_MAP_9800_9BFF: return &e->vram.map[0];
-    case TILE_MAP_9C00_9FFF: return &e->vram.map[1];
+    case TILE_MAP_9800_9BFF: return &e->state.vram.map[0];
+    case TILE_MAP_9C00_9FFF: return &e->state.vram.map[1];
     default: return NULL;
   }
 }
 
 static Tile* get_tile_data(Emulator* e, TileDataSelect select) {
   switch (select) {
-    case TILE_DATA_8000_8FFF: return &e->vram.tile[0];
-    case TILE_DATA_8800_97FF: return &e->vram.tile[256];
+    case TILE_DATA_8000_8FFF: return &e->state.vram.tile[0];
+    case TILE_DATA_8800_97FF: return &e->state.vram.tile[256];
     default: return NULL;
   }
 }
@@ -2604,12 +2609,12 @@ static void render_line(Emulator* e, uint8_t line_y) {
     line_data[sx] = RGBA_WHITE;
   }
 
-  if (e->ppu.lcdc.bg_display && !e->config.disable_bg) {
-    TileMap* map = get_tile_map(e, e->ppu.lcdc.bg_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
-    Palette* palette = &e->ppu.bgp;
-    uint8_t bg_y = line_y + e->ppu.SCY;
-    uint8_t bg_x = e->ppu.SCX;
+  if (e->state.ppu.lcdc.bg_display && !e->config.disable_bg) {
+    TileMap* map = get_tile_map(e, e->state.ppu.lcdc.bg_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->state.ppu.lcdc.bg_tile_data_select);
+    Palette* palette = &e->state.ppu.bgp;
+    uint8_t bg_y = line_y + e->state.ppu.SCY;
+    uint8_t bg_x = e->state.ppu.SCX;
     int sx;
     for (sx = 0; sx < SCREEN_WIDTH; ++sx, ++bg_x) {
       uint8_t palette_index =
@@ -2619,31 +2624,31 @@ static void render_line(Emulator* e, uint8_t line_y) {
     }
   }
 
-  if (e->ppu.lcdc.window_display && e->ppu.WX <= WINDOW_MAX_X &&
-      line_y >= e->ppu.frame_WY && !e->config.disable_window) {
-    TileMap* map = get_tile_map(e, e->ppu.lcdc.window_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->ppu.lcdc.bg_tile_data_select);
-    Palette* palette = &e->ppu.bgp;
+  if (e->state.ppu.lcdc.window_display && e->state.ppu.WX <= WINDOW_MAX_X &&
+      line_y >= e->state.ppu.frame_WY && !e->config.disable_window) {
+    TileMap* map = get_tile_map(e, e->state.ppu.lcdc.window_tile_map_select);
+    Tile* tiles = get_tile_data(e, e->state.ppu.lcdc.bg_tile_data_select);
+    Palette* palette = &e->state.ppu.bgp;
     uint8_t win_x = 0;
     int sx = 0;
-    if (e->ppu.WX < WINDOW_X_OFFSET) {
+    if (e->state.ppu.WX < WINDOW_X_OFFSET) {
       /* Start at the leftmost screen X, but skip N pixels of the window. */
-      win_x = WINDOW_X_OFFSET - e->ppu.WX;
+      win_x = WINDOW_X_OFFSET - e->state.ppu.WX;
     } else {
       /* Start N pixels right of the left of the screen. */
-      sx += e->ppu.WX - WINDOW_X_OFFSET;
+      sx += e->state.ppu.WX - WINDOW_X_OFFSET;
     }
     for (; sx < SCREEN_WIDTH; ++sx, ++win_x) {
       uint8_t palette_index =
-          get_tile_map_palette_index(map, tiles, win_x, e->ppu.win_y);
+          get_tile_map_palette_index(map, tiles, win_x, e->state.ppu.win_y);
       bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
       line_data[sx] = get_palette_index_rgba(palette_index, palette);
     }
-    e->ppu.win_y++;
+    e->state.ppu.win_y++;
   }
 
-  if (e->ppu.lcdc.obj_display && !e->config.disable_obj) {
-    uint8_t obj_height = s_obj_size_to_height[e->ppu.lcdc.obj_size];
+  if (e->state.ppu.lcdc.obj_display && !e->config.disable_obj) {
+    uint8_t obj_height = s_obj_size_to_height[e->state.ppu.lcdc.obj_size];
     Obj line_objs[OBJ_PER_LINE_COUNT];
     int n;
     int dst = 0;
@@ -2651,7 +2656,7 @@ static void render_line(Emulator* e, uint8_t line_y) {
      * smaller X-coordinates are earlier. Also, store the Y-coordinate relative
      * to the line being drawn, range [0..obj_height). */
     for (n = 0; n < OBJ_COUNT && dst < OBJ_PER_LINE_COUNT; ++n) {
-      Obj *src = &e->oam[n];
+      Obj *src = &e->state.oam[n];
       uint8_t rel_y = line_y - src->y;
       if (rel_y < obj_height) {
         int j = dst;
@@ -2676,16 +2681,16 @@ static void render_line(Emulator* e, uint8_t line_y) {
         oy = obj_height - 1 - oy;
       }
       if (obj_height == 8) {
-        tile_data = &e->vram.tile[o->tile][oy * TILE_HEIGHT];
+        tile_data = &e->state.vram.tile[o->tile][oy * TILE_HEIGHT];
       } else if (oy < 8) {
         /* Top tile of 8x16 sprite. */
-        tile_data = &e->vram.tile[o->tile & 0xfe][oy * TILE_HEIGHT];
+        tile_data = &e->state.vram.tile[o->tile & 0xfe][oy * TILE_HEIGHT];
       } else {
         /* Bottom tile of 8x16 sprite. */
-        tile_data = &e->vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
+        tile_data = &e->state.vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
       }
 
-      Palette* palette = &e->ppu.obp[o->palette];
+      Palette* palette = &e->state.ppu.obp[o->palette];
       int d = 1;
       uint8_t sx = o->x;
       if (o->xflip) {
@@ -2710,48 +2715,48 @@ static void render_line(Emulator* e, uint8_t line_y) {
 }
 
 static void dma_mcycle(Emulator* e) {
-  if (e->dma.state == DMA_INACTIVE) {
+  if (e->state.dma.state == DMA_INACTIVE) {
     return;
   }
-  if (e->dma.cycles < DMA_DELAY_CYCLES) {
-    e->dma.cycles += CPU_MCYCLE;
-    if (e->dma.cycles >= DMA_DELAY_CYCLES) {
-      e->dma.cycles = DMA_DELAY_CYCLES;
-      e->dma.state = DMA_ACTIVE;
+  if (e->state.dma.cycles < DMA_DELAY_CYCLES) {
+    e->state.dma.cycles += CPU_MCYCLE;
+    if (e->state.dma.cycles >= DMA_DELAY_CYCLES) {
+      e->state.dma.cycles = DMA_DELAY_CYCLES;
+      e->state.dma.state = DMA_ACTIVE;
     }
     return;
   }
 
-  uint8_t addr_offset = (e->dma.cycles - DMA_DELAY_CYCLES) >> 2;
+  uint8_t addr_offset = (e->state.dma.cycles - DMA_DELAY_CYCLES) >> 2;
   assert(addr_offset < OAM_TRANSFER_SIZE);
-  MemoryTypeAddressPair pair = e->dma.source;
+  MemoryTypeAddressPair pair = e->state.dma.source;
   pair.addr += addr_offset;
   uint8_t value = read_u8_no_dma_check(e, pair);
   write_oam_no_mode_check(e, addr_offset, value);
-  e->dma.cycles += CPU_MCYCLE;
-  if (VALUE_WRAPPED(e->dma.cycles, DMA_CYCLES)) {
-    e->dma.state = DMA_INACTIVE;
+  e->state.dma.cycles += CPU_MCYCLE;
+  if (VALUE_WRAPPED(e->state.dma.cycles, DMA_CYCLES)) {
+    e->state.dma.state = DMA_INACTIVE;
   }
 }
 
 static void trigger_vblank(Emulator* e) {
-  e->interrupts.new_IF |= IF_VBLANK;
-  if (e->ppu.display_delay_frames == 0) {
-    e->ppu.new_frame_edge = TRUE;
+  e->state.interrupts.new_IF |= IF_VBLANK;
+  if (e->state.ppu.display_delay_frames == 0) {
+    e->state.ppu.new_frame_edge = TRUE;
   } else {
-    e->ppu.display_delay_frames--;
+    e->state.ppu.display_delay_frames--;
   }
-  e->ppu.frame++;
+  e->state.ppu.frame++;
 }
 
 static void ppu_mcycle(Emulator* e) {
-  PPU* ppu = &e->ppu;
+  PPU* ppu = &e->state.ppu;
   LCDStatus* stat = &ppu->stat;
   if (!ppu->lcdc.display) {
     return;
   }
 
-  uint32_t cycle = e->cycles + CPU_MCYCLE;
+  uint32_t cycle = e->state.cycles + CPU_MCYCLE;
   PPUMode last_trigger_mode = stat->trigger_mode;
   Bool last_mode2_trigger = stat->mode2.trigger;
   Bool last_y_compare_trigger = stat->y_compare.trigger;
@@ -2871,11 +2876,11 @@ static void ppu_mcycle(Emulator* e) {
 }
 
 static void timer_mcycle(Emulator* e) {
-  if (e->timer.on && e->timer.tima_overflow) {
-    e->timer.tima_overflow = FALSE;
-    e->timer.TIMA = e->timer.TMA;
+  if (e->state.timer.on && e->state.timer.tima_overflow) {
+    e->state.timer.tima_overflow = FALSE;
+    e->state.timer.TIMA = e->state.timer.TMA;
   }
-  write_div_counter(e, e->timer.div_counter + CPU_MCYCLE);
+  write_div_counter(e, e->state.timer.div_counter + CPU_MCYCLE);
 }
 
 static void update_channel_sweep(Channel* channel, Sweep* sweep) {
@@ -3016,19 +3021,18 @@ static uint16_t channel3_sample(Channel* channel, Wave* wave, uint8_t sample) {
   return (sample >> shift[wave->volume]) << 12;
 }
 
-static void write_sample(APU* apu, uint16_t so1, uint16_t so2) {
-  AudioBuffer* buffer = apu->buffer;
+static void write_sample(AudioBuffer* buffer, uint16_t so1, uint16_t so2) {
   assert(buffer->position + 2 <= buffer->end);
   *buffer->position++ = so1;
   *buffer->position++ = so2;
 }
 
 static void apu_mcycle(Emulator* e) {
-  APU* apu = &e->apu;
+  APU* apu = &e->state.apu;
   uint8_t i;
   if (!apu->enabled) {
     for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
-      write_sample(apu, 0, 0);
+      write_sample(e->audio_buffer, 0, 0);
     }
     return;
   }
@@ -3042,7 +3046,7 @@ static void apu_mcycle(Emulator* e) {
   Noise* noise = &apu->noise;
 
   /* Synchronize with CPU cycle counter. */
-  apu->cycles = e->cycles;
+  apu->cycles = e->state.cycles;
 
   for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
     Bool do_length = FALSE;
@@ -3067,7 +3071,7 @@ static void apu_mcycle(Emulator* e) {
 
       VERBOSE(apu, "%s: %c%c%c frame: %u cy: %u\n", __func__,
               do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-              do_sweep ? 'S' : '.', apu->frame, e->cycles + i);
+              do_sweep ? 'S' : '.', apu->frame, e->state.cycles + i);
     }
 
     uint16_t sample = 0;
@@ -3148,36 +3152,36 @@ static void apu_mcycle(Emulator* e) {
     so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
     so2_mixed_sample *= (apu->so2_volume + 1);
     so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    write_sample(apu, so1_mixed_sample, so2_mixed_sample);
+    write_sample(e->audio_buffer, so1_mixed_sample, so2_mixed_sample);
   }
 }
 
 static void serial_mcycle(Emulator* e) {
-  if (!e->serial.transferring) {
+  if (!e->state.serial.transferring) {
     return;
   }
-  if (e->serial.clock == SERIAL_CLOCK_INTERNAL) {
-    e->serial.cycles += CPU_MCYCLE;
-    if (VALUE_WRAPPED(e->serial.cycles, SERIAL_CYCLES)) {
+  if (e->state.serial.clock == SERIAL_CLOCK_INTERNAL) {
+    e->state.serial.cycles += CPU_MCYCLE;
+    if (VALUE_WRAPPED(e->state.serial.cycles, SERIAL_CYCLES)) {
       /* Since we're never connected to another device, always shift in 0xff. */
-      e->serial.SB = (e->serial.SB << 1) | 1;
-      e->serial.transferred_bits++;
-      if (VALUE_WRAPPED(e->serial.transferred_bits, 8)) {
-        e->serial.transferring = 0;
-        e->interrupts.new_IF |= IF_SERIAL;
+      e->state.serial.SB = (e->state.serial.SB << 1) | 1;
+      e->state.serial.transferred_bits++;
+      if (VALUE_WRAPPED(e->state.serial.transferred_bits, 8)) {
+        e->state.serial.transferring = 0;
+        e->state.interrupts.new_IF |= IF_SERIAL;
       }
     }
   }
 }
 
 static void mcycle(Emulator* e) {
-  e->interrupts.IF = e->interrupts.new_IF;
+  e->state.interrupts.IF = e->state.interrupts.new_IF;
   dma_mcycle(e);
   ppu_mcycle(e);
   timer_mcycle(e);
   apu_mcycle(e);
   serial_mcycle(e);
-  e->cycles += CPU_MCYCLE;
+  e->state.cycles += CPU_MCYCLE;
 }
 
 static uint8_t read_u8_cy(Emulator* e, Address addr) {
@@ -3349,20 +3353,22 @@ static void print_instruction(Emulator* e, Address addr) {
 }
 
 static void print_emulator_info(Emulator* e) {
-  if (!s_never_trace && s_trace && !e->interrupts.halt) {
+  if (!s_never_trace && s_trace && !e->state.interrupts.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
-           e->reg.A, e->reg.F.Z ? 'Z' : '-', e->reg.F.N ? 'N' : '-',
-           e->reg.F.H ? 'H' : '-', e->reg.F.C ? 'C' : '-', e->reg.BC, e->reg.DE,
-           e->reg.HL, e->reg.SP, e->reg.PC);
-    printf(" (cy: %u)", e->cycles);
+           e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
+           e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
+           e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
+           e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
+    printf(" (cy: %u)", e->state.cycles);
     if (s_log_level_ppu >= 1) {
-      printf(" ppu:%c%u", e->ppu.lcdc.display ? '+' : '-', e->ppu.stat.mode);
+      printf(" ppu:%c%u", e->state.ppu.lcdc.display ? '+' : '-',
+             e->state.ppu.stat.mode);
     }
     if (s_log_level_ppu >= 2) {
-      printf(" LY:%u", e->ppu.LY);
+      printf(" LY:%u", e->state.ppu.LY);
     }
     printf(" |");
-    print_instruction(e, e->reg.PC);
+    print_instruction(e, e->state.reg.PC);
     printf("\n");
     if (s_trace_counter > 0) {
       if (--s_trace_counter == 0) {
@@ -3375,9 +3381,9 @@ static void print_emulator_info(Emulator* e) {
 #define NI UNREACHABLE("opcode not implemented!\n")
 #define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
-#define REG(R) e->reg.R
-#define FLAG(x) e->reg.F.x
-#define INTR(m) e->interrupts.m
+#define REG(R) e->state.reg.R
+#define FLAG(x) e->state.reg.F.x
+#define INTR(m) e->state.interrupts.m
 #define CY mcycle(e)
 
 #define RA REG(A)
@@ -3527,10 +3533,10 @@ static void print_emulator_info(Emulator* e) {
 #define OR_N RA |= READ_N; OR_FLAGS
 
 #define POP_RR(RR) REG(RR) = READ16(RSP); RSP += 2
-#define POP_AF set_af_reg(&e->reg, READ16(RSP)); RSP += 2
+#define POP_AF set_af_reg(&e->state.reg, READ16(RSP)); RSP += 2
 
 #define PUSH_RR(RR) CY; RSP -= 2; WRITE16(RSP, REG(RR))
-#define PUSH_AF CY; RSP -= 2; WRITE16(RSP, get_af_reg(&e->reg))
+#define PUSH_AF CY; RSP -= 2; WRITE16(RSP, get_af_reg(&e->state.reg))
 
 #define RES(BIT) u &= ~(1 << (BIT))
 #define RES_R(BIT, R) BASIC_OP_R(R, RES(BIT))
@@ -3627,15 +3633,15 @@ static void execute_instruction(Emulator* e) {
     /* When execution continues after the interrupt occurs, there are no
      * additional cycles spent reading the opcode (perhaps because it has
      * already been fetched?) */
-    opcode = read_u8(e, e->reg.PC);
+    opcode = read_u8(e, e->state.reg.PC);
     /* HALT bug. When interrupts are disabled during a HALT, the following byte
      * will be duplicated when decoding. */
-    e->reg.PC--;
+    e->state.reg.PC--;
     INTR(halt_DI) = FALSE;
   } else {
-    opcode = read_u8_cy(e, e->reg.PC);
+    opcode = read_u8_cy(e, e->state.reg.PC);
   }
-  new_pc = e->reg.PC + s_opcode_bytes[opcode];
+  new_pc = e->state.reg.PC + s_opcode_bytes[opcode];
 
 #define REG_OPS(code, name)            \
   case code + 0: name##_R(B); break;   \
@@ -3666,7 +3672,7 @@ static void execute_instruction(Emulator* e) {
   case code + 7: LD_R_R(R, A); break;
 
   if (opcode == 0xcb) {
-    uint8_t opcode = read_u8_cy(e, e->reg.PC + 1);
+    uint8_t opcode = read_u8_cy(e, e->state.reg.PC + 1);
     switch (opcode) {
       REG_OPS(0x00, RLC)
       REG_OPS(0x08, RRC)
@@ -3857,15 +3863,15 @@ static void execute_instruction(Emulator* e) {
       default: INVALID; break;
     }
   }
-  e->reg.PC = new_pc;
+  e->state.reg.PC = new_pc;
 }
 
 static void handle_interrupts(Emulator* e) {
-  if (!(e->interrupts.IME || e->interrupts.halt)) {
+  if (!(e->state.interrupts.IME || e->state.interrupts.halt)) {
     return;
   }
 
-  uint8_t interrupts = e->interrupts.new_IF & e->interrupts.IE;
+  uint8_t interrupts = e->state.interrupts.new_IF & e->state.interrupts.IE;
   if (interrupts == 0) {
     return;
   }
@@ -3875,21 +3881,22 @@ static void handle_interrupts(Emulator* e) {
   Address vector;
   if (interrupts & IF_VBLANK) {
     DEBUG(interrupt, ">> VBLANK interrupt [frame = %u] [cy: %u]\n",
-          e->ppu.frame, e->cycles);
+          e->state.ppu.frame, e->state.cycles);
     vector = 0x40;
     mask = IF_VBLANK;
   } else if (interrupts & IF_STAT) {
     DEBUG(interrupt, ">> LCD_STAT interrupt [%c%c%c%c] [cy: %u]\n",
-          e->ppu.stat.y_compare.irq ? 'Y' : '.',
-          e->ppu.stat.mode2.irq ? 'O' : '.', e->ppu.stat.vblank.irq ? 'V' : '.',
-          e->ppu.stat.hblank.irq ? 'H' : '.', e->cycles);
+          e->state.ppu.stat.y_compare.irq ? 'Y' : '.',
+          e->state.ppu.stat.mode2.irq ? 'O' : '.',
+          e->state.ppu.stat.vblank.irq ? 'V' : '.',
+          e->state.ppu.stat.hblank.irq ? 'H' : '.', e->state.cycles);
     vector = 0x48;
     mask = IF_STAT;
   } else if (interrupts & IF_TIMER) {
     DEBUG(interrupt, ">> TIMER interrupt\n");
     vector = 0x50;
     mask = IF_TIMER;
-    delay = e->interrupts.halt;
+    delay = e->state.interrupts.halt;
   } else if (interrupts & IF_SERIAL) {
     DEBUG(interrupt, ">> SERIAL interrupt\n");
     vector = 0x58;
@@ -3907,18 +3914,18 @@ static void handle_interrupts(Emulator* e) {
     mcycle(e);
   }
 
-  if (e->interrupts.halt_DI) {
+  if (e->state.interrupts.halt_DI) {
     DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupts.\n");
   } else {
-    e->interrupts.new_IF &= ~mask;
+    e->state.interrupts.new_IF &= ~mask;
     Address new_pc = REG(PC);
     CALL(vector);
     REG(PC) = new_pc;
-    e->interrupts.IME = FALSE;
+    e->state.interrupts.IME = FALSE;
     mcycle(e);
     mcycle(e);
   }
-  e->interrupts.halt = FALSE;
+  e->state.interrupts.halt = FALSE;
 }
 
 static void step_emulator(Emulator* e) {
@@ -3935,7 +3942,7 @@ enum {
 };
 
 static void reset_audio_buffer(Emulator* e) {
-  e->apu.buffer->position = e->apu.buffer->data;
+  e->audio_buffer->position = e->audio_buffer->data;
 }
 
 /* TODO: remove this global */
@@ -3958,13 +3965,13 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
                                               uint32_t requested_samples,
                                               double until_ms) {
   if (last_event & EMULATOR_EVENT_NEW_FRAME) {
-    e->ppu.new_frame_edge = FALSE;
+    e->state.ppu.new_frame_edge = FALSE;
   }
   if (last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     reset_audio_buffer(e);
   }
 
-  AudioBuffer* buffer = e->apu.buffer;
+  AudioBuffer* buffer = e->audio_buffer;
   assert(requested_samples <= buffer->end - buffer->data);
 
   EmulatorEvent result = 0;
@@ -3972,7 +3979,7 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
   while (running) {
     int i;
     for (i = 0; running && i < EMULATOR_INSTRUCTION_QUANTA; ++i) {
-      if (e->ppu.new_frame_edge) {
+      if (e->state.ppu.new_frame_edge) {
         result |= EMULATOR_EVENT_NEW_FRAME;
         running = FALSE;
       }
@@ -4172,14 +4179,14 @@ static Bool sdl_poll_events(Emulator* e) {
           case SDLK_b: if (set) e->config.disable_bg ^= 1; break;
           case SDLK_w: if (set) e->config.disable_window ^= 1; break;
           case SDLK_o: if (set) e->config.disable_obj ^= 1; break;
-          case SDLK_UP: e->joypad.up = set; break;
-          case SDLK_DOWN: e->joypad.down = set; break;
-          case SDLK_LEFT: e->joypad.left = set; break;
-          case SDLK_RIGHT: e->joypad.right = set; break;
-          case SDLK_z: e->joypad.B = set; break;
-          case SDLK_x: e->joypad.A = set; break;
-          case SDLK_RETURN: e->joypad.start = set; break;
-          case SDLK_BACKSPACE: e->joypad.select = set; break;
+          case SDLK_UP: e->state.joypad.up = set; break;
+          case SDLK_DOWN: e->state.joypad.down = set; break;
+          case SDLK_LEFT: e->state.joypad.left = set; break;
+          case SDLK_RIGHT: e->state.joypad.right = set; break;
+          case SDLK_z: e->state.joypad.B = set; break;
+          case SDLK_x: e->state.joypad.A = set; break;
+          case SDLK_RETURN: e->state.joypad.start = set; break;
+          case SDLK_BACKSPACE: e->state.joypad.select = set; break;
           case SDLK_ESCAPE: running = FALSE; break;
           case SDLK_TAB: e->config.no_sync = set; break;
           case SDLK_SPACE: if (set) e->config.paused ^= 1; break;
@@ -4247,7 +4254,7 @@ static void sdl_render_surface(SDL* sdl, Emulator* e) {
 
 static void sdl_synchronize(SDL* sdl, Emulator* e) {
   double now_ms = get_time_ms();
-  double gb_ms = (double)(e->cycles - sdl->last_event_cycles) *
+  double gb_ms = (double)(e->state.cycles - sdl->last_event_cycles) *
                  MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
   double real_ms = now_ms - sdl->last_event_real_ms;
   double delta_ms = gb_ms - real_ms;
@@ -4277,7 +4284,7 @@ static void sdl_synchronize(SDL* sdl, Emulator* e) {
     }
     sdl->last_event_real_ms = delay_until_ms;
   }
-  sdl->last_event_cycles = e->cycles;
+  sdl->last_event_cycles = e->state.cycles;
 }
 
 /* Returns TRUE if there was overflow. */
@@ -4304,8 +4311,8 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   Bool overflow = FALSE;
   SDLAudio* audio = &sdl->audio;
 
-  uint16_t* src = e->apu.buffer->data;
-  uint16_t* src_end = e->apu.buffer->position;
+  uint16_t* src = e->audio_buffer->data;
+  uint16_t* src_end = e->audio_buffer->position;
 
   SDL_LockAudio();
   size_t old_buffer_available = audio->buffer_available;
@@ -4362,11 +4369,11 @@ static void get_save_filename(const char* rom_filename,
 
 static Result read_ext_ram_from_file(Emulator* e, const char* filename) {
   FILE* f = NULL;
-  if (e->ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
+  if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "rb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    uint8_t* data = e->ext_ram.data;
-    size_t size = e->ext_ram.size;
+    uint8_t* data = e->state.ext_ram.data;
+    size_t size = e->state.ext_ram.size;
     CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
     fclose(f);
   }
@@ -4380,11 +4387,11 @@ error:
 
 static Result write_ext_ram_to_file(Emulator* e, const char* filename) {
   FILE* f = NULL;
-  if (e->ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
+  if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "wb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    uint8_t* data = e->ext_ram.data;
-    size_t size = e->ext_ram.size;
+    uint8_t* data = e->state.ext_ram.data;
+    size_t size = e->state.ext_ram.size;
     CHECK_MSG(fwrite(data, size, 1, f) == 1, "fwrite failed.\n");
     fclose(f);
   }
