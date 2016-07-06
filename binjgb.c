@@ -808,7 +808,7 @@ typedef struct {
   Bool enable;      /* Set after EI instruction. This delays updating IME. */
   Bool halt;        /* Halted, waiting for an interrupt. */
   Bool halt_DI;     /* Halted w/ disabled interrupts. */
-} Interrupts;
+} Interrupt;
 
 typedef struct {
   uint8_t TIMA;            /* Incremented at rate defined by clock_select */
@@ -1006,7 +1006,7 @@ typedef struct {
   VideoRam vram;
   ExtRam ext_ram;
   WorkRam ram;
-  Interrupts interrupts;
+  Interrupt interrupt;
   OAM oam;
   Joypad joypad;
   Serial serial;
@@ -1381,7 +1381,7 @@ static Result init_emulator(Emulator* e,
   e->state.reg.HL = 0x014d;
   e->state.reg.SP = 0xfffe;
   e->state.reg.PC = 0x0100;
-  e->state.interrupts.IME = FALSE;
+  e->state.interrupt.IME = FALSE;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
@@ -1565,7 +1565,7 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
       return TAC_UNUSED | READ_REG(e->state.timer.on, TAC_TIMER_ON) |
              READ_REG(e->state.timer.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
-      return IF_UNUSED | e->state.interrupts.IF;
+      return IF_UNUSED | e->state.interrupt.IF;
     case IO_LCDC_ADDR:
       return READ_REG(e->state.ppu.lcdc.display, LCDC_DISPLAY) |
              READ_REG(e->state.ppu.lcdc.window_tile_map_select,
@@ -1616,7 +1616,7 @@ static uint8_t read_io(Emulator* e, MaskedAddress addr) {
     case IO_WX_ADDR:
       return e->state.ppu.WX;
     case IO_IE_ADDR:
-      return e->state.interrupts.IE;
+      return e->state.interrupt.IE;
     default:
       INFO(io, "%s(0x%04x [%s]) ignored.\n", __func__, addr,
            get_io_reg_string(addr));
@@ -1928,7 +1928,7 @@ static void increment_tima(Emulator* e) {
     DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n",
           e->state.cycles + CPU_MCYCLE);
     e->state.timer.tima_overflow = TRUE;
-    e->state.interrupts.new_IF |= IF_TIMER;
+    e->state.interrupt.new_IF |= IF_TIMER;
   }
 }
 
@@ -1964,9 +1964,9 @@ static void check_stat(Emulator* e) {
   if (!stat->IF && SHOULD_TRIGGER_STAT) {
     VERBOSE(ppu, ">> trigger STAT [LY: %u] [cy: %u]\n", e->state.ppu.LY,
             e->state.cycles + CPU_MCYCLE);
-    e->state.interrupts.new_IF |= IF_STAT;
+    e->state.interrupt.new_IF |= IF_STAT;
     if (!(TRIGGER_VBLANK || TRIGGER_Y_COMPARE)) {
-      e->state.interrupts.IF |= IF_STAT;
+      e->state.interrupt.IF |= IF_STAT;
     }
     stat->IF = TRUE;
   } else if (!(TRIGGER_HBLANK || TRIGGER_VBLANK || CHECK_MODE2 ||
@@ -1990,10 +1990,10 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
     if (write) {
       /* If STAT was triggered this frame due to Y compare, cancel it.
        * There's probably a nicer way to do this. */
-      if ((e->state.interrupts.new_IF ^ e->state.interrupts.IF) &
-          e->state.interrupts.new_IF & IF_STAT) {
+      if ((e->state.interrupt.new_IF ^ e->state.interrupt.IF) &
+          e->state.interrupt.new_IF & IF_STAT) {
         if (!SHOULD_TRIGGER_STAT) {
-          e->state.interrupts.new_IF &= ~IF_STAT;
+          e->state.interrupt.new_IF &= ~IF_STAT;
         }
       }
     }
@@ -2051,7 +2051,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       break;
     }
     case IO_IF_ADDR:
-      e->state.interrupts.new_IF = e->state.interrupts.IF = value;
+      e->state.interrupt.new_IF = e->state.interrupt.IF = value;
       break;
     case IO_LCDC_ADDR: {
       LCDControl* lcdc = &e->state.ppu.lcdc;
@@ -2100,8 +2100,8 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
           VERBOSE(ppu, ">> trigger STAT from write [%c%c] [LY: %u] [cy: %u]\n",
                   vblank ? 'V' : '.', hblank ? 'H' : '.', e->state.ppu.LY,
                   e->state.cycles + CPU_MCYCLE);
-          e->state.interrupts.new_IF |= IF_STAT;
-          e->state.interrupts.IF |= IF_STAT;
+          e->state.interrupt.new_IF |= IF_STAT;
+          e->state.interrupt.IF |= IF_STAT;
           stat->IF = TRUE;
         }
       }
@@ -2159,7 +2159,7 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       e->state.ppu.WX = value;
       break;
     case IO_IE_ADDR:
-      e->state.interrupts.IE = value;
+      e->state.interrupt.IE = value;
       break;
     default:
       INFO(memory, "%s(0x%04x, 0x%02x) ignored.\n", __func__, addr, value);
@@ -2740,7 +2740,7 @@ static void dma_mcycle(Emulator* e) {
 }
 
 static void trigger_vblank(Emulator* e) {
-  e->state.interrupts.new_IF |= IF_VBLANK;
+  e->state.interrupt.new_IF |= IF_VBLANK;
   if (e->state.ppu.display_delay_frames == 0) {
     e->state.ppu.new_frame_edge = TRUE;
   } else {
@@ -3168,14 +3168,14 @@ static void serial_mcycle(Emulator* e) {
       e->state.serial.transferred_bits++;
       if (VALUE_WRAPPED(e->state.serial.transferred_bits, 8)) {
         e->state.serial.transferring = 0;
-        e->state.interrupts.new_IF |= IF_SERIAL;
+        e->state.interrupt.new_IF |= IF_SERIAL;
       }
     }
   }
 }
 
 static void mcycle(Emulator* e) {
-  e->state.interrupts.IF = e->state.interrupts.new_IF;
+  e->state.interrupt.IF = e->state.interrupt.new_IF;
   dma_mcycle(e);
   ppu_mcycle(e);
   timer_mcycle(e);
@@ -3353,7 +3353,7 @@ static void print_instruction(Emulator* e, Address addr) {
 }
 
 static void print_emulator_info(Emulator* e) {
-  if (!s_never_trace && s_trace && !e->state.interrupts.halt) {
+  if (!s_never_trace && s_trace && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
            e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
            e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
@@ -3383,7 +3383,7 @@ static void print_emulator_info(Emulator* e) {
 
 #define REG(R) e->state.reg.R
 #define FLAG(x) e->state.reg.F.x
-#define INTR(m) e->state.interrupts.m
+#define INTR(m) e->state.interrupt.m
 #define CY mcycle(e)
 
 #define RA REG(A)
@@ -3867,24 +3867,24 @@ static void execute_instruction(Emulator* e) {
 }
 
 static void handle_interrupts(Emulator* e) {
-  if (!(e->state.interrupts.IME || e->state.interrupts.halt)) {
+  if (!(e->state.interrupt.IME || e->state.interrupt.halt)) {
     return;
   }
 
-  uint8_t interrupts = e->state.interrupts.new_IF & e->state.interrupts.IE;
-  if (interrupts == 0) {
+  uint8_t interrupt = e->state.interrupt.new_IF & e->state.interrupt.IE;
+  if (interrupt == 0) {
     return;
   }
 
   Bool delay = FALSE;
   uint8_t mask = 0;
   Address vector;
-  if (interrupts & IF_VBLANK) {
+  if (interrupt & IF_VBLANK) {
     DEBUG(interrupt, ">> VBLANK interrupt [frame = %u] [cy: %u]\n",
           e->state.ppu.frame, e->state.cycles);
     vector = 0x40;
     mask = IF_VBLANK;
-  } else if (interrupts & IF_STAT) {
+  } else if (interrupt & IF_STAT) {
     DEBUG(interrupt, ">> LCD_STAT interrupt [%c%c%c%c] [cy: %u]\n",
           e->state.ppu.stat.y_compare.irq ? 'Y' : '.',
           e->state.ppu.stat.mode2.irq ? 'O' : '.',
@@ -3892,16 +3892,16 @@ static void handle_interrupts(Emulator* e) {
           e->state.ppu.stat.hblank.irq ? 'H' : '.', e->state.cycles);
     vector = 0x48;
     mask = IF_STAT;
-  } else if (interrupts & IF_TIMER) {
+  } else if (interrupt & IF_TIMER) {
     DEBUG(interrupt, ">> TIMER interrupt\n");
     vector = 0x50;
     mask = IF_TIMER;
-    delay = e->state.interrupts.halt;
-  } else if (interrupts & IF_SERIAL) {
+    delay = e->state.interrupt.halt;
+  } else if (interrupt & IF_SERIAL) {
     DEBUG(interrupt, ">> SERIAL interrupt\n");
     vector = 0x58;
     mask = IF_SERIAL;
-  } else if (interrupts & IF_JOYPAD) {
+  } else if (interrupt & IF_JOYPAD) {
     DEBUG(interrupt, ">> JOYPAD interrupt\n");
     vector = 0x60;
     mask = IF_JOYPAD;
@@ -3914,18 +3914,18 @@ static void handle_interrupts(Emulator* e) {
     mcycle(e);
   }
 
-  if (e->state.interrupts.halt_DI) {
-    DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupts.\n");
+  if (e->state.interrupt.halt_DI) {
+    DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupt.\n");
   } else {
-    e->state.interrupts.new_IF &= ~mask;
+    e->state.interrupt.new_IF &= ~mask;
     Address new_pc = REG(PC);
     CALL(vector);
     REG(PC) = new_pc;
-    e->state.interrupts.IME = FALSE;
+    e->state.interrupt.IME = FALSE;
     mcycle(e);
     mcycle(e);
   }
-  e->state.interrupts.halt = FALSE;
+  e->state.interrupt.halt = FALSE;
 }
 
 static void step_emulator(Emulator* e) {
