@@ -2,6 +2,18 @@
 
 A simple GB emulator.
 
+## Features
+
+* One file, less than 5000 lines of C!
+* Cycle accurate, passes many timing tests (see below)
+* Supports MBC1, MBC2 and MBC3
+* Save/load battery backup
+* Save/load emulator state to file
+* Fast-forward, pause and step one frame
+* Disable/enable each audio channel
+* Disable/enable BG, Window and Sprite layers
+* Convenient Python test harness using hashes to validate
+
 ## Building
 
 Requires [CMake](https://cmake.org) and [SDL 1.2](https://www.libsdl.org/download-1.2.php).
@@ -36,6 +48,27 @@ Keys:
 | Fast-forward | tab |
 | Pause | space |
 | Step one frame | n |
+
+## Running tests
+
+You'll have to get the various test suites below, build the `.gb` files if
+necessary, and copy the results to the appropriate directories. See `tester.py`
+for the expected locations. Probably should write a script that does this
+automatically.
+
+`tester.py` will only run the tests that match a filter passed on the command
+line. Some examples:
+
+```
+# Run all tests
+$ ./tester.py
+
+# Run all tests mooneye tests
+$ ./tester.py mooneye
+
+# Run all gpu tests
+$ ./tester.py gpu
+```
 
 ## Test status
 
@@ -146,7 +179,7 @@ Keys:
 | acceptance/gpu/ly\_lyc\_0\_write-GS | :ok: |
 | acceptance/gpu/ly\_lyc\_144-GS | :ok: |
 | acceptance/gpu/ly\_lyc\_153-GS | :ok: |
-| acceptance/gpu/ly\_lyc\_153\_write-GS | :x: |
+| acceptance/gpu/ly\_lyc\_153\_write-GS | :ok: |
 | acceptance/gpu/ly\_lyc\_write-GS | :ok: |
 | acceptance/gpu/ly\_new\_frame-GS | :ok: |
 | acceptance/gpu/stat\_write\_if-GS | :x: |
