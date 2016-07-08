@@ -132,16 +132,11 @@ typedef uint32_t RGBA;
 
 #define OAM_START_ADDR 0xfe00
 #define OAM_END_ADDR 0xfe9f
-#define UNUSED_START_ADDR 0xfea0
-#define UNUSED_END_ADDR 0xfeff
 #define IO_START_ADDR 0xff00
 #define APU_START_ADDR 0xff10
-#define APU_END_ADDR 0xff2f
 #define WAVE_RAM_START_ADDR 0xff30
-#define WAVE_RAM_END_ADDR 0xff3f
-#define IO_END_ADDR 0xff7f
 #define HIGH_RAM_START_ADDR 0xff80
-#define HIGH_RAM_END_ADDR 0xfffe
+#define IE_ADDR 0xffff
 
 #define OAM_TRANSFER_SIZE (OAM_END_ADDR - OAM_START_ADDR + 1)
 
@@ -1410,82 +1405,73 @@ error:
 static MemoryTypeAddressPair map_address(Address addr) {
   MemoryTypeAddressPair result;
   switch (addr >> 12) {
-    case 0x0:
-    case 0x1:
-    case 0x2:
-    case 0x3:
+    case 0x0: case 0x1: case 0x2: case 0x3:
       result.type = MEMORY_MAP_ROM;
       result.addr = addr & ADDR_MASK_16K;
       break;
-
-    case 0x4:
-    case 0x5:
-    case 0x6:
-    case 0x7:
+    case 0x4: case 0x5: case 0x6: case 0x7:
       result.type = MEMORY_MAP_ROM_BANK_SWITCH;
       result.addr = addr & ADDR_MASK_16K;
       break;
-
-    case 0x8:
-    case 0x9:
+    case 0x8: case 0x9:
       result.type = MEMORY_MAP_VRAM;
       result.addr = addr & ADDR_MASK_8K;
       break;
-
-    case 0xA:
-    case 0xB:
+    case 0xA: case 0xB:
       result.type = MEMORY_MAP_EXT_RAM;
       result.addr = addr & ADDR_MASK_8K;
       break;
-
-    case 0xC:
-    case 0xE: /* mirror of 0xc000..0xcfff */
+    case 0xC: case 0xE: /* mirror of 0xc000..0xcfff */
       result.type = MEMORY_MAP_WORK_RAM;
       result.addr = addr & ADDR_MASK_4K;
       break;
-
     case 0xD:
       result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
       result.addr = addr & ADDR_MASK_4K;
       break;
-
     case 0xF:
-      if (addr < OAM_START_ADDR) {
-        /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
-        result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
-        result.addr = addr & ADDR_MASK_4K;
-      } else if (addr <= OAM_END_ADDR) {
-        /* 0xfe00 - 0xfe9f */
-        result.type = MEMORY_MAP_OAM;
-        result.addr = addr - OAM_START_ADDR;
-      } else if (addr <= UNUSED_END_ADDR) {
-        /* 0xfea0 - 0xfeff */
-        result.type = MEMORY_MAP_UNUSED;
-        result.addr = addr;
-      } else if (addr < APU_START_ADDR) {
-        /* 0xff00 - 0xff0f */
-        result.type = MEMORY_MAP_IO;
-        result.addr = addr - IO_START_ADDR;
-      } else if (addr < WAVE_RAM_START_ADDR) {
-        /* 0xff10 - 0xff2f */
-        result.type = MEMORY_MAP_APU;
-        result.addr = addr - APU_START_ADDR;
-      } else if (addr <= WAVE_RAM_END_ADDR) {
-        /* 0xff30 - 0xff3f */
-        result.type = MEMORY_MAP_WAVE_RAM;
-        result.addr = addr - WAVE_RAM_START_ADDR;
-      } else if (addr <= IO_END_ADDR) {
-        /* 0xff40 - 0xff7f */
-        result.type = MEMORY_MAP_IO;
-        result.addr = addr - IO_START_ADDR;
-      } else if (addr <= HIGH_RAM_END_ADDR) {
-        /* 0xff80 - 0xfffe */
-        result.type = MEMORY_MAP_HIGH_RAM;
-        result.addr = addr - HIGH_RAM_START_ADDR;
-      } else {
-        /* 0xffff: IE register */
-        result.type = MEMORY_MAP_IO;
-        result.addr = addr - IO_START_ADDR;
+      switch ((addr >> 8) & 0xf) {
+        default: /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
+          result.type = MEMORY_MAP_WORK_RAM_BANK_SWITCH;
+          result.addr = addr & ADDR_MASK_4K;
+          break;
+        case 0xe:
+          if (addr <= OAM_END_ADDR) { /* 0xfe00 - 0xfe9f */
+            result.type = MEMORY_MAP_OAM;
+            result.addr = addr - OAM_START_ADDR;
+          } else { /* 0xfea0 - 0xfeff */
+            result.type = MEMORY_MAP_UNUSED;
+            result.addr = addr;
+          }
+          break;
+        case 0xf:
+          switch ((addr >> 4) & 0xf) {
+            case 0: case 4: case 5: case 6: case 7:
+              /* 0xff00 - 0xff0f, 0xff40 - 0xff7f */
+              result.type = MEMORY_MAP_IO;
+              result.addr = addr - IO_START_ADDR;
+              break;
+            case 1: case 2: /* 0xff10 - 0xff2f */
+              result.type = MEMORY_MAP_APU;
+              result.addr = addr - APU_START_ADDR;
+              break;
+            case 3: /* 0xff30 - 0xff3f */
+              result.type = MEMORY_MAP_WAVE_RAM;
+              result.addr = addr - WAVE_RAM_START_ADDR;
+              break;
+            case 0xf:
+              if (addr == IE_ADDR) {
+                result.type = MEMORY_MAP_IO;
+                result.addr = addr - IO_START_ADDR;
+                break;
+              }
+              /* fallthrough */
+            default: /* 0xff80 - 0xfffe */
+              result.type = MEMORY_MAP_HIGH_RAM;
+              result.addr = addr - HIGH_RAM_START_ADDR;
+              break;
+          }
+          break;
       }
       break;
   }
