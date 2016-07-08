@@ -42,6 +42,12 @@
   if (!(x)) {    \
     goto error;  \
   }
+#define ON_ERROR_CLOSE_FILE_AND_RETURN \
+  error:                               \
+  if (f) {                             \
+    fclose(f);                         \
+  }                                    \
+  return ERROR
 
 #define UNREACHABLE(...)      \
   do {                        \
@@ -1036,28 +1042,33 @@ static void print_emulator_info(Emulator*);
 static void write_apu(Emulator*, Address, uint8_t);
 static void write_io(Emulator*, Address, uint8_t);
 
-static Result read_rom_data_from_file(const char* filename,
-                                      RomData* out_rom_data) {
-  FILE* f = fopen(filename, "rb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+static Result get_file_size(FILE* f, long* out_size) {
   CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
   long size = ftell(f);
   CHECK_MSG(size >= 0, "ftell failed.");
   CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
+  *out_size = size;
+  return OK;
+error:
+  return ERROR;
+}
+
+static Result read_rom_data_from_file(const char* filename,
+                                      RomData* out_rom_data) {
+  FILE* f = fopen(filename, "rb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  long size;
+  CHECK(SUCCESS(get_file_size(f, &size)));
   CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
             MINIMUM_ROM_SIZE);
-  uint8_t* data = malloc(size);
+  uint8_t* data = malloc(size); /* Leaks. */
   CHECK_MSG(data, "allocation failed.\n");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
   fclose(f);
   out_rom_data->data = data;
   out_rom_data->size = size;
   return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
 static void get_rom_title(RomData* rom_data,
@@ -4018,6 +4029,10 @@ typedef uint16_t AudioBufferSample;
   ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
 #define SDL_SURFACE_COUNT 2
 #define SAVE_EXTENSION ".sav"
+#define SAVE_STATE_EXTENSION ".state"
+#define SAVE_STATE_VERSION (0)
+#define SAVE_STATE_HEADER (uint32_t)(0x6b57a7e0 + SAVE_STATE_VERSION)
+#define SAVE_STATE_FILE_SIZE (sizeof(uint32_t) + sizeof(EmulatorState))
 
 static int s_log_level_sdl = 1;
 
@@ -4038,6 +4053,8 @@ typedef struct {
 } SDLAudio;
 
 typedef struct {
+  const char* save_filename;
+  const char* save_state_filename;
   SDL_Surface* surface[SDL_SURFACE_COUNT];
   uint8_t used_surfaces;
   SDLAudio audio;
@@ -4116,7 +4133,7 @@ static Result sdl_init_audio(SDL* sdl) {
       (size_t)(sdl->audio.spec.size * AUDIO_MAX_BUFFER_SIZE_MULTIPLIER);
   sdl->audio.buffer_capacity = buffer_capacity;
 
-  sdl->audio.buffer = malloc(buffer_capacity);
+  sdl->audio.buffer = malloc(buffer_capacity); /* Leaks. */
   CHECK_MSG(sdl->audio.buffer != NULL,
             "SDL audio buffer allocation failed.\n");
   memset(sdl->audio.buffer, 0, buffer_capacity);
@@ -4140,7 +4157,7 @@ static Result init_audio_buffer(SDL* sdl, AudioBuffer* audio_buffer) {
       get_gb_channel_samples(sdl, sdl->audio.spec.size) +
       AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
   size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
-  audio_buffer->data = malloc(buffer_size);
+  audio_buffer->data = malloc(buffer_size); /* Leaks. */
   CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
   audio_buffer->end = audio_buffer->data + gb_channel_samples;
   audio_buffer->position = audio_buffer->data;
@@ -4149,39 +4166,71 @@ error:
   return ERROR;
 }
 
-static Bool sdl_poll_events(Emulator* e) {
+static Result read_state_from_file(Emulator* e, const char* filename) {
+  FILE* f = fopen(filename, "rb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  long size;
+  CHECK(SUCCESS(get_file_size(f, &size)));
+  CHECK_MSG(size == SAVE_STATE_FILE_SIZE,
+            "save state file is wrong size: %ld, expected %ld.\n", size,
+            SAVE_STATE_FILE_SIZE);
+  uint32_t header;
+  CHECK_MSG(fread(&header, sizeof(header), 1, f) == 1, "fread failed.\n");
+  CHECK_MSG(header == SAVE_STATE_HEADER, "header mismatch: %u, expected %u.\n",
+            header, SAVE_STATE_HEADER);
+  CHECK_MSG(fread(&e->state, sizeof(e->state), 1, f) == 1, "fread failed.\n");
+  fclose(f);
+  return OK;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
+}
+
+static Result write_state_to_file(Emulator* e, const char* filename) {
+  FILE* f = fopen(filename, "wb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  uint32_t header = SAVE_STATE_HEADER;
+  CHECK_MSG(fwrite(&header, sizeof(header), 1, f) == 1, "fwrite failed.\n");
+  CHECK_MSG(fwrite(&e->state, sizeof(e->state), 1, f) == 1, "fwrite failed.\n");
+  fclose(f);
+  return OK;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
+}
+
+static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   Bool running = TRUE;
   SDL_Event event;
+  const char* ss_filename = sdl->save_state_filename;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
       case SDL_KEYDOWN:
       case SDL_KEYUP: {
-        Bool set = event.type == SDL_KEYDOWN;
+        Bool down = event.type == SDL_KEYDOWN;
         switch (event.key.keysym.sym) {
-          case SDLK_1: if (set) e->config.disable_sound[CHANNEL1] ^= 1; break;
-          case SDLK_2: if (set) e->config.disable_sound[CHANNEL2] ^= 1; break;
-          case SDLK_3: if (set) e->config.disable_sound[CHANNEL3] ^= 1; break;
-          case SDLK_4: if (set) e->config.disable_sound[CHANNEL4] ^= 1; break;
-          case SDLK_b: if (set) e->config.disable_bg ^= 1; break;
-          case SDLK_w: if (set) e->config.disable_window ^= 1; break;
-          case SDLK_o: if (set) e->config.disable_obj ^= 1; break;
-          case SDLK_UP: e->state.joypad.up = set; break;
-          case SDLK_DOWN: e->state.joypad.down = set; break;
-          case SDLK_LEFT: e->state.joypad.left = set; break;
-          case SDLK_RIGHT: e->state.joypad.right = set; break;
-          case SDLK_z: e->state.joypad.B = set; break;
-          case SDLK_x: e->state.joypad.A = set; break;
-          case SDLK_RETURN: e->state.joypad.start = set; break;
-          case SDLK_BACKSPACE: e->state.joypad.select = set; break;
+          case SDLK_1: if (down) e->config.disable_sound[CHANNEL1] ^= 1; break;
+          case SDLK_2: if (down) e->config.disable_sound[CHANNEL2] ^= 1; break;
+          case SDLK_3: if (down) e->config.disable_sound[CHANNEL3] ^= 1; break;
+          case SDLK_4: if (down) e->config.disable_sound[CHANNEL4] ^= 1; break;
+          case SDLK_b: if (down) e->config.disable_bg ^= 1; break;
+          case SDLK_w: if (down) e->config.disable_window ^= 1; break;
+          case SDLK_o: if (down) e->config.disable_obj ^= 1; break;
+          case SDLK_UP: e->state.joypad.up = down; break;
+          case SDLK_DOWN: e->state.joypad.down = down; break;
+          case SDLK_LEFT: e->state.joypad.left = down; break;
+          case SDLK_RIGHT: e->state.joypad.right = down; break;
+          case SDLK_z: e->state.joypad.B = down; break;
+          case SDLK_x: e->state.joypad.A = down; break;
+          case SDLK_RETURN: e->state.joypad.start = down; break;
+          case SDLK_BACKSPACE: e->state.joypad.select = down; break;
           case SDLK_ESCAPE: running = FALSE; break;
-          case SDLK_TAB: e->config.no_sync = set; break;
-          case SDLK_SPACE: if (set) e->config.paused ^= 1; break;
+          case SDLK_TAB: e->config.no_sync = down; break;
+          case SDLK_SPACE: if (down) e->config.paused ^= 1; break;
           case SDLK_n:
-            if (set) {
+            if (down) {
               e->config.step = 1;
               e->config.paused = 0;
             }
             break;
+          case SDLK_F6: if (down) write_state_to_file(e, ss_filename); break;
+          case SDLK_F9: if (down) read_state_from_file(e, ss_filename); break;
           default: break;
         }
         break;
@@ -4341,16 +4390,18 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   }
 }
 
-static void get_save_filename(const char* rom_filename,
-                              char* out,
-                              size_t out_size) {
-  char* last_dot = strrchr(rom_filename, '.');
+static const char* replace_extension(const char* filename,
+                                     const char* extension) {
+  size_t length = strlen(filename) + strlen(extension) + 1; /* +1 for \0. */
+  char* result = malloc(length); /* Leaks. */
+  char* last_dot = strrchr(filename, '.');
   if (last_dot == NULL) {
-    snprintf(out, out_size, "%s" SAVE_EXTENSION, rom_filename);
+    snprintf(result, length, "%s%s", filename, extension);
   } else {
-    snprintf(out, out_size, "%.*s" SAVE_EXTENSION,
-             (int)(last_dot - rom_filename), rom_filename);
+    snprintf(result, length, "%.*s%s", (int)(last_dot - filename), filename,
+             extension);
   }
+  return result;
 }
 
 static Result read_ext_ram_from_file(Emulator* e, const char* filename) {
@@ -4358,17 +4409,12 @@ static Result read_ext_ram_from_file(Emulator* e, const char* filename) {
   if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "rb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    uint8_t* data = e->state.ext_ram.data;
-    size_t size = e->state.ext_ram.size;
-    CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
+    CHECK_MSG(fread(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1,
+              "fread failed.\n");
     fclose(f);
   }
   return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
 static Result write_ext_ram_to_file(Emulator* e, const char* filename) {
@@ -4376,17 +4422,12 @@ static Result write_ext_ram_to_file(Emulator* e, const char* filename) {
   if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
     f = fopen(filename, "wb");
     CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    uint8_t* data = e->state.ext_ram.data;
-    size_t size = e->state.ext_ram.size;
-    CHECK_MSG(fwrite(data, size, 1, f) == 1, "fwrite failed.\n");
+    CHECK_MSG(fwrite(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1,
+              "fwrite failed.\n");
     fclose(f);
   }
   return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
 int main(int argc, char** argv) {
@@ -4408,17 +4449,15 @@ int main(int argc, char** argv) {
   CHECK_MSG(argc == 1, "no rom file given.\n");
   const char* rom_filename = argv[0];
   CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &rom_data)));
-  size_t save_filename_length =
-      strlen(rom_filename) + strlen(SAVE_EXTENSION) + 1;
-  char* save_filename = alloca(save_filename_length);
-  get_save_filename(rom_filename, save_filename, save_filename_length);
-
   CHECK(SUCCESS(sdl_init_video(&sdl)));
   CHECK(SUCCESS(sdl_init_audio(&sdl)));
   CHECK(SUCCESS(init_audio_buffer(&sdl, &audio_buffer)));
-
   CHECK(SUCCESS(init_emulator(e, &rom_data, &audio_buffer)));
-  read_ext_ram_from_file(e, save_filename);
+
+  sdl.save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
+  sdl.save_state_filename =
+      replace_extension(rom_filename, SAVE_STATE_EXTENSION);
+  read_ext_ram_from_file(e, sdl.save_filename);
 
   double now_ms = get_time_ms();
   double next_poll_event_ms = now_ms + POLL_EVENT_MS;
@@ -4426,7 +4465,7 @@ int main(int argc, char** argv) {
   EmulatorEvent event = 0;
   while (TRUE) {
     if (e->config.paused) {
-      if (!sdl_poll_events(e)) {
+      if (!sdl_poll_events(e, &sdl)) {
         break;
       }
       SDL_PauseAudio(e->config.paused || !sdl.audio.ready);
@@ -4447,7 +4486,7 @@ int main(int argc, char** argv) {
           next_flip_ms = now_ms + VIDEO_FRAME_MS;
         }
       } else if (now_ms >= next_poll_event_ms) {
-        if (!sdl_poll_events(e)) {
+        if (!sdl_poll_events(e, &sdl)) {
           break;
         }
         while (next_poll_event_ms <= now_ms) {
@@ -4469,7 +4508,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  write_ext_ram_to_file(e, save_filename);
+  write_ext_ram_to_file(e, sdl.save_filename);
   result = 0;
 error:
   sdl_destroy(&sdl);
