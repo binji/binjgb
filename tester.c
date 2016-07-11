@@ -54,10 +54,9 @@ error:
 int main(int argc, char** argv) {
   clock_gettime(CLOCK_MONOTONIC, &s_start_time);
   --argc; ++argv;
-  RomData rom_data;
   Emulator emulator;
+  ZERO_MEMORY(emulator);
   Emulator* e = &emulator;
-  AudioBuffer audio_buffer;
 
   s_never_trace = 1;
   s_log_level_memory = 0;
@@ -66,17 +65,13 @@ int main(int argc, char** argv) {
   s_log_level_io = 0;
   s_log_level_interrupt = 0;
 
-  ZERO_MEMORY(rom_data);
-  ZERO_MEMORY(emulator);
-  ZERO_MEMORY(audio_buffer);
-
   CHECK_MSG(argc == 3, "usage: tester <in.gb> <frames> <out.ppm>\n");
   const char* rom_filename = argv[0];
   int frames = atoi(argv[1]);
   const char* output_ppm = argv[2];
-  CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &rom_data)));
-  CHECK(SUCCESS(init_audio_buffer(&audio_buffer)));
-  CHECK(SUCCESS(init_emulator(e, &rom_data, &audio_buffer)));
+  CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &e->rom_data)));
+  CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer)));
+  CHECK(SUCCESS(init_emulator(e)));
 
   /* Run for N frames, measured by audio samples (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
