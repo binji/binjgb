@@ -1380,6 +1380,10 @@ static void set_af_reg(Registers* reg, uint16_t af) {
 }
 
 static Result init_emulator(Emulator* e) {
+  static uint8_t s_initial_wave_ram[WAVE_RAM_SIZE] = {
+      0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
+      0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
+  };
   CHECK(SUCCESS(get_rom_info(&e->rom_data, &e->rom_info)));
   CHECK(SUCCESS(init_memory_map(e)));
   set_af_reg(&e->state.reg, 0x01b0);
@@ -1396,6 +1400,7 @@ static Result init_emulator(Emulator* e) {
   write_apu(e, APU_NR14_ADDR, 0x80);
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
+  memcpy(&e->state.apu.wave.ram, s_initial_wave_ram, WAVE_RAM_SIZE);
   /* Turn down the volume on channel1, it is playing by default (because of the
    * GB startup sound), but we don't want to hear it when starting the
    * emulator. */
