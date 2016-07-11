@@ -182,6 +182,6 @@ $ ./tester.py gpu
 | acceptance/gpu/ly\_lyc\_153\_write-GS | :ok: |
 | acceptance/gpu/ly\_lyc\_write-GS | :ok: |
 | acceptance/gpu/ly\_new\_frame-GS | :ok: |
-| acceptance/gpu/stat\_write\_if-GS | :x: |
+| acceptance/gpu/stat\_write\_if-GS | :ok: |
 | acceptance/gpu/vblank\_if\_timing | :ok: |
 | acceptance/timer/timer\_if | :ok: |

@@ -2114,10 +2114,12 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       if (e->state.ppu.lcdc.display) {
         Bool hblank = TRIGGER_MODE_IS(HBLANK) && !stat->hblank.irq;
         Bool vblank = TRIGGER_MODE_IS(VBLANK) && !stat->vblank.irq;
-        if (!stat->IF && (hblank || vblank)) {
-          VERBOSE(ppu, ">> trigger STAT from write [%c%c] [LY: %u] [cy: %u]\n",
-                  vblank ? 'V' : '.', hblank ? 'H' : '.', e->state.ppu.LY,
-                  e->state.cycles + CPU_MCYCLE);
+        Bool y_compare = stat->new_ly_eq_lyc && !stat->y_compare.irq;
+        if (!stat->IF && (hblank || vblank || y_compare)) {
+          VERBOSE(ppu,
+                  ">> trigger STAT from write [%c%c%c] [LY: %u] [cy: %u]\n",
+                  y_compare ? 'Y' : '.', vblank ? 'V' : '.', hblank ? 'H' : '.',
+                  e->state.ppu.LY, e->state.cycles + CPU_MCYCLE);
           e->state.interrupt.new_IF |= IF_STAT;
           e->state.interrupt.IF |= IF_STAT;
           stat->IF = TRUE;
