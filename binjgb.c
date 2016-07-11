@@ -566,6 +566,12 @@ typedef enum {
 static const uint16_t s_tima_mask[] = {1 << 9, 1 << 3, 1 << 5, 1 << 7};
 
 typedef enum {
+  TIMA_STATE_NORMAL,
+  TIMA_STATE_OVERFLOW,
+  TIMA_STATE_RESET,
+} TimaState;
+
+typedef enum {
   SERIAL_CLOCK_EXTERNAL = 0,
   SERIAL_CLOCK_INTERNAL = 1,
 } SerialClock;
@@ -817,7 +823,7 @@ typedef struct {
   TimerClock clock_select; /* Select the rate of TIMA */
   /* Internal state */
   uint16_t div_counter; /* Internal clock counter, upper 8 bits are DIV. */
-  Bool tima_overflow;   /* Used to implement TIMA overflow delay. */
+  TimaState tima_state; /* Used to implement TIMA overflow delay. */
   Bool on;
 } Timer;
 
@@ -1924,7 +1930,7 @@ static void increment_tima(Emulator* e) {
   if (++e->state.timer.TIMA == 0) {
     DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n",
           e->state.cycles + CPU_MCYCLE);
-    e->state.timer.tima_overflow = TRUE;
+    e->state.timer.tima_state = TIMA_STATE_OVERFLOW;
     e->state.interrupt.new_IF |= IF_TIMER;
   }
 }
@@ -2019,10 +2025,25 @@ static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
       write_div_counter(e, 0);
       break;
     case IO_TIMA_ADDR:
-      e->state.timer.TIMA = value;
+      if (e->state.timer.on) {
+        if (e->state.timer.tima_state == TIMA_STATE_OVERFLOW) {
+          /* Cancel the overflow and interrupt if written on the same cycle. */
+          e->state.timer.tima_state = TIMA_STATE_NORMAL;
+          e->state.interrupt.new_IF &= ~IF_TIMER;
+          e->state.timer.TIMA = value;
+        } else if (e->state.timer.tima_state != TIMA_STATE_RESET) {
+          /* Only update TIMA if it wasn't reset this cycle. */
+          e->state.timer.TIMA = value;
+        }
+      } else {
+        e->state.timer.TIMA = value;
+      }
       break;
     case IO_TMA_ADDR:
       e->state.timer.TMA = value;
+      if (e->state.timer.on && e->state.timer.tima_state == TIMA_STATE_RESET) {
+        e->state.timer.TIMA = value;
+      }
       break;
     case IO_TAC_ADDR: {
       Bool old_timer_on = e->state.timer.on;
@@ -2873,9 +2894,13 @@ static void ppu_mcycle(Emulator* e) {
 }
 
 static void timer_mcycle(Emulator* e) {
-  if (e->state.timer.on && e->state.timer.tima_overflow) {
-    e->state.timer.tima_overflow = FALSE;
-    e->state.timer.TIMA = e->state.timer.TMA;
+  if (e->state.timer.on) {
+    if (e->state.timer.tima_state == TIMA_STATE_OVERFLOW) {
+      e->state.timer.tima_state = TIMA_STATE_RESET;
+      e->state.timer.TIMA = e->state.timer.TMA;
+    } else if (e->state.timer.tima_state == TIMA_STATE_RESET) {
+      e->state.timer.tima_state = TIMA_STATE_NORMAL;
+    }
   }
   write_div_counter(e, e->state.timer.div_counter + CPU_MCYCLE);
 }
@@ -4030,7 +4055,7 @@ typedef uint16_t AudioBufferSample;
 #define SDL_SURFACE_COUNT 2
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
-#define SAVE_STATE_VERSION (0)
+#define SAVE_STATE_VERSION (1)
 #define SAVE_STATE_HEADER (uint32_t)(0x6b57a7e0 + SAVE_STATE_VERSION)
 #define SAVE_STATE_FILE_SIZE (sizeof(uint32_t) + sizeof(EmulatorState))
 

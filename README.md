@@ -139,8 +139,8 @@ $ ./tester.py gpu
 | acceptance/timer/tim11\_div\_trigger | :ok: |
 | acceptance/timer/tim11 | :ok: |
 | acceptance/timer/tima\_reload | :ok: |
-| acceptance/timer/tima\_write\_reloading | :x: |
-| acceptance/timer/tma\_write\_reloading | :x: |
+| acceptance/timer/tima\_write\_reloading | :ok: |
+| acceptance/timer/tma\_write\_reloading | :ok: |
 | emulator-only/mbc1\_rom\_4banks | :ok: |
 | manual-only/sprite\_priority | :ok: |
 

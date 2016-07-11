@@ -95,9 +95,9 @@ TESTS = [
   (TIMER + 'tim11_div_trigger.gb', 1, '245aea6bc6462ff810e4ed6e4398def1480613b8'),
   (TIMER + 'tim11.gb', 1, '245aea6bc6462ff810e4ed6e4398def1480613b8'),
   (TIMER + 'tima_reload.gb', 1, '23c9a0b2139784fc457c39dc6b730702a85d506f'),
-  (TIMER + 'tima_write_reloading.gb', 10, '!14426f81f0ffc484e3a69621b47d093e5d304d6f'),
+  (TIMER + 'tima_write_reloading.gb', 10, '240a3a3ca5c0aa62f323fc212bc7088c4369d316'),
   (TIMER + 'timer_if.gb', 1, '2ff8a38f7421feb1e86de059ed47fb908501ed8a'),
-  (TIMER + 'tma_write_reloading.gb', 10, '!62c33e844d66361037fc8e6e34546927e7e21c38'),
+  (TIMER + 'tma_write_reloading.gb', 10, 'cd316e9257b1f954f09bf6f34a9a9deaedb3883d'),
 
   ('test/mooneye/emulator-only/mbc1_rom_4banks.gb', 1, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
   ('test/mooneye/manual-only/sprite_priority.gb', 1, 'e055a00339efdde563ba1d0698809abfbed8ff82'),
