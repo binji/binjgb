@@ -2207,8 +2207,13 @@ static void write_nrx2_reg(Emulator* e, Channel* channel, uint8_t value) {
             CHANNEL_INDEX(channel), value);
   }
   if (channel->status) {
-    VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) zombie mode?\n",
-            CHANNEL_INDEX(channel), value);
+    if (channel->envelope.period == 0 && channel->envelope.automatic) {
+      uint8_t new_volume = (channel->envelope.volume + 1) & ENVELOPE_MAX_VOLUME;
+      VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) zombie mode: volume %u -> %u\n",
+              CHANNEL_INDEX(channel), value, channel->envelope.volume,
+              new_volume);
+      channel->envelope.volume = new_volume;
+    }
   }
   channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
@@ -2270,7 +2275,7 @@ static Bool write_nrx4_reg(Emulator* e,
 static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope) {
   envelope->volume = envelope->initial_volume;
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
-  envelope->automatic = envelope->period != 0;
+  envelope->automatic = TRUE;
   /* If the next APU frame will update the envelope, increment the timer. */
   if (e->state.apu.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
