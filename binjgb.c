@@ -178,6 +178,7 @@ typedef uint32_t RGBA;
 #define SOUND_MAX_FREQUENCY 2047
 #define WAVE_SAMPLE_COUNT 32
 #define NOISE_MAX_CLOCK_SHIFT 13
+#define NOISE_DIVISOR_COUNT 8
 #define ENVELOPE_MAX_PERIOD 8
 #define ENVELOPE_MAX_VOLUME 15
 #define DUTY_CYCLE_COUNT 8
@@ -628,18 +629,6 @@ typedef enum {
 } LFSRWidth;
 
 typedef enum {
-  NOISE_DIVISOR_8 = 0,
-  NOISE_DIVISOR_16 = 1,
-  NOISE_DIVISOR_32 = 2,
-  NOISE_DIVISOR_48 = 3,
-  NOISE_DIVISOR_64 = 4,
-  NOISE_DIVISOR_80 = 5,
-  NOISE_DIVISOR_96 = 6,
-  NOISE_DIVISOR_112 = 7,
-  NOISE_DIVISOR_COUNT,
-} NoiseDivisor;
-
-typedef enum {
   TILE_MAP_9800_9BFF = 0,
   TILE_MAP_9C00_9FFF = 1,
 } TileMapSelect;
@@ -892,7 +881,7 @@ typedef struct {
 typedef struct {
   uint8_t clock_shift;
   LFSRWidth lfsr_width;
-  NoiseDivisor divisor;
+  uint8_t divisor; /* 0..NOISE_DIVISOR_COUNT */
   /* Internal state */
   uint8_t sample;  /* Last sample generated, 0..1 */
   uint16_t lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
@@ -912,9 +901,9 @@ typedef struct {
 } Channel;
 
 typedef struct {
-  uint16_t* data; /* Unsigned 16-bit 2-channel samples @ 2MHz */
-  uint16_t* end;
-  uint16_t* position;
+  uint8_t* data; /* Unsigned 8-bit 2-channel samples @ 2MHz */
+  uint8_t* end;
+  uint8_t* position;
 } AudioBuffer;
 
 typedef struct {
@@ -2967,18 +2956,12 @@ static void update_channel_envelope(Emulator* e, Channel* channel) {
   if (envelope->period) {
     if (envelope->automatic && --envelope->timer == 0) {
       envelope->timer = envelope->period;
-      if (envelope->direction == ENVELOPE_ATTENUATE) {
-        if (envelope->volume > 0) {
-          envelope->volume--;
-        } else {
-          envelope->automatic = FALSE;
-        }
+      uint8_t delta = envelope->direction == ENVELOPE_ATTENUATE ? -1 : 1;
+      uint8_t volume = envelope->volume + delta;
+      if (volume < ENVELOPE_MAX_VOLUME) {
+        envelope->volume = volume;
       } else {
-        if (envelope->volume < ENVELOPE_MAX_VOLUME) {
-          envelope->volume++;
-        } else {
-          envelope->automatic = FALSE;
-        }
+        envelope->automatic = FALSE;
       }
     }
   } else {
@@ -3025,71 +3008,59 @@ static uint8_t update_noise(APU* apu, Noise* noise) {
   return noise->sample;
 }
 
-static uint16_t channelx_sample(Channel* channel, uint8_t sample) {
+static uint8_t channelx_sample(Channel* channel, uint8_t sample) {
   assert(channel->status);
   assert(sample < 2);
   assert(channel->envelope.volume < 16);
-  /* Convert from a 1-bit sample (with 4-bit volume) to a 16-bit sample. */
-  return (sample * channel->envelope.volume) << 12;
+  /* Convert from a 1-bit sample (with 4-bit volume) to an 8-bit sample. */
+  return sample ? (channel->envelope.volume << 4) : 0;
 }
 
-static uint16_t channel3_sample(Channel* channel, Wave* wave, uint8_t sample) {
+static uint8_t channel3_sample(Channel* channel, Wave* wave, uint8_t sample) {
   assert(channel->status);
   assert(sample < 16);
   assert(wave->volume < WAVE_VOLUME_COUNT);
   static uint8_t shift[WAVE_VOLUME_COUNT] = {4, 0, 1, 2};
-  /* Convert from a 4-bit sample to a 16-bit sample. */
-  return (sample >> shift[wave->volume]) << 12;
+  /* Convert from a 4-bit sample to an 8-bit sample. */
+  return (sample >> shift[wave->volume]) << 4;
 }
 
-static void write_sample(AudioBuffer* buffer, uint16_t so1, uint16_t so2) {
+static void write_sample(AudioBuffer* buffer, uint8_t so1, uint8_t so2) {
   assert(buffer->position + 2 <= buffer->end);
   *buffer->position++ = so1;
   *buffer->position++ = so2;
 }
 
-static void apu_mcycle(Emulator* e) {
+static void apu_update(Emulator* e) {
   APU* apu = &e->state.apu;
-  uint8_t i;
-  if (!apu->enabled) {
-    for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
-      write_sample(&e->audio_buffer, 0, 0);
+  Bool do_length = FALSE;
+  Bool do_envelope = FALSE;
+  Bool do_sweep = FALSE;
+  apu->cycles += APU_CYCLES;
+  apu->frame_cycles += APU_CYCLES;
+  if (VALUE_WRAPPED(apu->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
+    apu->frame++;
+    VALUE_WRAPPED(apu->frame, FRAME_SEQUENCER_COUNT);
+
+    switch (apu->frame) {
+      case 0: do_length = TRUE; break;
+      case 1: break;
+      case 2: do_length = do_sweep = TRUE; break;
+      case 3: break;
+      case 4: do_length = TRUE; break;
+      case 5: break;
+      case 6: do_length = do_sweep = TRUE; break;
+      case 7: do_envelope = TRUE; break;
     }
-    return;
+
+    VERBOSE(apu, "%s: %c%c%c frame: %u cy: %u\n", __func__,
+            do_length ? 'L' : '.', do_envelope ? 'E' : '.',
+            do_sweep ? 'S' : '.', apu->frame, e->state.cycles);
   }
 
-  /* Synchronize with CPU cycle counter. */
-  apu->cycles = e->state.cycles;
-
-  for (i = 0; i < CPU_MCYCLE; i += APU_CYCLES) {
-    Bool do_length = FALSE;
-    Bool do_envelope = FALSE;
-    Bool do_sweep = FALSE;
-    apu->cycles += APU_CYCLES;
-    apu->frame_cycles += APU_CYCLES;
-    if (VALUE_WRAPPED(apu->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
-      apu->frame++;
-      VALUE_WRAPPED(apu->frame, FRAME_SEQUENCER_COUNT);
-
-      switch (apu->frame) {
-        case 0: do_length = TRUE; break;
-        case 1: break;
-        case 2: do_length = do_sweep = TRUE; break;
-        case 3: break;
-        case 4: do_length = TRUE; break;
-        case 5: break;
-        case 6: do_length = do_sweep = TRUE; break;
-        case 7: do_envelope = TRUE; break;
-      }
-
-      VERBOSE(apu, "%s: %c%c%c frame: %u cy: %u\n", __func__,
-              do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-              do_sweep ? 'S' : '.', apu->frame, e->state.cycles + i);
-    }
-
-    uint16_t sample = 0;
-    uint32_t so1_mixed_sample = 0;
-    uint32_t so2_mixed_sample = 0;
+  uint8_t sample = 0;
+  uint16_t so1_mixed_sample = 0;
+  uint16_t so2_mixed_sample = 0;
 
 #define MIX_SAMPLE(channel, get_sample)      \
   do {                                       \
@@ -3104,55 +3075,66 @@ static void apu_mcycle(Emulator* e) {
     }                                        \
   } while (0)
 
-    /* Channel 1 */
-    Channel* channel1 = &apu->channel[CHANNEL1];
-    if (channel1->status) {
-      if (do_sweep) update_channel_sweep(channel1, &apu->sweep);
-      sample = update_square_wave(channel1, &channel1->square_wave);
-    }
-    if (do_length) update_channel_length(channel1);
-    if (channel1->status) {
-      if (do_envelope) update_channel_envelope(e, channel1);
-      MIX_SAMPLE(CHANNEL1, channelx_sample(channel1, sample));
-    }
+  /* Channel 1 */
+  Channel* channel1 = &apu->channel[CHANNEL1];
+  if (channel1->status) {
+    if (do_sweep) update_channel_sweep(channel1, &apu->sweep);
+    sample = update_square_wave(channel1, &channel1->square_wave);
+  }
+  if (do_length) update_channel_length(channel1);
+  if (channel1->status) {
+    if (do_envelope) update_channel_envelope(e, channel1);
+    MIX_SAMPLE(CHANNEL1, channelx_sample(channel1, sample));
+  }
 
-    /* Channel 2 */
-    Channel* channel2 = &apu->channel[CHANNEL2];
-    if (channel2->status) {
-      sample = update_square_wave(channel2, &channel2->square_wave);
-    }
-    if (do_length) update_channel_length(channel2);
-    if (channel2->status) {
-      if (do_envelope) update_channel_envelope(e, channel2);
-      MIX_SAMPLE(CHANNEL2, channelx_sample(channel2, sample));
-    }
+  /* Channel 2 */
+  Channel* channel2 = &apu->channel[CHANNEL2];
+  if (channel2->status) {
+    sample = update_square_wave(channel2, &channel2->square_wave);
+  }
+  if (do_length) update_channel_length(channel2);
+  if (channel2->status) {
+    if (do_envelope) update_channel_envelope(e, channel2);
+    MIX_SAMPLE(CHANNEL2, channelx_sample(channel2, sample));
+  }
 
-    /* Channel 3 */
-    Channel* channel3 = &apu->channel[CHANNEL3];
-    if (channel3->status) {
-      sample = update_wave(apu, &apu->wave);
-    }
-    if (do_length) update_channel_length(channel3);
-    if (channel3->status) {
-      MIX_SAMPLE(CHANNEL3, channel3_sample(channel3, &apu->wave, sample));
-    }
+  /* Channel 3 */
+  Channel* channel3 = &apu->channel[CHANNEL3];
+  if (channel3->status) {
+    sample = update_wave(apu, &apu->wave);
+  }
+  if (do_length) update_channel_length(channel3);
+  if (channel3->status) {
+    MIX_SAMPLE(CHANNEL3, channel3_sample(channel3, &apu->wave, sample));
+  }
 
-    /* Channel 4 */
-    Channel* channel4 = &apu->channel[CHANNEL4];
-    if (channel4->status) {
-      sample = update_noise(apu, &apu->noise);
-    }
-    if (do_length) update_channel_length(channel4);
-    if (channel4->status) {
-      if (do_envelope) update_channel_envelope(e, channel4);
-      MIX_SAMPLE(CHANNEL4, channelx_sample(channel4, sample));
-    }
+  /* Channel 4 */
+  Channel* channel4 = &apu->channel[CHANNEL4];
+  if (channel4->status) {
+    sample = update_noise(apu, &apu->noise);
+  }
+  if (do_length) update_channel_length(channel4);
+  if (channel4->status) {
+    if (do_envelope) update_channel_envelope(e, channel4);
+    MIX_SAMPLE(CHANNEL4, channelx_sample(channel4, sample));
+  }
 
-    so1_mixed_sample *= (apu->so1_volume + 1);
-    so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    so2_mixed_sample *= (apu->so2_volume + 1);
-    so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
-    write_sample(&e->audio_buffer, so1_mixed_sample, so2_mixed_sample);
+  so1_mixed_sample *= (apu->so1_volume + 1);
+  so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  so2_mixed_sample *= (apu->so2_volume + 1);
+  so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  write_sample(&e->audio_buffer, so1_mixed_sample, so2_mixed_sample);
+}
+
+static void apu_mcycle(Emulator* e) {
+  if (e->state.apu.enabled) {
+    /* Synchronize with CPU cycle counter. */
+    e->state.apu.cycles = e->state.cycles;
+    apu_update(e);
+    apu_update(e);
+  } else {
+    write_sample(&e->audio_buffer, 0, 0);
+    write_sample(&e->audio_buffer, 0, 0);
   }
 }
 
@@ -3977,6 +3959,7 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
   while (running) {
     int i;
     for (i = 0; running && i < EMULATOR_INSTRUCTION_QUANTA; ++i) {
+      step_emulator(e);
       if (e->state.ppu.new_frame_edge) {
         result |= EMULATOR_EVENT_NEW_FRAME;
         running = FALSE;
@@ -3986,7 +3969,6 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
         result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
         running = FALSE;
       }
-      step_emulator(e);
     }
     if (get_time_ms() >= until_ms) {
       result |= EMULATOR_EVENT_TIMEOUT;
@@ -4012,7 +3994,7 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
 #define AUDIO_CHANNELS 2
 #define AUDIO_SAMPLES 4096
 #define AUDIO_SAMPLE_SIZE 2
-typedef uint16_t AudioBufferSample;
+typedef uint16_t SDLAudioBufferSample;
 /* Try to keep the audio buffer filled to |number of samples| *
  * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
 #define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
@@ -4325,7 +4307,7 @@ static void sdl_synchronize(SDL* sdl, Emulator* e) {
 /* Returns TRUE if there was an overflow. */
 static Bool sdl_write_audio_sample(SDLAudio* audio, uint16_t sample) {
   if (audio->buffer_available < audio->buffer_capacity) {
-    AudioBufferSample* dst = (AudioBufferSample*)audio->write_pos;
+    SDLAudioBufferSample* dst = (SDLAudioBufferSample*)audio->write_pos;
     *dst = AUDIO_CONVERT_SAMPLE_U16SYS(sample);
     audio->buffer_available += AUDIO_SAMPLE_SIZE;
     audio->write_pos += AUDIO_SAMPLE_SIZE;
@@ -4346,8 +4328,8 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   Bool overflow = FALSE;
   SDLAudio* audio = &sdl->audio;
 
-  uint16_t* src = e->audio_buffer.data;
-  uint16_t* src_end = e->audio_buffer.position;
+  uint8_t* src = e->audio_buffer.data;
+  uint8_t* src_end = e->audio_buffer.position;
 
   SDL_LockAudio();
   size_t old_buffer_available = audio->buffer_available;
@@ -4355,7 +4337,7 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   for (; src < src_end; src += AUDIO_CHANNELS) {
     audio->freq_counter += freq;
     for (i = 0; i < AUDIO_CHANNELS; ++i) {
-      audio->accumulator[i] += src[i];
+      audio->accumulator[i] += (src[i] << 8); /* Convert to 16-bit sample. */
     }
     audio->divisor++;
     if (VALUE_WRAPPED(audio->freq_counter, APU_CYCLES_PER_SECOND)) {
