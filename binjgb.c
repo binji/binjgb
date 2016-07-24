@@ -3369,58 +3369,47 @@ static void print_emulator_info(Emulator* e) {
 #define CY mcycle(e)
 
 #define RA REG(A)
-#define RHL REG(HL)
 #define RSP REG(SP)
-#define RPC REG(PC)
 #define FZ FLAG(Z)
 #define FC FLAG(C)
 #define FH FLAG(H)
 #define FN FLAG(N)
-
-#define COND_NZ (!FZ)
-#define COND_Z FZ
-#define COND_NC (!FC)
-#define COND_C FC
+#define FNZ (!FZ)
+#define FNC (!FC)
 #define FZ_EQ0(X) FZ = (uint8_t)(X) == 0
-#define FC_ADD(X, Y) FC = ((X) + (Y) > 0xff)
-#define FC_ADD16(X, Y) FC = ((X) + (Y) > 0xffff)
-#define FC_ADC(X, Y, C) FC = ((X) + (Y) + (C) > 0xff)
-#define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
-#define FC_SBC(X, Y, C) FC = ((int)(X) - (int)(Y) - (int)(C) < 0)
 #define MASK8(X) ((X) & 0xf)
 #define MASK16(X) ((X) & 0xfff)
-#define FH_ADD(X, Y) FH = (MASK8(X) + MASK8(Y) > 0xf)
-#define FH_ADD16(X, Y) FH = (MASK16(X) + MASK16(Y) > 0xfff)
-#define FH_ADC(X, Y, C) FH = (MASK8(X) + MASK8(Y) + C > 0xf)
-#define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
-#define FH_SBC(X, Y, C) FH = ((int)MASK8(X) - (int)MASK8(Y) - (int)C < 0)
-#define FCH_ADD(X, Y) FC_ADD(X, Y); FH_ADD(X, Y)
-#define FCH_ADD16(X, Y) FC_ADD16(X, Y); FH_ADD16(X, Y)
-#define FCH_ADC(X, Y, C) FC_ADC(X, Y, C); FH_ADC(X, Y, C)
-#define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
-#define FCH_SBC(X, Y, C) FC_SBC(X, Y, C); FH_SBC(X, Y, C)
 
 #define READ8(X) read_u8_cy(e, X)
 #define READ16(X) read_u16_cy(e, X)
 #define WRITE8(X, V) write_u8_cy(e, X, V)
 #define WRITE16(X, V) write_u16_cy(e, X, V)
-#define READ_N READ8(RPC + 1)
-#define READ_NN READ16(RPC + 1)
+#define READ_N READ8(REG(PC) + 1)
+#define READ_NN READ16(REG(PC) + 1)
 #define READMR(MR) READ8(REG(MR))
 #define WRITEMR(MR, V) WRITE8(REG(MR), V)
 
 #define BASIC_OP_R(R, OP) u = REG(R); OP; REG(R) = u
 #define BASIC_OP_MR(MR, OP) u = READMR(MR); OP; WRITEMR(MR, u)
 
+#define FC_ADD(X, Y) FC = ((X) + (Y) > 0xff)
+#define FH_ADD(X, Y) FH = (MASK8(X) + MASK8(Y) > 0xf)
+#define FCH_ADD(X, Y) FC_ADD(X, Y); FH_ADD(X, Y)
+#define FC_ADD16(X, Y) FC = ((X) + (Y) > 0xffff)
+#define FH_ADD16(X, Y) FH = (MASK16(X) + MASK16(Y) > 0xfff)
+#define FCH_ADD16(X, Y) FC_ADD16(X, Y); FH_ADD16(X, Y)
 #define ADD_FLAGS(X, Y) FZ_EQ0((X) + (Y)); FN = 0; FCH_ADD(X, Y)
 #define ADD_FLAGS16(X, Y) FN = 0; FCH_ADD16(X, Y)
-#define ADD_SP_FLAGS(Y) FZ = FN = 0; FCH_ADD((uint8_t)RSP, (uint8_t)Y)
+#define ADD_SP_FLAGS(Y) FZ = FN = 0; FCH_ADD((uint8_t)RSP, (uint8_t)(Y))
 #define ADD_R(R) ADD_FLAGS(RA, REG(R)); RA += REG(R)
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
-#define ADD_HL_RR(RR) CY; ADD_FLAGS16(RHL, REG(RR)); RHL += REG(RR)
+#define ADD_HL_RR(RR) CY; ADD_FLAGS16(REG(HL), REG(RR)); REG(HL) += REG(RR)
 #define ADD_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RSP += s; CY; CY
 
+#define FC_ADC(X, Y, C) FC = ((X) + (Y) + (C) > 0xff)
+#define FH_ADC(X, Y, C) FH = (MASK8(X) + MASK8(Y) + C > 0xf)
+#define FCH_ADC(X, Y, C) FC_ADC(X, Y, C); FH_ADC(X, Y, C)
 #define ADC_FLAGS(X, Y, C) FZ_EQ0((X) + (Y) + (C)); FN = 0; FCH_ADC(X, Y, C)
 #define ADC_R(R) u = REG(R); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
 #define ADC_MR(MR) u = READMR(MR); c = FC; ADC_FLAGS(RA, u, c); RA += u + c
@@ -3431,7 +3420,7 @@ static void print_emulator_info(Emulator* e) {
 #define AND_MR(MR) RA &= READMR(MR); AND_FLAGS
 #define AND_N RA &= READ_N; AND_FLAGS
 
-#define BIT_FLAGS(BIT, X) FZ_EQ0(X & (1 << BIT)); FN = 0; FH = 1
+#define BIT_FLAGS(BIT, X) FZ_EQ0((X) & (1 << (BIT))); FN = 0; FH = 1
 #define BIT_R(BIT, R) u = REG(R); BIT_FLAGS(BIT, u)
 #define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
 
@@ -3441,7 +3430,7 @@ static void print_emulator_info(Emulator* e) {
 
 #define CCF FC ^= 1; FN = FH = 0
 
-#define CP_FLAGS(X, Y) FZ_EQ0(X - Y); FN = 1; FCH_SUB(X, Y)
+#define CP_FLAGS(X, Y) FZ_EQ0((X) - (Y)); FN = 1; FCH_SUB(X, Y)
 #define CP_R(R) CP_FLAGS(RA, REG(R))
 #define CP_N u = READ_N; CP_FLAGS(RA, u)
 #define CP_MR(MR) u = READMR(MR); CP_FLAGS(RA, u)
@@ -3472,11 +3461,7 @@ static void print_emulator_info(Emulator* e) {
 #define DI INTR(IME) = INTR(enable) = FALSE;
 #define EI INTR(enable) = TRUE;
 
-#define HALT                        \
-  do {                              \
-    INTR(halt) = TRUE;              \
-    INTR(halt_DI) = INTR(IME) == 0; \
-  } while (0)
+#define HALT INTR(halt) = TRUE; INTR(halt_DI) = INTR(IME) == 0
 
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
@@ -3484,10 +3469,9 @@ static void print_emulator_info(Emulator* e) {
 #define INC_RR(RR) REG(RR)++; CY
 #define INC_MR(MR) BASIC_OP_MR(MR, INC); INC_FLAGS
 
-#define JP new_pc = u16
-#define JP_F_NN(COND) u16 = READ_NN; if (COND) { JP; CY; }
-#define JP_RR(RR) u16 = REG(RR); JP
-#define JP_NN u16 = READ_NN; JP; CY
+#define JP_F_NN(COND) u16 = READ_NN; if (COND) { new_pc = u16; CY; }
+#define JP_RR(RR) new_pc = REG(RR)
+#define JP_NN new_pc = READ_NN; CY
 
 #define JR new_pc += s; CY
 #define JR_F_N(COND) s = READ_N; if (COND) { JR; }
@@ -3507,7 +3491,7 @@ static void print_emulator_info(Emulator* e) {
 #define LD_R_MFF00_N(R) REG(R) = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG(R1) = READ8(0xFF00 + REG(R2))
 #define LD_MNN_SP u16 = READ_NN; WRITE16(u16, RSP)
-#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); RHL = RSP + s; CY
+#define LD_HL_SP_N s = (int8_t)READ_N; ADD_SP_FLAGS(s); REG(HL) = RSP + s; CY
 
 #define OR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define OR_R(R) RA |= REG(R); OR_FLAGS
@@ -3573,11 +3557,17 @@ static void print_emulator_info(Emulator* e) {
 #define SRL_R(R) BASIC_OP_R(R, SRL); SRL_FLAGS
 #define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SRL_FLAGS
 
+#define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
+#define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
+#define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
 #define SUB_FLAGS(X, Y) FZ_EQ0((X) - (Y)); FN = 1; FCH_SUB(X, Y)
 #define SUB_R(R) SUB_FLAGS(RA, REG(R)); RA -= REG(R)
 #define SUB_MR(MR) u = READMR(MR); SUB_FLAGS(RA, u); RA -= u
 #define SUB_N u = READ_N; SUB_FLAGS(RA, u); RA -= u
 
+#define FC_SBC(X, Y, C) FC = ((int)(X) - (int)(Y) - (int)(C) < 0)
+#define FH_SBC(X, Y, C) FH = ((int)MASK8(X) - (int)MASK8(Y) - (int)C < 0)
+#define FCH_SBC(X, Y, C) FC_SBC(X, Y, C); FH_SBC(X, Y, C)
 #define SBC_FLAGS(X, Y, C) FZ_EQ0((X) - (Y) - (C)); FN = 1; FCH_SBC(X, Y, C)
 #define SBC_R(R) u = REG(R); c = FC; SBC_FLAGS(RA, u, c); RA -= u + c
 #define SBC_MR(MR) u = READMR(MR); c = FC; SBC_FLAGS(RA, u, c); RA -= u + c
@@ -3723,7 +3713,7 @@ static void execute_instruction(Emulator* e) {
       case 0x1d: DEC_R(E); break;
       case 0x1e: LD_R_N(E); break;
       case 0x1f: RRA; break;
-      case 0x20: JR_F_N(COND_NZ); break;
+      case 0x20: JR_F_N(FNZ); break;
       case 0x21: LD_RR_NN(HL); break;
       case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
       case 0x23: INC_RR(HL); break;
@@ -3731,7 +3721,7 @@ static void execute_instruction(Emulator* e) {
       case 0x25: DEC_R(H); break;
       case 0x26: LD_R_N(H); break;
       case 0x27: DAA; break;
-      case 0x28: JR_F_N(COND_Z); break;
+      case 0x28: JR_F_N(FZ); break;
       case 0x29: ADD_HL_RR(HL); break;
       case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
       case 0x2b: DEC_RR(HL); break;
@@ -3739,7 +3729,7 @@ static void execute_instruction(Emulator* e) {
       case 0x2d: DEC_R(L); break;
       case 0x2e: LD_R_N(L); break;
       case 0x2f: CPL; break;
-      case 0x30: JR_F_N(COND_NC); break;
+      case 0x30: JR_F_N(FNC); break;
       case 0x31: LD_RR_NN(SP); break;
       case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
       case 0x33: INC_RR(SP); break;
@@ -3747,7 +3737,7 @@ static void execute_instruction(Emulator* e) {
       case 0x35: DEC_MR(HL); break;
       case 0x36: LD_MR_N(HL); break;
       case 0x37: SCF; break;
-      case 0x38: JR_F_N(COND_C); break;
+      case 0x38: JR_F_N(FC); break;
       case 0x39: ADD_HL_RR(SP); break;
       case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
       case 0x3b: DEC_RR(SP); break;
@@ -3778,35 +3768,35 @@ static void execute_instruction(Emulator* e) {
       REG_OPS(0xa8, XOR)
       REG_OPS(0xb0, OR)
       REG_OPS(0xb8, CP)
-      case 0xc0: RET_F(COND_NZ); break;
+      case 0xc0: RET_F(FNZ); break;
       case 0xc1: POP_RR(BC); break;
-      case 0xc2: JP_F_NN(COND_NZ); break;
+      case 0xc2: JP_F_NN(FNZ); break;
       case 0xc3: JP_NN; break;
-      case 0xc4: CALL_F_NN(COND_NZ); break;
+      case 0xc4: CALL_F_NN(FNZ); break;
       case 0xc5: PUSH_RR(BC); break;
       case 0xc6: ADD_N; break;
       case 0xc7: CALL(0x00); break;
-      case 0xc8: RET_F(COND_Z); break;
+      case 0xc8: RET_F(FZ); break;
       case 0xc9: RET; break;
-      case 0xca: JP_F_NN(COND_Z); break;
+      case 0xca: JP_F_NN(FZ); break;
       case 0xcb: INVALID; break;
-      case 0xcc: CALL_F_NN(COND_Z); break;
+      case 0xcc: CALL_F_NN(FZ); break;
       case 0xcd: CALL_NN; break;
       case 0xce: ADC_N; break;
       case 0xcf: CALL(0x08); break;
-      case 0xd0: RET_F(COND_NC); break;
+      case 0xd0: RET_F(FNC); break;
       case 0xd1: POP_RR(DE); break;
-      case 0xd2: JP_F_NN(COND_NC); break;
+      case 0xd2: JP_F_NN(FNC); break;
       case 0xd3: INVALID; break;
-      case 0xd4: CALL_F_NN(COND_NC); break;
+      case 0xd4: CALL_F_NN(FNC); break;
       case 0xd5: PUSH_RR(DE); break;
       case 0xd6: SUB_N; break;
       case 0xd7: CALL(0x10); break;
-      case 0xd8: RET_F(COND_C); break;
+      case 0xd8: RET_F(FC); break;
       case 0xd9: RETI; break;
-      case 0xda: JP_F_NN(COND_C); break;
+      case 0xda: JP_F_NN(FC); break;
       case 0xdb: INVALID; break;
-      case 0xdc: CALL_F_NN(COND_C); break;
+      case 0xdc: CALL_F_NN(FC); break;
       case 0xdd: INVALID; break;
       case 0xde: SBC_N; break;
       case 0xdf: CALL(0x18); break;
