@@ -4413,6 +4413,9 @@ int main(int argc, char** argv) {
     uint32_t requested_samples = get_gb_channel_samples(&s_sdl, buffer_needed);
     event = run_emulator_until_event(e, event, requested_samples,
                                      next_poll_event_ms);
+    if (!e->config.no_sync) {
+      sdl_synchronize(&s_sdl, e);
+    }
     if (event & EMULATOR_EVENT_TIMEOUT) {
       now_ms = get_time_ms();
       if (!sdl_poll_events(e, &s_sdl)) {
@@ -4431,9 +4434,6 @@ int main(int argc, char** argv) {
     }
     sdl_render_audio(&s_sdl, e);
     reset_audio_buffer(e);
-    if (!e->config.no_sync) {
-      sdl_synchronize(&s_sdl, e);
-    }
   }
 
   write_ext_ram_to_file(e, s_sdl.save_filename);
