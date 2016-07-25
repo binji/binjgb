@@ -3972,8 +3972,7 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
 
 #ifndef NO_SDL
 
-#include <SDL/SDL.h>
-#include <SDL/SDL_main.h>
+#include <SDL.h>
 
 #define RENDER_SCALE 4
 #define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
@@ -4009,6 +4008,7 @@ typedef uint16_t SDLAudioBufferSample;
 static int s_log_level_sdl = 1;
 
 typedef struct {
+  SDL_AudioDeviceID dev;
   SDL_AudioSpec spec;
   uint8_t* buffer;
   uint8_t* buffer_end;
@@ -4027,22 +4027,33 @@ typedef struct {
 typedef struct {
   const char* save_filename;
   const char* save_state_filename;
-  SDL_Surface* surface;
+  SDL_Window* window;
+  SDL_Renderer* renderer;
+  SDL_Texture* texture;
   SDLAudio audio;
   uint32_t last_sync_cycles; /* GB CPU cycle count of last synchronization. */
   double last_sync_real_ms;  /* Wall clock time of last synchronization. */
 } SDL;
 
 static void sdl_destroy(SDL* sdl) {
-  SDL_FreeSurface(sdl->surface);
   SDL_Quit();
 }
 
 static Result sdl_init_video(SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
-  SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
-  CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
-  sdl->surface = surface;
+  sdl->window =
+      SDL_CreateWindow("binjgb", SDL_WINDOWPOS_UNDEFINED,
+                       SDL_WINDOWPOS_UNDEFINED, RENDER_WIDTH, RENDER_HEIGHT, 0);
+  CHECK_MSG(sdl->window != NULL, "SDL_CreateWindow failed.\n");
+  sdl->renderer = SDL_CreateRenderer(sdl->window, -1, 0);
+  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateWindow failed.\n");
+  CHECK_MSG(
+      SDL_RenderSetLogicalSize(sdl->renderer, SCREEN_WIDTH, SCREEN_HEIGHT) == 0,
+      "SDL_SetRendererLogicalSize failed.\n");
+  sdl->texture = SDL_CreateTexture(sdl->renderer, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
+                                   SCREEN_HEIGHT);
+  CHECK_MSG(sdl->texture != NULL, "SDL_CreateTexture failed.\n");
   return OK;
 error:
   sdl_destroy(sdl);
@@ -4050,6 +4061,7 @@ error:
 }
 
 static void sdl_audio_callback(void* userdata, uint8_t* dst, int len) {
+  memset(dst, 0, len);
   SDL* sdl = userdata;
   SDLAudio* audio = &sdl->audio;
   if (len > (int)audio->buffer_available) {
@@ -4074,14 +4086,15 @@ static Result sdl_init_audio(SDL* sdl) {
   sdl->last_sync_cycles = 0;
   sdl->last_sync_real_ms = get_time_ms();
 
-  sdl->audio.spec.freq = AUDIO_FREQUENCY;
-  sdl->audio.spec.format = AUDIO_FORMAT;
-  sdl->audio.spec.channels = AUDIO_CHANNELS;
-  sdl->audio.spec.samples = AUDIO_SAMPLES;
-  sdl->audio.spec.callback = sdl_audio_callback;
-  sdl->audio.spec.userdata = sdl;
-  CHECK_MSG(SDL_OpenAudio(&sdl->audio.spec, NULL) == 0,
-            "SDL_OpenAudio failed.\n");
+  SDL_AudioSpec want;
+  want.freq = AUDIO_FREQUENCY;
+  want.format = AUDIO_FORMAT;
+  want.channels = AUDIO_CHANNELS;
+  want.samples = AUDIO_SAMPLES;
+  want.callback = sdl_audio_callback;
+  want.userdata = sdl;
+  sdl->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &sdl->audio.spec, 0);
+  CHECK_MSG(sdl->audio.dev != 0, "SDL_OpenAudioDevice failed.\n");
 
   sdl->audio.buffer_target_available =
       (size_t)(sdl->audio.spec.size * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER);
@@ -4159,35 +4172,34 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
       case SDL_KEYDOWN:
+        switch (event.key.keysym.scancode) {
+          case SDL_SCANCODE_1: e->config.disable_sound[CHANNEL1] ^= 1; break;
+          case SDL_SCANCODE_2: e->config.disable_sound[CHANNEL2] ^= 1; break;
+          case SDL_SCANCODE_3: e->config.disable_sound[CHANNEL3] ^= 1; break;
+          case SDL_SCANCODE_4: e->config.disable_sound[CHANNEL4] ^= 1; break;
+          case SDL_SCANCODE_B: e->config.disable_bg ^= 1; break;
+          case SDL_SCANCODE_W: e->config.disable_window ^= 1; break;
+          case SDL_SCANCODE_O: e->config.disable_obj ^= 1; break;
+          case SDL_SCANCODE_F6: write_state_to_file(e, ss_filename); break;
+          case SDL_SCANCODE_F9: read_state_from_file(e, ss_filename); break;
+          case SDL_SCANCODE_N: e->config.step = 1; e->config.paused = 0; break;
+          case SDL_SCANCODE_SPACE: e->config.paused ^= 1; break;
+          default: break;
+        }
+        /* fall through */
       case SDL_KEYUP: {
         Bool down = event.type == SDL_KEYDOWN;
-        switch (event.key.keysym.sym) {
-          case SDLK_1: if (down) e->config.disable_sound[CHANNEL1] ^= 1; break;
-          case SDLK_2: if (down) e->config.disable_sound[CHANNEL2] ^= 1; break;
-          case SDLK_3: if (down) e->config.disable_sound[CHANNEL3] ^= 1; break;
-          case SDLK_4: if (down) e->config.disable_sound[CHANNEL4] ^= 1; break;
-          case SDLK_b: if (down) e->config.disable_bg ^= 1; break;
-          case SDLK_w: if (down) e->config.disable_window ^= 1; break;
-          case SDLK_o: if (down) e->config.disable_obj ^= 1; break;
-          case SDLK_UP: e->state.JOYP.up = down; break;
-          case SDLK_DOWN: e->state.JOYP.down = down; break;
-          case SDLK_LEFT: e->state.JOYP.left = down; break;
-          case SDLK_RIGHT: e->state.JOYP.right = down; break;
-          case SDLK_z: e->state.JOYP.B = down; break;
-          case SDLK_x: e->state.JOYP.A = down; break;
-          case SDLK_RETURN: e->state.JOYP.start = down; break;
-          case SDLK_BACKSPACE: e->state.JOYP.select = down; break;
-          case SDLK_ESCAPE: running = FALSE; break;
-          case SDLK_TAB: e->config.no_sync = down; break;
-          case SDLK_SPACE: if (down) e->config.paused ^= 1; break;
-          case SDLK_n:
-            if (down) {
-              e->config.step = 1;
-              e->config.paused = 0;
-            }
-            break;
-          case SDLK_F6: if (down) write_state_to_file(e, ss_filename); break;
-          case SDLK_F9: if (down) read_state_from_file(e, ss_filename); break;
+        switch (event.key.keysym.scancode) {
+          case SDL_SCANCODE_UP: e->state.JOYP.up = down; break;
+          case SDL_SCANCODE_DOWN: e->state.JOYP.down = down; break;
+          case SDL_SCANCODE_LEFT: e->state.JOYP.left = down; break;
+          case SDL_SCANCODE_RIGHT: e->state.JOYP.right = down; break;
+          case SDL_SCANCODE_Z: e->state.JOYP.B = down; break;
+          case SDL_SCANCODE_X: e->state.JOYP.A = down; break;
+          case SDL_SCANCODE_RETURN: e->state.JOYP.start = down; break;
+          case SDL_SCANCODE_BACKSPACE: e->state.JOYP.select = down; break;
+          case SDL_SCANCODE_ESCAPE: running = FALSE; break;
+          case SDL_SCANCODE_TAB: e->config.no_sync = down; break;
           default: break;
         }
         break;
@@ -4199,32 +4211,21 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   return running;
 }
 
-static void sdl_render_surface(SDL* sdl, Emulator* e) {
-  SDL_Surface* surface = sdl->surface;
-  if (SDL_LockSurface(sdl->surface) == 0) {
-    uint32_t* pixels = sdl->surface->pixels;
-    int sx, sy;
-    for (sy = 0; sy < SCREEN_HEIGHT; sy++) {
-      for (sx = 0; sx < SCREEN_WIDTH; sx++) {
-        int i, j;
-        RGBA pixel = e->frame_buffer[sy * SCREEN_WIDTH + sx];
-        uint8_t r = (pixel >> 16) & 0xff;
-        uint8_t g = (pixel >> 8) & 0xff;
-        uint8_t b = (pixel >> 0) & 0xff;
-        uint32_t mapped = SDL_MapRGB(sdl->surface->format, r, g, b);
-        for (j = 0; j < RENDER_SCALE; j++) {
-          for (i = 0; i < RENDER_SCALE; i++) {
-            int rx = sx * RENDER_SCALE + i;
-            int ry = sy * RENDER_SCALE + j;
-            pixels[ry * RENDER_WIDTH + rx] = mapped;
-          }
-        }
-      }
+static void sdl_render_video(SDL* sdl, Emulator* e) {
+  SDL_RenderClear(sdl->renderer);
+  void* pixels;
+  int pitch;
+  if (SDL_LockTexture(sdl->texture, NULL, &pixels, &pitch) == 0) {
+    int y;
+    for (y = 0; y < SCREEN_HEIGHT; y++) {
+      memcpy((uint8_t*)pixels + y * pitch, &e->frame_buffer[y * SCREEN_WIDTH],
+             SCREEN_WIDTH * sizeof(RGBA));
     }
-    SDL_UnlockSurface(sdl->surface);
+    SDL_UnlockTexture(sdl->texture);
+    SDL_RenderCopy(sdl->renderer, sdl->texture, NULL, NULL);
   }
-  DEBUG(sdl, "@@@ %.1f: flip surface\n", get_time_ms());
-  SDL_Flip(sdl->surface);
+  DEBUG(sdl, "@@@ %.1f: render present\n", get_time_ms());
+  SDL_RenderPresent(sdl->renderer);
 }
 
 static void sdl_synchronize(SDL* sdl, Emulator* e) {
@@ -4241,12 +4242,12 @@ static void sdl_synchronize(SDL* sdl, Emulator* e) {
     /* Major desync; don't try to catch up, just reset. But our audio buffer
      * is probably behind (or way ahead), so pause to refill. */
     sdl->last_sync_real_ms = now_ms;
-    SDL_PauseAudio(1);
+    SDL_PauseAudioDevice(sdl->audio.dev, 1);
     sdl->audio.ready = FALSE;
-    SDL_LockAudio();
+    SDL_LockAudioDevice(sdl->audio.dev);
     sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
     sdl->audio.buffer_available = 0;
-    SDL_UnlockAudio();
+    SDL_UnlockAudioDevice(sdl->audio.dev);
   } else {
     if (real_ms < gb_ms) {
       DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
@@ -4289,7 +4290,7 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
   uint8_t* src = e->audio_buffer.data;
   uint8_t* src_end = e->audio_buffer.position;
 
-  SDL_LockAudio();
+  SDL_LockAudioDevice(sdl->audio.dev);
   size_t old_buffer_available = audio->buffer_available;
   size_t i;
   for (; src < src_end; src += AUDIO_CHANNELS) {
@@ -4314,7 +4315,7 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
     }
   }
   size_t new_buffer_available = audio->buffer_available;
-  SDL_UnlockAudio();
+  SDL_UnlockAudioDevice(sdl->audio.dev);
 
   if (overflow) {
     DEBUG(sdl, "!!! audio overflow (old size = %zu)\n", old_buffer_available);
@@ -4326,7 +4327,7 @@ static void sdl_render_audio(SDL* sdl, Emulator* e) {
     DEBUG(sdl, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
           new_buffer_available);
     audio->ready = TRUE;
-    SDL_PauseAudio(0);
+    SDL_PauseAudioDevice(audio->dev, 0);
   }
 }
 
@@ -4401,7 +4402,8 @@ int main(int argc, char** argv) {
       if (!sdl_poll_events(e, &s_sdl)) {
         break;
       }
-      SDL_PauseAudio(e->config.paused || !s_sdl.audio.ready);
+      SDL_PauseAudioDevice(s_sdl.audio.dev,
+                           e->config.paused || !s_sdl.audio.ready);
       SDL_Delay(VIDEO_FRAME_MS);
       continue;
     }
@@ -4421,7 +4423,7 @@ int main(int argc, char** argv) {
       }
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
-      sdl_render_surface(&s_sdl, e);
+      sdl_render_video(&s_sdl, e);
       if (e->config.step) {
         e->config.paused = TRUE;
         e->config.step = FALSE;

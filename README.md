@@ -16,9 +16,9 @@ A simple GB emulator.
 
 ## Building
 
-Requires [CMake](https://cmake.org) and [SDL 1.2](https://www.libsdl.org/download-1.2.php).
-If you run `make`, it will run CMake for you and put the output in the `out/`
-directory.
+Requires [CMake](https://cmake.org) and
+[SDL2](http://libsdl.org/download-2.0.php). If you run `make`, it will run
+CMake for you and put the output in the `out/` directory.
 
 ## Running
 
