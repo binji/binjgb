@@ -4000,7 +4000,6 @@ typedef uint16_t SDLAudioBufferSample;
 #define POLL_EVENT_MS 10.0
 #define VIDEO_FRAME_MS \
   ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
-#define SDL_SURFACE_COUNT 2
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
 #define SAVE_STATE_VERSION (1)
@@ -4028,21 +4027,14 @@ typedef struct {
 typedef struct {
   const char* save_filename;
   const char* save_state_filename;
-  SDL_Surface* surface[SDL_SURFACE_COUNT];
-  uint8_t used_surfaces;
+  SDL_Surface* surface;
   SDLAudio audio;
   uint32_t last_sync_cycles; /* GB CPU cycle count of last synchronization. */
   double last_sync_real_ms;  /* Wall clock time of last synchronization. */
 } SDL;
 
 static void sdl_destroy(SDL* sdl) {
-  int i;
-  for (i = 0; i < SDL_SURFACE_COUNT; ++i) {
-    if (sdl->surface[i]) {
-      SDL_FreeSurface(sdl->surface[i]);
-    }
-    sdl->surface[i] = NULL;
-  }
+  SDL_FreeSurface(sdl->surface);
   SDL_Quit();
 }
 
@@ -4050,14 +4042,7 @@ static Result sdl_init_video(SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
   SDL_Surface* surface = SDL_SetVideoMode(RENDER_WIDTH, RENDER_HEIGHT, 32, 0);
   CHECK_MSG(surface != NULL, "SDL_SetVideoMode failed.\n");
-  sdl->surface[0] = surface;
-  int i;
-  for (i = 1; i < SDL_SURFACE_COUNT; ++i) {
-    sdl->surface[i] = SDL_CreateRGBSurface(
-        SDL_SWSURFACE, surface->w, surface->h, 32, surface->format->Rmask,
-        surface->format->Gmask, surface->format->Bmask, surface->format->Amask);
-    CHECK_MSG(sdl->surface[i], "SDL_CreateRGBSurface failed.\n");
-  }
+  sdl->surface = surface;
   return OK;
 error:
   sdl_destroy(sdl);
@@ -4214,28 +4199,10 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   return running;
 }
 
-static void sdl_flip_surface(SDL* sdl, Bool force) {
-  if (sdl->used_surfaces > 0 &&
-      (force || sdl->used_surfaces == SDL_SURFACE_COUNT)) {
-    DEBUG(sdl, "@@@ %.1f: flip surface\n", get_time_ms());
-    SDL_Flip(sdl->surface[0]);
-    sdl->used_surfaces--;
-    /* Cycle the surfaces. */
-    SDL_Surface* temp = sdl->surface[0];
-    int i;
-    for (i = 1; i < SDL_SURFACE_COUNT - 1; ++i) {
-      sdl->surface[i - 1] = sdl->surface[i];
-    }
-    sdl->surface[SDL_SURFACE_COUNT - 1] = temp;
-  }
-}
-
 static void sdl_render_surface(SDL* sdl, Emulator* e) {
-  sdl_flip_surface(sdl, FALSE);
-  assert(sdl->used_surfaces < SDL_SURFACE_COUNT);
-  SDL_Surface* surface = sdl->surface[sdl->used_surfaces];
-  if (SDL_LockSurface(surface) == 0) {
-    uint32_t* pixels = surface->pixels;
+  SDL_Surface* surface = sdl->surface;
+  if (SDL_LockSurface(sdl->surface) == 0) {
+    uint32_t* pixels = sdl->surface->pixels;
     int sx, sy;
     for (sy = 0; sy < SCREEN_HEIGHT; sy++) {
       for (sx = 0; sx < SCREEN_WIDTH; sx++) {
@@ -4244,7 +4211,7 @@ static void sdl_render_surface(SDL* sdl, Emulator* e) {
         uint8_t r = (pixel >> 16) & 0xff;
         uint8_t g = (pixel >> 8) & 0xff;
         uint8_t b = (pixel >> 0) & 0xff;
-        uint32_t mapped = SDL_MapRGB(surface->format, r, g, b);
+        uint32_t mapped = SDL_MapRGB(sdl->surface->format, r, g, b);
         for (j = 0; j < RENDER_SCALE; j++) {
           for (i = 0; i < RENDER_SCALE; i++) {
             int rx = sx * RENDER_SCALE + i;
@@ -4254,9 +4221,10 @@ static void sdl_render_surface(SDL* sdl, Emulator* e) {
         }
       }
     }
-    SDL_UnlockSurface(surface);
-    sdl->used_surfaces++;
+    SDL_UnlockSurface(sdl->surface);
   }
+  DEBUG(sdl, "@@@ %.1f: flip surface\n", get_time_ms());
+  SDL_Flip(sdl->surface);
 }
 
 static void sdl_synchronize(SDL* sdl, Emulator* e) {
@@ -4441,22 +4409,15 @@ int main(int argc, char** argv) {
     size_t buffer_needed = s_sdl.audio.spec.size -
                            s_sdl.audio.buffer_available % s_sdl.audio.spec.size;
     uint32_t requested_samples = get_gb_channel_samples(&s_sdl, buffer_needed);
-    double timeout_ms = MIN(next_poll_event_ms, next_flip_ms);
-    event = run_emulator_until_event(e, event, requested_samples, timeout_ms);
-    now_ms = get_time_ms();
+    event = run_emulator_until_event(e, event, requested_samples,
+                                     next_poll_event_ms);
     if (event & EMULATOR_EVENT_TIMEOUT) {
-      if (now_ms >= next_flip_ms) {
-        sdl_flip_surface(&s_sdl, TRUE);
-        while (next_flip_ms <= now_ms) {
-          next_flip_ms = now_ms + VIDEO_FRAME_MS;
-        }
-      } else if (now_ms >= next_poll_event_ms) {
-        if (!sdl_poll_events(e, &s_sdl)) {
-          break;
-        }
-        while (next_poll_event_ms <= now_ms) {
-          next_poll_event_ms = now_ms + POLL_EVENT_MS;
-        }
+      now_ms = get_time_ms();
+      if (!sdl_poll_events(e, &s_sdl)) {
+        break;
+      }
+      while (next_poll_event_ms < now_ms) {
+        next_poll_event_ms += POLL_EVENT_MS;
       }
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
