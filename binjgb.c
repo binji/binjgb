@@ -17,6 +17,7 @@
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 #ifndef NDEBUG
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -667,12 +668,6 @@ static RGBA s_color_to_rgba[] = {
   [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
   [COLOR_BLACK] = RGBA_BLACK,
 };
-static uint8_t s_color_to_obj_mask[] = {
-  [COLOR_WHITE] = 0xff,
-  [COLOR_LIGHT_GRAY] = 0,
-  [COLOR_DARK_GRAY] = 0,
-  [COLOR_BLACK] = 0,
-};
 
 typedef enum {
   OBJ_PRIORITY_ABOVE_BG = 0,
@@ -970,13 +965,18 @@ typedef struct {
   Palette BGP;                    /* BG Palette */
   Palette OBP[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
   /* Internal state */
-  uint32_t frame;       /* The currently rendering frame. */
-  uint8_t last_LY;      /* LY from the previous M-cycle. */
-  uint32_t LY_cycles;   /* Counts cycles until LY changes. */
-  uint32_t line_cycles; /* Counts cycles until line_y changes. */
+  uint32_t frame;                   /* The currently rendering frame. */
+  uint8_t last_LY;                  /* LY from the previous M-cycle. */
+  uint32_t LY_cycles;               /* Counts cycles until LY changes. */
+  uint32_t line_cycles;             /* Counts cycles until line_y changes. */
+  uint8_t render_x;                 /* Currently rendering X coordinate. */
   uint8_t line_y; /* The currently rendering line. Can be different than LY. */
   uint8_t win_y;  /* The window Y is only incremented when rendered. */
   uint8_t frame_WY; /* WY is cached per frame. */
+  Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
+  uint8_t line_obj_count; /* Number of sprites to draw on this line. */
+  uint8_t oam_index;      /* Current sprite index in mode 2. */
+  Bool rendering_window;  /* TRUE when this line is rendering the window. */
   Bool new_frame_edge;
   uint8_t display_delay_frames; /* Wait this many frames before displaying. */
 } PPU;
@@ -2572,155 +2572,6 @@ static void write_u8(Emulator* e, Address addr, uint8_t value) {
   }
 }
 
-static TileMap* get_tile_map(Emulator* e, TileMapSelect select) {
-  switch (select) {
-    case TILE_MAP_9800_9BFF: return &e->state.vram.map[0];
-    case TILE_MAP_9C00_9FFF: return &e->state.vram.map[1];
-    default: return NULL;
-  }
-}
-
-static Tile* get_tile_data(Emulator* e, TileDataSelect select) {
-  switch (select) {
-    case TILE_DATA_8000_8FFF: return &e->state.vram.tile[0];
-    case TILE_DATA_8800_97FF: return &e->state.vram.tile[256];
-    default: return NULL;
-  }
-}
-
-static uint8_t get_tile_map_palette_index(TileMap* map,
-                                          Tile* tiles,
-                                          uint8_t x,
-                                          uint8_t y) {
-  uint8_t tile_index = (*map)[((y >> 3) * TILE_MAP_WIDTH) | (x >> 3)];
-  Tile* tile = &tiles[tile_index];
-  return (*tile)[(y & 7) * TILE_WIDTH | (x & 7)];
-}
-
-static RGBA get_palette_index_rgba(uint8_t palette_index, Palette* palette) {
-  return s_color_to_rgba[palette->color[palette_index]];
-}
-
-static void render_line(Emulator* e, uint8_t line_y) {
-  if (line_y >= SCREEN_HEIGHT) {
-    return;
-  }
-
-  RGBA* line_data = &e->frame_buffer[line_y * SCREEN_WIDTH];
-
-  uint8_t bg_obj_mask[SCREEN_WIDTH];
-
-  uint8_t sx;
-  for (sx = 0; sx < SCREEN_WIDTH; ++sx) {
-    bg_obj_mask[sx] = s_color_to_obj_mask[COLOR_WHITE];
-    line_data[sx] = RGBA_WHITE;
-  }
-
-  if (e->state.ppu.LCDC.bg_display && !e->config.disable_bg) {
-    TileMap* map = get_tile_map(e, e->state.ppu.LCDC.bg_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->state.ppu.LCDC.bg_tile_data_select);
-    Palette* palette = &e->state.ppu.BGP;
-    uint8_t bg_y = line_y + e->state.ppu.SCY;
-    uint8_t bg_x = e->state.ppu.SCX;
-    int sx;
-    for (sx = 0; sx < SCREEN_WIDTH; ++sx, ++bg_x) {
-      uint8_t palette_index =
-          get_tile_map_palette_index(map, tiles, bg_x, bg_y);
-      bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
-      line_data[sx] = get_palette_index_rgba(palette_index, palette);
-    }
-  }
-
-  if (e->state.ppu.LCDC.window_display && e->state.ppu.WX <= WINDOW_MAX_X &&
-      line_y >= e->state.ppu.frame_WY && !e->config.disable_window) {
-    TileMap* map = get_tile_map(e, e->state.ppu.LCDC.window_tile_map_select);
-    Tile* tiles = get_tile_data(e, e->state.ppu.LCDC.bg_tile_data_select);
-    Palette* palette = &e->state.ppu.BGP;
-    uint8_t win_x = 0;
-    int sx = 0;
-    if (e->state.ppu.WX < WINDOW_X_OFFSET) {
-      /* Start at the leftmost screen X, but skip N pixels of the window. */
-      win_x = WINDOW_X_OFFSET - e->state.ppu.WX;
-    } else {
-      /* Start N pixels right of the left of the screen. */
-      sx += e->state.ppu.WX - WINDOW_X_OFFSET;
-    }
-    for (; sx < SCREEN_WIDTH; ++sx, ++win_x) {
-      uint8_t palette_index =
-          get_tile_map_palette_index(map, tiles, win_x, e->state.ppu.win_y);
-      bg_obj_mask[sx] = s_color_to_obj_mask[palette_index];
-      line_data[sx] = get_palette_index_rgba(palette_index, palette);
-    }
-    e->state.ppu.win_y++;
-  }
-
-  if (e->state.ppu.LCDC.obj_display && !e->config.disable_obj) {
-    uint8_t obj_height = s_obj_size_to_height[e->state.ppu.LCDC.obj_size];
-    Obj line_objs[OBJ_PER_LINE_COUNT];
-    int n;
-    int dst = 0;
-    /* Put the visible sprites into line_objs, but insert them so sprites with
-     * smaller X-coordinates are earlier. Also, store the Y-coordinate relative
-     * to the line being drawn, range [0..obj_height). */
-    for (n = 0; n < OBJ_COUNT && dst < OBJ_PER_LINE_COUNT; ++n) {
-      Obj *src = &e->state.oam[n];
-      uint8_t rel_y = line_y - src->y;
-      if (rel_y < obj_height) {
-        int j = dst;
-        while (j > 0 && src->x < line_objs[j - 1].x) {
-          line_objs[j] = line_objs[j - 1];
-          j--;
-        }
-        line_objs[j] = *src;
-        line_objs[j].y = rel_y;
-        dst++;
-      }
-    }
-
-    /* Draw in reverse so sprites with higher priority are rendered on top. */
-    for (n = dst - 1; n >= 0; --n) {
-      Obj* o = &line_objs[n];
-      uint8_t oy = o->y;
-      assert(oy < obj_height);
-
-      uint8_t* tile_data;
-      if (o->yflip) {
-        oy = obj_height - 1 - oy;
-      }
-      if (obj_height == 8) {
-        tile_data = &e->state.vram.tile[o->tile][oy * TILE_HEIGHT];
-      } else if (oy < 8) {
-        /* Top tile of 8x16 sprite. */
-        tile_data = &e->state.vram.tile[o->tile & 0xfe][oy * TILE_HEIGHT];
-      } else {
-        /* Bottom tile of 8x16 sprite. */
-        tile_data = &e->state.vram.tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
-      }
-
-      Palette* palette = &e->state.ppu.OBP[o->palette];
-      int d = 1;
-      uint8_t sx = o->x;
-      if (o->xflip) {
-        d = -1;
-        tile_data += 7;
-      }
-      int n;
-      for (n = 0; n < 8; ++n, ++sx, tile_data += d) {
-        if (sx >= SCREEN_WIDTH) {
-          continue;
-        }
-        if (o->priority == OBJ_PRIORITY_BEHIND_BG && bg_obj_mask[sx] == 0) {
-          continue;
-        }
-        uint8_t palette_index = *tile_data;
-        if (palette_index != 0) {
-          line_data[sx] = get_palette_index_rgba(palette_index, palette);
-        }
-      }
-    }
-  }
-}
-
 static void dma_mcycle(Emulator* e) {
   if (e->state.dma.state == DMA_INACTIVE) {
     return;
@@ -2756,6 +2607,141 @@ static void trigger_vblank(Emulator* e) {
   e->state.ppu.frame++;
 }
 
+static void ppu_mode2_mcycle(Emulator* e) {
+  PPU* ppu = &e->state.ppu;
+  if (!ppu->LCDC.obj_display || e->config.disable_obj ||
+      ppu->line_obj_count >= OBJ_PER_LINE_COUNT) {
+    return;
+  }
+
+  /* 80 cycles / 40 sprites == 2 cycles/sprite == 2 sprites per M-cycle. */
+  int i;
+  uint8_t obj_height = s_obj_size_to_height[ppu->LCDC.obj_size];
+  uint8_t y = ppu->line_y;
+  for (i = 0; i < 2 && ppu->line_obj_count < OBJ_PER_LINE_COUNT; ++i) {
+    /* Put the visible sprites into line_obj, but insert them so sprites with
+     * smaller X-coordinates are earlier. */
+    Obj* o = &e->state.oam[ppu->oam_index];
+    uint8_t rel_y = y - o->y;
+    if (rel_y < obj_height) {
+      int j = ppu->line_obj_count;
+      while (j > 0 && o->x < ppu->line_obj[j - 1].x) {
+        ppu->line_obj[j] = ppu->line_obj[j - 1];
+        j--;
+      }
+      ppu->line_obj[j] = *o;
+      ppu->line_obj_count++;
+    }
+    ppu->oam_index++;
+  }
+}
+
+static void ppu_mode3_mcycle(Emulator* e) {
+  int i;
+  PPU* ppu = &e->state.ppu;
+  uint8_t x = ppu->render_x;
+  uint8_t y = ppu->line_y;
+  if (x + 4 > SCREEN_WIDTH) {
+    return;
+  }
+  VideoRam* vram = &e->state.vram;
+  /* Each M-cycle writes 4 pixels. */
+  Color pixels[4];
+  ZERO_MEMORY(pixels);
+  Bool bg_is_zero[4];
+  memset(bg_is_zero, TRUE, sizeof(bg_is_zero));
+
+  TileDataSelect data_select = ppu->LCDC.bg_tile_data_select;
+  Tile* tiles = &vram->tile[data_select == TILE_DATA_8800_97FF ? 256 : 0];
+  for (i = 0; i < 4; ++i) {
+    uint8_t xi = x + i;
+    ppu->rendering_window =
+        ppu->rendering_window ||
+        (ppu->LCDC.window_display && !e->config.disable_window &&
+         xi + WINDOW_X_OFFSET >= ppu->WX && ppu->WX <= WINDOW_MAX_X &&
+         y >= ppu->frame_WY);
+    Bool display_bg = ppu->LCDC.bg_display && !e->config.disable_bg;
+    if (ppu->rendering_window || display_bg) {
+      TileMapSelect map_select;
+      uint8_t mx, my;
+      if (ppu->rendering_window) {
+        map_select = ppu->LCDC.window_tile_map_select;
+        mx = xi + WINDOW_X_OFFSET - ppu->WX;
+        my = ppu->win_y;
+      } else {
+        map_select = ppu->LCDC.bg_tile_map_select;
+        mx = ppu->SCX + xi;
+        my = ppu->SCY + y;
+      }
+      TileMap* map = &vram->map[map_select == TILE_MAP_9800_9BFF ? 0 : 1];
+      uint8_t tile = (*map)[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
+      uint8_t palette_index = tiles[tile][(my & 7) * TILE_WIDTH | (mx & 7)];
+      pixels[i] = ppu->BGP.color[palette_index];
+      bg_is_zero[i] = palette_index == 0;
+    }
+  }
+
+  if (ppu->LCDC.obj_display && !e->config.disable_obj) {
+    uint8_t obj_height = s_obj_size_to_height[ppu->LCDC.obj_size];
+    int n;
+    for (n = ppu->line_obj_count - 1; n >= 0; --n) {
+      Obj* o = &ppu->line_obj[n];
+      /* Does [x, x + 4) intersect [o->x, o->x + 8)? Note that the sums must
+       * wrap at 256 (i.e. arithmetic is 8-bit). */
+      int8_t ox_start = o->x - x;
+      int8_t ox_end = ox_start + 7; /* ox_end is inclusive. */
+      uint8_t oy = y - o->y;
+      if (((uint8_t)ox_start >= 4 && (uint8_t)ox_end >= 8) ||
+          oy >= obj_height) {
+        continue;
+      }
+
+      if (o->yflip) {
+        oy = obj_height - 1 - oy;
+      }
+
+      uint8_t *tile_data;
+      if (obj_height == 8) {
+        tile_data = &vram->tile[o->tile][oy * TILE_HEIGHT];
+      } else if (oy < 8) {
+        /* Top tile of 8x16 sprite. */
+        tile_data = &vram->tile[o->tile & 0xfe][oy * TILE_HEIGHT];
+      } else {
+        /* Bottom tile of 8x16 sprite. */
+        tile_data = &vram->tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
+      }
+
+      int tile_data_offset = MAX(0, -ox_start);
+      assert(tile_data_offset >= 0 && tile_data_offset < 8);
+      int d = 1;
+      if (o->xflip) {
+        tile_data_offset = 7 - tile_data_offset;
+        d = -1;
+      }
+      tile_data += tile_data_offset;
+
+      int start = MAX(0, ox_start);
+      assert(start >= 0 && start < 4);
+      int end = MIN(3, ox_end); /* end is inclusive. */
+      assert(end >= 0 && end < 4);
+      for (i = start; i <= end; ++i, tile_data += d) {
+        uint8_t palette_index = *tile_data;
+        if (palette_index != 0 &&
+            (o->priority != OBJ_PRIORITY_BEHIND_BG || bg_is_zero[i])) {
+          pixels[i] = ppu->OBP[o->palette].color[palette_index];
+        }
+      }
+    }
+  }
+
+  RGBA* rgba_pixels = &e->frame_buffer[y * SCREEN_WIDTH + x];
+  for (i = 0; i < 4; ++i) {
+    rgba_pixels[i] = s_color_to_rgba[pixels[i]];
+  }
+
+  ppu->render_x += 4;
+}
+
 static void ppu_mcycle(Emulator* e) {
   PPU* ppu = &e->state.ppu;
   LCDStatus* STAT = &ppu->STAT;
@@ -2784,6 +2770,12 @@ static void ppu_mcycle(Emulator* e) {
     }
   }
 
+  switch (STAT->mode) {
+    case PPU_MODE_MODE2: ppu_mode2_mcycle(e); break;
+    case PPU_MODE_MODE3: ppu_mode3_mcycle(e); break;
+    default: break;
+  }
+
   /* STAT mode */
   STAT->mode_cycles -= CPU_MCYCLE;
   if (STAT->mode_cycles == 0) {
@@ -2806,13 +2798,16 @@ static void ppu_mcycle(Emulator* e) {
       case PPU_MODE_MODE2:
         STAT->mode_cycles = PPU_MODE2_CYCLES;
         STAT->next_mode = PPU_MODE_MODE3;
+        ppu->oam_index = 0;
+        ppu->line_obj_count = 0;
         break;
       case PPU_MODE_MODE3:
         STAT->trigger_mode = PPU_MODE_MODE3;
         STAT->mode_cycles = PPU_MODE3_CYCLES;
         STAT->next_mode = PPU_MODE_HBLANK;
         STAT->hblank.cycles = PPU_MODE3_CYCLES - CPU_MCYCLE;
-        render_line(e, ppu->line_y);
+        ppu->render_x = 0;
+        ppu->rendering_window = FALSE;
         break;
     }
   }
@@ -2837,6 +2832,9 @@ static void ppu_mcycle(Emulator* e) {
       VERBOSE(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
       STAT->mode2.trigger = TRUE;
       STAT->trigger_mode = PPU_MODE_MODE2;
+    }
+    if (ppu->rendering_window) {
+      ppu->win_y++;
     }
     if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
       ppu->frame_WY = ppu->WY;
@@ -3857,7 +3855,7 @@ static void handle_interrupts(Emulator* e) {
 
   Bool delay = FALSE;
   uint8_t mask = 0;
-  Address vector;
+  Address vector = 0;
   if (interrupt & IF_VBLANK) {
     DEBUG(interrupt, ">> VBLANK interrupt [frame = %u] [cy: %u]\n",
           e->state.ppu.frame, e->state.cycles);
@@ -4006,7 +4004,7 @@ typedef uint16_t SDLAudioBufferSample;
   ((double)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
-#define SAVE_STATE_VERSION (1)
+#define SAVE_STATE_VERSION (2)
 #define SAVE_STATE_HEADER (uint32_t)(0x6b57a7e0 + SAVE_STATE_VERSION)
 #define SAVE_STATE_FILE_SIZE (sizeof(uint32_t) + sizeof(EmulatorState))
 
