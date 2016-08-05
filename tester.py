@@ -107,6 +107,7 @@ TESTS = [
   ('test/blargg/instr_timing/instr_timing.gb', 42, '98e64480d3637d51683cc0d5ae1a3fa266e634e3'),
   ('test/blargg/mem_timing-2/mem_timing.gb', 170, 'f2f2cd0a196587d7b77a762eafd6a26bd95a68c1'),
   ('test/blargg/oam_bug-2/oam_bug.gb', 1000, '!33fe95494d7eb02b36a4d19a1dbf949dcab25c1c'),
+  ('test/blargg/halt_bug.gb', 102, 'bb6282f423d9a7e14f2ef61bd30c403a24648da1'),
 
   ('test/oam_count_v5.gb', 6, '9046cd1217fd36ef9ab715bd0983bcbd3d058c73'),
 ]

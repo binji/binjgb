@@ -282,6 +282,7 @@ typedef uint32_t RGBA;
 #define TAC_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
 
 #define IF_UNUSED 0xe0
+#define IF_ALL 0x1f
 #define IF_JOYPAD 0x10
 #define IF_SERIAL 0x08
 #define IF_TIMER 0x04
@@ -805,6 +806,7 @@ typedef struct {
   Bool enable;      /* Set after EI instruction. This delays updating IME. */
   Bool halt;        /* Halted, waiting for an interrupt. */
   Bool halt_DI;     /* Halted w/ disabled interrupts. */
+  Bool halt_bug;    /* Halt bug occurred. */
 } Interrupt;
 
 typedef struct {
@@ -1207,7 +1209,6 @@ static uint32_t get_ext_ram_address(Emulator* e, MaskedAddress addr) {
   uint32_t ram_addr = ((ram_bank << EXT_RAM_BANK_SHIFT) &
                        e->state.memory_map_state.ext_ram_addr_mask) |
                       addr;
-  assert(ram_addr < e->state.ext_ram.size);
   return ram_addr;
 }
 
@@ -3461,7 +3462,15 @@ static void print_emulator_info(Emulator* e) {
 #define DI INTR(IME) = INTR(enable) = FALSE;
 #define EI INTR(enable) = TRUE;
 
-#define HALT INTR(halt) = TRUE; INTR(halt_DI) = INTR(IME) == 0
+#define HALT                                     \
+  if (INTR(IME)) {                               \
+    INTR(halt) = TRUE;                           \
+  } else if (INTR(IE) & INTR(new_IF) & IF_ALL) { \
+    INTR(halt_bug) = TRUE;                       \
+  } else {                                       \
+    INTR(halt) = TRUE;                           \
+    INTR(halt_DI) = TRUE;                        \
+  }
 
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
@@ -3601,15 +3610,12 @@ static void execute_instruction(Emulator* e) {
     return;
   }
 
-  if (INTR(halt_DI)) {
-    /* When execution continues after the interrupt occurs, there are no
-     * additional cycles spent reading the opcode (perhaps because it has
-     * already been fetched?) */
+  if (INTR(halt_bug)) {
+    /* When interrupts are disabled during a HALT, the following byte will be
+     * duplicated when decoding. */
     opcode = read_u8(e, e->state.reg.PC);
-    /* HALT bug. When interrupts are disabled during a HALT, the following byte
-     * will be duplicated when decoding. */
     e->state.reg.PC--;
-    INTR(halt_DI) = FALSE;
+    INTR(halt_bug) = FALSE;
   } else {
     opcode = read_u8_cy(e, e->state.reg.PC);
   }
@@ -3843,7 +3849,8 @@ static void handle_interrupts(Emulator* e) {
     return;
   }
 
-  uint8_t interrupt = e->state.interrupt.new_IF & e->state.interrupt.IE;
+  uint8_t interrupt =
+      e->state.interrupt.new_IF & e->state.interrupt.IE & IF_ALL;
   if (interrupt == 0) {
     return;
   }
@@ -3877,9 +3884,6 @@ static void handle_interrupts(Emulator* e) {
     DEBUG(interrupt, ">> JOYPAD interrupt\n");
     vector = 0x60;
     mask = IF_JOYPAD;
-  } else {
-    INFO(interrupt, "handle_interrupts: Unhandled interrupt!\n");
-    return;
   }
 
   if (delay) {
@@ -3888,6 +3892,7 @@ static void handle_interrupts(Emulator* e) {
 
   if (e->state.interrupt.halt_DI) {
     DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupt.\n");
+    INTR(halt_DI) = FALSE;
   } else {
     e->state.interrupt.new_IF &= ~mask;
     Address new_pc = REG(PC);

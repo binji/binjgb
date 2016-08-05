@@ -78,6 +78,7 @@ $ ./tester.py gpu
 | --- | --- |
 | cpu\_instrs | :ok: |
 | dmg\_sound-2 | :ok: |
+| halt_bug | :ok: |
 | instr\_timing | :ok: |
 | mem\_timing-2 | :ok: |
 | oam\_bug-2 | :x: |
