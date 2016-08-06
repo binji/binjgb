@@ -52,7 +52,7 @@ error:
 }
 
 int main(int argc, char** argv) {
-  clock_gettime(CLOCK_MONOTONIC, &s_start_time);
+  init_time();
   --argc; ++argv;
   Emulator emulator;
   ZERO_MEMORY(emulator);

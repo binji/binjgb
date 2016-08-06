@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <time.h>
+#include <sys/time.h>
 
 #define SUCCESS(x) ((x) == OK)
 
@@ -101,9 +101,9 @@ typedef uint32_t RGBA;
 
 /* Cycle counts */
 #define MILLISECONDS_PER_SECOND 1000
-#define NANOSECONDS_PER_SECOND 1000000000
-#define NANOSECONDS_PER_MILLISECOND \
-  (NANOSECONDS_PER_SECOND / MILLISECONDS_PER_SECOND)
+#define MICROSECONDS_PER_SECOND 1000000
+#define MICROSECONDS_PER_MILLISECOND \
+  (MICROSECONDS_PER_SECOND / MILLISECONDS_PER_SECOND)
 #define CPU_CYCLES_PER_SECOND 4194304
 #define CPU_MCYCLE 4
 #define APU_CYCLES_PER_SECOND (CPU_CYCLES_PER_SECOND / APU_CYCLES)
@@ -3921,18 +3921,24 @@ static void reset_audio_buffer(Emulator* e) {
 }
 
 /* TODO: remove this global */
-static struct timespec s_start_time;
+static struct timeval s_start_time;
+static void init_time(void) {
+  int result = gettimeofday(&s_start_time, NULL);
+  assert(result == 0);
+}
+
 static double get_time_ms(void) {
-  struct timespec from = s_start_time;
-  struct timespec to;
-  int result = clock_gettime(CLOCK_MONOTONIC, &to);
+  struct timeval from = s_start_time;
+  struct timeval to;
+  int result = gettimeofday(&to, NULL);
   assert(result == 0);
   double ms = (double)(to.tv_sec - from.tv_sec) * MILLISECONDS_PER_SECOND;
-  if (to.tv_nsec < from.tv_nsec) {
+  if (to.tv_usec < from.tv_usec) {
     ms -= MILLISECONDS_PER_SECOND;
-    to.tv_nsec += NANOSECONDS_PER_SECOND;
+    to.tv_usec += MICROSECONDS_PER_SECOND;
   }
-  return ms + (double)(to.tv_nsec - from.tv_nsec) / NANOSECONDS_PER_MILLISECOND;
+  return ms +
+         (double)(to.tv_usec - from.tv_usec) / MICROSECONDS_PER_MILLISECOND;
 }
 
 static EmulatorEvent run_emulator_until_event(Emulator* e,
@@ -4378,7 +4384,7 @@ static Emulator s_emulator;
 static SDL s_sdl;
 
 int main(int argc, char** argv) {
-  clock_gettime(CLOCK_MONOTONIC, &s_start_time);
+  init_time();
   --argc; ++argv;
   int result = 1;
 
