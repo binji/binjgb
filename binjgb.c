@@ -2992,18 +2992,19 @@ static uint8_t update_wave(APU* apu, Wave* wave) {
 }
 
 static uint8_t update_noise(APU* apu, Noise* noise) {
-  if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT &&
-      noise->cycles <= APU_CYCLES) {
-    noise->cycles += noise->period;
-    uint16_t bit = (noise->lfsr ^ (noise->lfsr >> 1)) & 1;
-    if (noise->lfsr_width == LFSR_WIDTH_7) {
-      noise->lfsr = ((noise->lfsr >> 1) & ~0x40) | (bit << 6);
-    } else {
-      noise->lfsr = ((noise->lfsr >> 1) & ~0x4000) | (bit << 14);
+  if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
+    if (noise->cycles <= APU_CYCLES) {
+      noise->cycles += noise->period;
+      uint16_t bit = (noise->lfsr ^ (noise->lfsr >> 1)) & 1;
+      if (noise->lfsr_width == LFSR_WIDTH_7) {
+        noise->lfsr = ((noise->lfsr >> 1) & ~0x40) | (bit << 6);
+      } else {
+        noise->lfsr = ((noise->lfsr >> 1) & ~0x4000) | (bit << 14);
+      }
+      noise->sample = ~noise->lfsr & 1;
     }
-    noise->sample = ~noise->lfsr & 1;
+    noise->cycles -= APU_CYCLES;
   }
-  noise->cycles -= APU_CYCLES;
   return noise->sample;
 }
 
