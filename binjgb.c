@@ -154,7 +154,7 @@ typedef uint32_t RGBA;
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
-#define TILE_COUNT (256 + 256) /* Actually 256+128, but we mirror the middle. */
+#define TILE_COUNT 256 + 128
 #define TILE_WIDTH 8
 #define TILE_HEIGHT 8
 #define TILE_MAP_COUNT 2
@@ -1873,12 +1873,6 @@ static void write_vram(Emulator* e, MaskedAddress addr, uint8_t value) {
     uint32_t tile_y = (addr >> 1) & 0x7; /* 2 bytes per row. */
     uint32_t plane = addr & 1;
     write_vram_tile_data(e, tile_index, plane, tile_y, value);
-    if (tile_index >= 128 && tile_index < 256) {
-      /* Mirror tile data from 0x8800-0x8fff as if it were at 0x9800-0x9fff; it
-       * isn't actually, but when using TILE_DATA_8800_97FF, the tile indexes
-       * work as though it was. */
-      write_vram_tile_data(e, tile_index + 256, plane, tile_y, value);
-    }
   } else {
     /* 0x9800-0x9fff: Tile map data */
     addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
@@ -2652,7 +2646,6 @@ static void ppu_mode3_mcycle(Emulator* e) {
   memset(bg_is_zero, TRUE, sizeof(bg_is_zero));
 
   TileDataSelect data_select = ppu->LCDC.bg_tile_data_select;
-  Tile* tiles = &vram->tile[data_select == TILE_DATA_8800_97FF ? 256 : 0];
   for (i = 0; i < 4; ++i) {
     uint8_t xi = x + i;
     ppu->rendering_window =
@@ -2674,8 +2667,11 @@ static void ppu_mode3_mcycle(Emulator* e) {
         my = ppu->SCY + y;
       }
       TileMap* map = &vram->map[map_select == TILE_MAP_9800_9BFF ? 0 : 1];
-      uint8_t tile = (*map)[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
-      uint8_t palette_index = tiles[tile][(my & 7) * TILE_WIDTH | (mx & 7)];
+      uint8_t tile_index = (*map)[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
+      Tile* tile = &vram->tile[data_select == TILE_DATA_8800_97FF
+                                   ? 256 + (int8_t)tile_index
+                                   : tile_index];
+      uint8_t palette_index = (*tile)[(my & 7) * TILE_WIDTH | (mx & 7)];
       pixels[i] = ppu->BGP.color[palette_index];
       bg_is_zero[i] = palette_index == 0;
     }
@@ -2727,7 +2723,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
       for (i = start; i <= end; ++i, tile_data += d) {
         uint8_t palette_index = *tile_data;
         if (palette_index != 0 &&
-            (o->priority != OBJ_PRIORITY_BEHIND_BG || bg_is_zero[i])) {
+            (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
           pixels[i] = ppu->OBP[o->palette].color[palette_index];
         }
       }
