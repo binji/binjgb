@@ -49,6 +49,11 @@
     fclose(f);                         \
   }                                    \
   return ERROR
+#define DESTROY_IF(ptr, destroy) \
+  if (ptr) {                     \
+    destroy(ptr);                \
+    ptr = NULL;                  \
+  }
 
 #define UNREACHABLE(...)      \
   do {                        \
@@ -4106,21 +4111,33 @@ static void sdl_destroy(SDL* sdl) {
   SDL_Quit();
 }
 
+static Result sdl_init_renderer(SDL* sdl, Bool vsync) {
+  DESTROY_IF(sdl->renderer, SDL_DestroyRenderer);
+  sdl->renderer = SDL_CreateRenderer(sdl->window, -1,
+                                     vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
+  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateWindow failed.\n");
+  CHECK_MSG(
+      SDL_RenderSetLogicalSize(sdl->renderer, SCREEN_WIDTH, SCREEN_HEIGHT) == 0,
+      "SDL_SetRendererLogicalSize failed.\n");
+  DESTROY_IF(sdl->texture, SDL_DestroyTexture);
+  sdl->texture = SDL_CreateTexture(sdl->renderer, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
+                                   SCREEN_HEIGHT);
+  CHECK_MSG(sdl->texture != NULL, "SDL_CreateTexture failed.\n");
+  return OK;
+error:
+  DESTROY_IF(sdl->texture, SDL_DestroyTexture);
+  DESTROY_IF(sdl->renderer, SDL_DestroyRenderer);
+  return ERROR;
+}
+
 static Result sdl_init_video(SDL* sdl) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
   sdl->window =
       SDL_CreateWindow("binjgb", SDL_WINDOWPOS_UNDEFINED,
                        SDL_WINDOWPOS_UNDEFINED, RENDER_WIDTH, RENDER_HEIGHT, 0);
   CHECK_MSG(sdl->window != NULL, "SDL_CreateWindow failed.\n");
-  sdl->renderer = SDL_CreateRenderer(sdl->window, -1, 0);
-  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateWindow failed.\n");
-  CHECK_MSG(
-      SDL_RenderSetLogicalSize(sdl->renderer, SCREEN_WIDTH, SCREEN_HEIGHT) == 0,
-      "SDL_SetRendererLogicalSize failed.\n");
-  sdl->texture = SDL_CreateTexture(sdl->renderer, SDL_PIXELFORMAT_ARGB8888,
-                                   SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
-                                   SCREEN_HEIGHT);
-  CHECK_MSG(sdl->texture != NULL, "SDL_CreateTexture failed.\n");
+  CHECK(SUCCESS(sdl_init_renderer(sdl, TRUE)));
   return OK;
 error:
   sdl_destroy(sdl);
@@ -4236,6 +4253,7 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   Bool running = TRUE;
   SDL_Event event;
   const char* ss_filename = sdl->save_state_filename;
+  EmulatorConfig old_config = e->config;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
       case SDL_KEYDOWN:
@@ -4274,6 +4292,9 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
       case SDL_QUIT: running = FALSE; break;
       default: break;
     }
+  }
+  if (old_config.no_sync != e->config.no_sync) {
+    sdl_init_renderer(sdl, !e->config.no_sync);
   }
   return running;
 }
