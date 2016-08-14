@@ -139,6 +139,7 @@ typedef uint32_t RGBA;
 #define MBC2_ROM_BANK_SELECT_MASK 0xf
 #define MBC3_ROM_BANK_SELECT_MASK 0x7f
 #define MBC3_RAM_BANK_SELECT_MASK 0x7
+#define MBC5_RAM_BANK_SELECT_MASK 0xf
 
 #define OAM_START_ADDR 0xfe00
 #define OAM_END_ADDR 0xfe9f
@@ -719,6 +720,11 @@ typedef struct {
 } MBC1;
 
 typedef struct {
+  uint8_t byte_2000_2fff;
+  uint8_t byte_3000_3fff;
+} MBC5;
+
+typedef struct {
   uint8_t (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
   uint8_t (*read_ext_ram)(struct Emulator*, MaskedAddress);
   void (*write_rom)(struct Emulator*, MaskedAddress, uint8_t);
@@ -728,12 +734,13 @@ typedef struct {
 
 typedef struct {
   uint8_t rom_bank_mask;
-  uint8_t rom_bank;
+  uint16_t rom_bank;
   uint16_t ext_ram_addr_mask;
   uint8_t ext_ram_bank;
   Bool ext_ram_enabled;
   union {
     MBC1 mbc1;
+    MBC5 mbc5;
   };
 } MemoryMapState;
 
@@ -1302,6 +1309,34 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
   }
 }
 
+static void mbc5_write_rom(Emulator* e, MaskedAddress addr, uint8_t value) {
+  MemoryMapState* memory_map = &e->state.memory_map_state;
+  switch (addr >> 12) {
+    case 0: case 1: /* 0000-1fff */
+      memory_map->ext_ram_enabled =
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+      break;
+    case 2: /* 2000-2fff */
+      memory_map->mbc5.byte_2000_2fff = value;
+      break;
+    case 3: /* 3000-3fff */
+      memory_map->mbc5.byte_3000_3fff = value;
+      break;
+    case 4: case 5: /* 4000-5fff */
+      memory_map->ext_ram_bank = value & MBC5_RAM_BANK_SELECT_MASK;
+      break;
+    default:
+      break;
+  }
+
+  memory_map->rom_bank = (((memory_map->mbc5.byte_3000_3fff & 1) << 8) |
+                          memory_map->mbc5.byte_2000_2fff) &
+                         memory_map->rom_bank_mask;
+  VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", __func__,
+          addr, value, memory_map->rom_bank,
+          memory_map->rom_bank << ROM_BANK_SHIFT);
+}
+
 static Result init_memory_map(Emulator* e) {
   MemoryMap* memory_map = &e->memory_map;
   MemoryMapState* memory_map_state = &e->state.memory_map_state;
@@ -1344,6 +1379,9 @@ static Result init_memory_map(Emulator* e) {
     case MBC_TYPE_MBC3:
       memory_map->write_rom = mbc3_write_rom;
       /* TODO handle MBC3 RTC */
+      break;
+    case MBC_TYPE_MBC5:
+      memory_map->write_rom = mbc5_write_rom;
       break;
     default:
       PRINT_ERROR("memory map for %s not implemented.\n",
