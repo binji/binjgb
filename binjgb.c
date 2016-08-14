@@ -797,6 +797,8 @@ typedef struct {
   Bool down, up, left, right;
   Bool start, select, B, A;
   JoypadSelect joypad_select;
+  /* Internal state */
+  uint8_t last_p10_p13;
 } Joypad;
 
 typedef struct {
@@ -809,6 +811,7 @@ typedef struct {
   Bool halt;        /* Halted, waiting for an interrupt. */
   Bool halt_DI;     /* Halted w/ disabled interrupts. */
   Bool halt_bug;    /* Halt bug occurred. */
+  Bool stop;        /* Stopped, waiting for an interrupt. */
 } Interrupt;
 
 typedef struct {
@@ -1555,31 +1558,33 @@ static uint8_t read_oam(Emulator* e, MaskedAddress addr) {
   UNREACHABLE("invalid OAM address: 0x%04x\n", addr);
 }
 
+static uint8_t read_joyp_p10_p13(Emulator* e) {
+  uint8_t result = 0;
+  if (e->state.JOYP.joypad_select == JOYPAD_SELECT_BUTTONS ||
+      e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
+    result |= READ_REG(e->state.JOYP.start, JOYP_BUTTON_START) |
+              READ_REG(e->state.JOYP.select, JOYP_BUTTON_SELECT) |
+              READ_REG(e->state.JOYP.B, JOYP_BUTTON_B) |
+              READ_REG(e->state.JOYP.A, JOYP_BUTTON_A);
+  }
+
+  if (e->state.JOYP.joypad_select == JOYPAD_SELECT_DPAD ||
+      e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
+    result |= READ_REG(e->state.JOYP.down, JOYP_DPAD_DOWN) |
+              READ_REG(e->state.JOYP.up, JOYP_DPAD_UP) |
+              READ_REG(e->state.JOYP.left, JOYP_DPAD_LEFT) |
+              READ_REG(e->state.JOYP.right, JOYP_DPAD_RIGHT);
+  }
+  /* The bits are low when the buttons are pressed. */
+  return ~result;
+}
+
 static uint8_t read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
-    case IO_JOYP_ADDR: {
-      uint8_t result = 0;
-      if (e->state.JOYP.joypad_select == JOYPAD_SELECT_BUTTONS ||
-          e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= READ_REG(e->state.JOYP.start, JOYP_BUTTON_START) |
-                  READ_REG(e->state.JOYP.select, JOYP_BUTTON_SELECT) |
-                  READ_REG(e->state.JOYP.B, JOYP_BUTTON_B) |
-                  READ_REG(e->state.JOYP.A, JOYP_BUTTON_A);
-      }
-
-      if (e->state.JOYP.joypad_select == JOYPAD_SELECT_DPAD ||
-          e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
-        result |= READ_REG(e->state.JOYP.down, JOYP_DPAD_DOWN) |
-                  READ_REG(e->state.JOYP.up, JOYP_DPAD_UP) |
-                  READ_REG(e->state.JOYP.left, JOYP_DPAD_LEFT) |
-                  READ_REG(e->state.JOYP.right, JOYP_DPAD_RIGHT);
-      }
-
-      /* The bits are low when the buttons are pressed. */
+    case IO_JOYP_ADDR:
       return JOYP_UNUSED |
              READ_REG(e->state.JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
-             (~result & JOYP_RESULT_MASK);
-    }
+             (read_joyp_p10_p13(e) & JOYP_RESULT_MASK);
     case IO_SB_ADDR:
       return e->state.serial.SB;
     case IO_SC_ADDR:
@@ -2025,12 +2030,23 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
   }
 }
 
+static void check_joyp_intr(Emulator* e) {
+  uint8_t p10_p13 = read_joyp_p10_p13(e);
+  /* JOYP interrupt only triggers on p10-p13 going from high to low (i.e. not
+   * pressed to pressed). */
+  if ((p10_p13 ^ e->state.JOYP.last_p10_p13) & ~p10_p13) {
+    e->state.interrupt.new_IF |= IF_JOYPAD;
+    e->state.JOYP.last_p10_p13 = p10_p13;
+  }
+}
+
 static void write_io(Emulator* e, MaskedAddress addr, uint8_t value) {
   DEBUG(io, "%s(0x%04x [%s], 0x%02x) [cy: %u]\n", __func__, addr,
         get_io_reg_string(addr), value, e->state.cycles);
   switch (addr) {
     case IO_JOYP_ADDR:
       e->state.JOYP.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
+      check_joyp_intr(e);
       break;
     case IO_SB_ADDR:
       e->state.serial.SB = value;
@@ -3394,7 +3410,6 @@ static void print_emulator_info(Emulator* e) {
   }
 }
 
-#define NI UNREACHABLE("opcode not implemented!\n")
 #define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
 #define REG(R) e->state.reg.R
@@ -3599,6 +3614,8 @@ static void print_emulator_info(Emulator* e) {
 #define SRL_R(R) BASIC_OP_R(R, SRL); SRL_FLAGS
 #define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SRL_FLAGS
 
+#define STOP INTR(stop) = TRUE;
+
 #define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
 #define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
 #define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
@@ -3632,6 +3649,10 @@ static void execute_instruction(Emulator* e) {
   uint8_t c;
   uint8_t opcode;
   Address new_pc;
+
+  if (INTR(stop)) {
+    return;
+  }
 
   if (INTR(enable)) {
     INTR(enable) = FALSE;
@@ -3736,7 +3757,7 @@ static void execute_instruction(Emulator* e) {
       case 0x0d: DEC_R(C); break;
       case 0x0e: LD_R_N(C); break;
       case 0x0f: RRCA; break;
-      case 0x10: NI; break;
+      case 0x10: STOP; break;
       case 0x11: LD_RR_NN(DE); break;
       case 0x12: LD_MR_R(DE, A); break;
       case 0x13: INC_RR(DE); break;
@@ -3936,6 +3957,7 @@ static void handle_interrupts(Emulator* e) {
     mcycle(e);
   }
   e->state.interrupt.halt = FALSE;
+  e->state.interrupt.stop = FALSE;
 }
 
 static void step_emulator(Emulator* e) {
@@ -3986,6 +4008,7 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
   if (last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     reset_audio_buffer(e);
   }
+  check_joyp_intr(e);
 
   assert(requested_samples <= e->audio_buffer.end - e->audio_buffer.data);
   EmulatorEvent result = 0;
@@ -4228,6 +4251,7 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
           case SDL_SCANCODE_F9: read_state_from_file(e, ss_filename); break;
           case SDL_SCANCODE_N: e->config.step = 1; e->config.paused = 0; break;
           case SDL_SCANCODE_SPACE: e->config.paused ^= 1; break;
+          case SDL_SCANCODE_ESCAPE: running = FALSE; break;
           default: break;
         }
         /* fall through */
@@ -4242,7 +4266,6 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
           case SDL_SCANCODE_X: e->state.JOYP.A = down; break;
           case SDL_SCANCODE_RETURN: e->state.JOYP.start = down; break;
           case SDL_SCANCODE_BACKSPACE: e->state.JOYP.select = down; break;
-          case SDL_SCANCODE_ESCAPE: running = FALSE; break;
           case SDL_SCANCODE_TAB: e->config.no_sync = down; break;
           default: break;
         }
