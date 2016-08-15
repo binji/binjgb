@@ -41,6 +41,7 @@ Keys:
 | Quit | escape |
 | Save state | F6 |
 | Load state | F9 |
+| Toggle fullscreen | F11 |
 | Disable audio channel 1-4 | 1-4 |
 | Disable BG layer | b |
 | Disable Window layer | w |

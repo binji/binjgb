@@ -1012,6 +1012,7 @@ typedef struct {
   Bool no_sync;
   Bool paused;
   Bool step;
+  Bool fullscreen;
 } EmulatorConfig;
 
 typedef struct {
@@ -4285,6 +4286,7 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
           case SDL_SCANCODE_RETURN: e->state.JOYP.start = down; break;
           case SDL_SCANCODE_BACKSPACE: e->state.JOYP.select = down; break;
           case SDL_SCANCODE_TAB: e->config.no_sync = down; break;
+          case SDL_SCANCODE_F11: if (!down) e->config.fullscreen ^= 1; break;
           default: break;
         }
         break;
@@ -4295,6 +4297,10 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
   }
   if (old_config.no_sync != e->config.no_sync) {
     sdl_init_renderer(sdl, !e->config.no_sync);
+  }
+  if (old_config.fullscreen != e->config.fullscreen) {
+    SDL_SetWindowFullscreen(
+        sdl->window, e->config.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
   }
   return running;
 }
