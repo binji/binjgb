@@ -14,7 +14,7 @@
 #include "binjgb.c"
 
 static Result init_audio_buffer(AudioBuffer* audio_buffer) {
-  uint32_t gb_channel_samples =
+  u32 gb_channel_samples =
       (GB_CHANNEL_SAMPLES + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES);
   size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
   audio_buffer->data = malloc(buffer_size);
@@ -30,25 +30,21 @@ Result write_frame_ppm(Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
-  uint8_t x, y;
+  u8 x, y;
   RGBA* data = &e->frame_buffer[0];
   for (y = 0; y < SCREEN_HEIGHT; ++y) {
     for (x = 0; x < SCREEN_WIDTH; ++x) {
       RGBA pixel = *data++;
-      uint8_t b = (pixel >> 16) & 0xff;
-      uint8_t g = (pixel >> 8) & 0xff;
-      uint8_t r = (pixel >> 0) & 0xff;
+      u8 b = (pixel >> 16) & 0xff;
+      u8 g = (pixel >> 8) & 0xff;
+      u8 r = (pixel >> 0) & 0xff;
       CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
     }
     CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
   }
   fclose(f);
   return OK;
-error:
-  if (f) {
-    fclose(f);
-  }
-  return ERROR;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
 int main(int argc, char** argv) {
@@ -76,12 +72,11 @@ int main(int argc, char** argv) {
   /* Run for N frames, measured by audio samples (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
    * we still produce audio samples at a fixed rate. */
-  uint32_t total_samples =
-      (uint32_t)((double)frames * APU_CYCLES_PER_SECOND * PPU_FRAME_CYCLES *
-                 SOUND_OUTPUT_COUNT / CPU_CYCLES_PER_SECOND);
+  u32 total_samples =
+      (u32)((f64)frames * APU_CYCLES_PER_SECOND * PPU_FRAME_CYCLES *
+            SOUND_OUTPUT_COUNT / CPU_CYCLES_PER_SECOND);
   LOG("frames = %u total_samples = %u\n", frames, total_samples);
-  double timeout_ms =
-      get_time_ms() + TEST_TIMEOUT_SEC * MILLISECONDS_PER_SECOND;
+  f64 timeout_ms = get_time_ms() + TEST_TIMEOUT_SEC * MILLISECONDS_PER_SECOND;
   EmulatorEvent event = 0;
   Bool finish_at_next_frame = FALSE;
   while (TRUE) {
