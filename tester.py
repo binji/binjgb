@@ -5,6 +5,7 @@
 # This software may be modified and distributed under the terms
 # of the MIT license.  See the LICENSE file for details.
 #
+from __future__ import print_function
 import argparse
 import fnmatch
 import hashlib
@@ -147,16 +148,16 @@ def RunTest(rom, frames, expected):
     expect_fail = False
   if actual == expected:
     if expect_fail:
-      print '[X]  %s => %s' % (rom, actual)
+      print('[X]  %s => %s' % (rom, actual))
     else:
-      print '[OK] %s' % rom
+      print('[OK] %s' % rom)
       os.remove(ppm)
       return True
   else:
     if expected == '' or expect_fail:
-      print '[?]  %s => %s' % (rom, actual)
+      print('[?]  %s => %s' % (rom, actual))
     else:
-      print '[X]  %s => %s' % (rom, actual)
+      print('[X]  %s => %s' % (rom, actual))
     return False
 
 
@@ -177,7 +178,7 @@ def main(args):
       total += 1
       if RunTest(rom, frames, expected):
         passed += 1
-  print 'Passed %d/%d' % (passed, total)
+  print('Passed %d/%d' % (passed, total))
   if total == passed:
     return 0
   return 1
