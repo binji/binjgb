@@ -1,2 +1,4 @@
 /out
 *.gb
+/__pycache__
+*.pyc

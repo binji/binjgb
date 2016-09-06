@@ -7,12 +7,10 @@
 #
 from __future__ import print_function
 import argparse
-import fnmatch
-import hashlib
 import os
-import re
-import subprocess
 import sys
+
+import common
 
 ACCEPTANCE = 'test/mooneye/acceptance/'
 BITS = ACCEPTANCE + 'bits/'
@@ -114,33 +112,10 @@ TESTS = [
 ]
 
 
-class Error(Exception):
-  pass
-
-
-def Run(exe, *args):
-  cmd = [exe] + list(args)
-  basename = os.path.basename(exe)
-  try:
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if process.returncode != 0:
-      raise Error('Error running "%s":\n%s' % (basename, stderr))
-  except OSError as e:
-    raise Error('Error running "%s": %s' % (basename, str(e)))
-
-
-def HashFile(filename):
-  m = hashlib.sha1()
-  m.update(open(filename, 'rb').read())
-  return m.hexdigest()
-
-
-def RunTest(rom, frames, expected):
+def RunTest(rom, frames, expected, debug_exe):
   ppm = os.path.basename(os.path.splitext(rom)[0]) + '.ppm'
-  Run('out/tester', rom, str(frames), ppm)
-  actual = HashFile(ppm)
+  common.RunTester(rom, frames, ppm, debug_exe=debug_exe)
+  actual = common.HashFile(ppm)
   if expected.startswith('!'):
     expect_fail = True
     expected = expected[1:]
@@ -165,19 +140,20 @@ def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('patterns', metavar='pattern', nargs='*',
                       help='test patterns.')
+  parser.add_argument('-d', '--debug-exe', action='store_true',
+                      help='run debug tester')
   options = parser.parse_args(args)
-  if options.patterns:
-    pattern_re = '|'.join(fnmatch.translate('*%s*' % p)
-                          for p in options.patterns)
-  else:
-    pattern_re = '.*'
+  pattern_re = common.MakePatternRE(options.patterns)
   total = 0
   passed = 0
   for rom, frames, expected in TESTS:
-    if re.match(pattern_re, rom):
+    if pattern_re.match(rom):
       total += 1
-      if RunTest(rom, frames, expected):
-        passed += 1
+      try:
+        if RunTest(rom, frames, expected, options.debug_exe):
+          passed += 1
+      except common.Error as e:
+        print(e)
   print('Passed %d/%d' % (passed, total))
   if total == passed:
     return 0
