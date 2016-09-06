@@ -1241,6 +1241,9 @@ static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
                 __func__, addr, value, memory_map->rom_bank,
                 memory_map->rom_bank << ROM_BANK_SHIFT);
       }
+      if (memory_map->rom_bank == 0) {
+        memory_map->rom_bank++;
+      }
       break;
     default:
       break;
