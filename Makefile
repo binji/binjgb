@@ -18,3 +18,16 @@ endef
 
 $(eval $(call BUILD,Debug,debug))
 $(eval $(call BUILD,Release,release))
+
+# Emscripten stuff
+
+EMSCRIPTEN_DIR := emscripten
+
+out/Emscripten:
+	mkdir -p out/Emscripten
+out/Emscripten/Makefile: | out/Emscripten
+	cd out/Emscripten && \
+		cmake ../.. -DCMAKE_TOOLCHAIN_FILE=${EMSCRIPTEN_DIR}/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_BUILD_TYPE=Release
+.PHONY: emscripten
+emscripten: out/Emscripten/Makefile
+	$(MAKE) --no-print-directory -C out/Emscripten

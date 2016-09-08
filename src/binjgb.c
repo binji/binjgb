@@ -1401,7 +1401,7 @@ static void set_af_reg(Registers* reg, u16 af) {
   reg->F.C = UNPACK(af, CPU_FLAG_C);
 }
 
-static Result init_emulator(Emulator* e) {
+Result init_emulator(Emulator* e) {
   static u8 s_initial_wave_ram[WAVE_RAM_SIZE] = {
       0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
       0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
