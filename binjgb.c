@@ -1134,7 +1134,7 @@ error:
 static void dummy_write(Emulator* e, MaskedAddress addr, u8 value) {}
 
 static u8 dummy_read(Emulator* e, MaskedAddress addr) {
-  return 0;
+  return INVALID_READ_BYTE;
 }
 
 static u8 gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
