@@ -151,6 +151,9 @@ typedef u32 RGBA;
 #define MBC3_ROM_BANK_SELECT_MASK 0x7f
 #define MBC3_RAM_BANK_SELECT_MASK 0x7
 #define MBC5_RAM_BANK_SELECT_MASK 0xf
+#define HUC1_ROM_BANK_LO_SELECT_MASK 0x3f
+#define HUC1_BANK_HI_SELECT_MASK 0x3
+#define HUC1_BANK_HI_SHIFT 6
 
 #define OAM_START_ADDR 0xfe00
 #define OAM_END_ADDR 0xfe9f
@@ -400,9 +403,8 @@ typedef u32 RGBA;
   V(CARTRIDGE_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)            \
   V(CARTRIDGE_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)              \
   V(CARTRIDGE_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                       \
-  V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, NO_BATTERY)
+  V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
 
-/* TODO: Correct masks for 1.1M, 1.2M, 1.5M sizes? */
 #define FOREACH_ROM_SIZE(V)        \
   V(ROM_SIZE_32K, 0, 2, 0x1)       \
   V(ROM_SIZE_64K, 1, 4, 0x3)       \
@@ -412,15 +414,15 @@ typedef u32 RGBA;
   V(ROM_SIZE_1M, 5, 64, 0x3f)      \
   V(ROM_SIZE_2M, 6, 128, 0x7f)     \
   V(ROM_SIZE_4M, 7, 256, 0xff)     \
-  V(ROM_SIZE_1_1M, 0x52, 72, 0x7f) \
-  V(ROM_SIZE_1_2M, 0x53, 80, 0x7f) \
-  V(ROM_SIZE_1_5M, 0x54, 96, 0x7f)
+  V(ROM_SIZE_8M, 8, 512, 0x1ff)
 
-#define FOREACH_EXT_RAM_SIZE(V)  \
-  V(EXT_RAM_SIZE_NONE, 0, 0, 0)  \
-  V(EXT_RAM_SIZE_2K, 1, 2048, 0x7ff) \
-  V(EXT_RAM_SIZE_8K, 2, 8192, 0x1fff) \
-  V(EXT_RAM_SIZE_32K, 3, 32768, 0x7fff)
+#define FOREACH_EXT_RAM_SIZE(V)                                                \
+  V(EXT_RAM_SIZE_NONE, 0, 0, 0)                                                \
+  V(EXT_RAM_SIZE_2K, 1, 2048, 0x7ff)                                           \
+  V(EXT_RAM_SIZE_8K, 2, 8192, 0x1fff)                                          \
+  V(EXT_RAM_SIZE_32K, 3, 32768, 0x7fff)                                        \
+  V(EXT_RAM_SIZE_128K, 4, 131072, 0x1ffff)                                     \
+  V(EXT_RAM_SIZE_64K, 5, 65536, 0xffff)
 
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_STRING(name, code, ...) [code] = #name,
@@ -709,6 +711,7 @@ typedef struct {
   u8 byte_4000_5fff;
   BankMode bank_mode;
 } MBC1;
+typedef MBC1 HUC1;
 
 typedef struct {
   u8 byte_2000_2fff;
@@ -731,6 +734,7 @@ typedef struct {
   Bool ext_ram_enabled;
   union {
     MBC1 mbc1;
+    HUC1 huc1;
     MBC5 mbc5;
   };
 } MemoryMapState;
@@ -1318,6 +1322,45 @@ static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           memory_map->rom_bank << ROM_BANK_SHIFT);
 }
 
+static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
+  MemoryMapState* memory_map = &e->state.memory_map_state;
+  HUC1* huc1 = &memory_map->huc1;
+  switch (addr >> 13) {
+    case 0: /* 0000-1fff */
+      memory_map->ext_ram_enabled =
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+      break;
+    case 1: /* 2000-3fff */
+      huc1->byte_2000_3fff = value;
+      break;
+    case 2: /* 4000-5fff */
+      huc1->byte_4000_5fff = value;
+      break;
+    case 3: /* 6000-7fff */
+      huc1->bank_mode = (BankMode)(value & 1);
+      break;
+  }
+
+  memory_map->rom_bank = huc1->byte_2000_3fff & HUC1_ROM_BANK_LO_SELECT_MASK;
+  if (memory_map->rom_bank == 0) {
+    memory_map->rom_bank++;
+  }
+
+  if (huc1->bank_mode == BANK_MODE_ROM) {
+    memory_map->rom_bank |= (huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK)
+                            << HUC1_BANK_HI_SHIFT;
+    memory_map->ext_ram_bank = 0;
+  } else {
+    memory_map->ext_ram_bank = huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK;
+  }
+
+  memory_map->rom_bank &= memory_map->rom_bank_mask;
+
+  VERBOSE(memory,
+          "huc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
+          value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
+}
+
 static Result init_memory_map(Emulator* e) {
   MemoryMap* memory_map = &e->memory_map;
   MemoryMapState* memory_map_state = &e->state.memory_map_state;
@@ -1363,6 +1406,9 @@ static Result init_memory_map(Emulator* e) {
       break;
     case MBC_TYPE_MBC5:
       memory_map->write_rom = mbc5_write_rom;
+      break;
+    case MBC_TYPE_HUC1:
+      memory_map->write_rom = huc1_write_rom;
       break;
     default:
       PRINT_ERROR("memory map for %s not implemented.\n",
