@@ -10,8 +10,8 @@ add_definitions(
   -Wno-unused-function
   -Wno-unused-variable
 )
-add_executable(binjgb binjgb.c)
+add_executable(binjgb src/binjgb.c)
 target_include_directories(binjgb PUBLIC ${SDL2_INCLUDE_DIR})
 target_link_libraries(binjgb ${SDL2_LIBRARY})
-add_executable(tester tester.c)
+add_executable(tester src/tester.c)
 target_compile_definitions(tester PRIVATE NO_SDL)

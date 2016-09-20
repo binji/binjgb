@@ -9,8 +9,12 @@ import hashlib
 import re
 import subprocess
 
-TESTER_DEBUG = 'out/tester'
-TESTER_RELEASE = 'out/tester-release'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+OUT_DIR = os.path.join(ROOT_DIR, 'out')
+ROM_DIR = os.path.join(ROOT_DIR, 'rom')
+TESTER_DEBUG = os.path.join(OUT_DIR, 'tester')
+TESTER_RELEASE = os.path.join(OUT_DIR, 'tester-release')
 
 
 class Error(Exception):

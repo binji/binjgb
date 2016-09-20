@@ -149,6 +149,7 @@ def main(args):
   for rom, frames, expected in TESTS:
     if pattern_re.match(rom):
       total += 1
+      rom = os.path.join(common.ROOT_DIR, rom)
       try:
         if RunTest(rom, frames, expected, options.debug_exe):
           passed += 1

@@ -53,22 +53,22 @@ Keys:
 ## Running tests
 
 You'll have to get the various test suites below, build the `.gb` files if
-necessary, and copy the results to the appropriate directories. See `tester.py`
-for the expected locations. Probably should write a script that does this
-automatically.
+necessary, and copy the results to the appropriate directories. See
+`scripts/tester.py` for the expected locations. Probably should write a script
+that does this automatically.
 
-`tester.py` will only run the tests that match a filter passed on the command
-line. Some examples:
+`scripts/tester.py` will only run the tests that match a filter passed on the
+command line. Some examples:
 
 ```
 # Run all tests
-$ ./tester.py
+$ scripts/tester.py
 
 # Run all tests mooneye tests
-$ ./tester.py mooneye
+$ scripts/tester.py mooneye
 
 # Run all gpu tests
-$ ./tester.py gpu
+$ scripts/tester.py gpu
 ```
 
 ## Test status
@@ -79,7 +79,7 @@ $ ./tester.py gpu
 | --- | --- |
 | cpu\_instrs | :ok: |
 | dmg\_sound-2 | :ok: |
-| halt_bug | :ok: |
+| halt\_bug | :ok: |
 | instr\_timing | :ok: |
 | mem\_timing-2 | :ok: |
 | oam\_bug-2 | :x: |

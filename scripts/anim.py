@@ -16,9 +16,10 @@ import time
 
 import common
 
+OUT_ANIM_DIR = os.path.join(common.OUT_DIR, 'anim')
+
 DEFAULT_FRAMES = 2400
-CONTROLLER_INPUT_FILE = 'input_move_right.txt'
-OUT_ANIM_DIR = os.path.join('out', 'anim')
+CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'input_move_right.txt')
 
 
 def ChangeExt(path, new_ext):
@@ -74,7 +75,7 @@ def main(args):
   pattern_re = common.MakePatternRE(options.patterns)
 
   roms = []
-  for root, dirs, files in os.walk('rom'):
+  for root, dirs, files in os.walk(common.ROM_DIR):
     for file_ in files:
       path = os.path.join(root, file_)
       if not os.path.splitext(path)[1].startswith('.gb'):
