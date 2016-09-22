@@ -986,6 +986,7 @@ typedef struct {
   Bool paused;
   Bool step;
   Bool fullscreen;
+  Bool allow_simulataneous_dpad_opposites;
 } EmulatorConfig;
 
 typedef struct {
@@ -1592,12 +1593,22 @@ static u8 read_joyp_p10_p13(Emulator* e) {
               READ_REG(e->state.JOYP.A, JOYP_BUTTON_A);
   }
 
+  Bool left = e->state.JOYP.left;
+  Bool right = e->state.JOYP.right;
+  Bool up = e->state.JOYP.up;
+  Bool down = e->state.JOYP.down;
+  if (!e->config.allow_simulataneous_dpad_opposites) {
+    if (left && right) {
+      left = FALSE;
+    } else if (up && down) {
+      up = FALSE;
+    }
+  }
+
   if (e->state.JOYP.joypad_select == JOYPAD_SELECT_DPAD ||
       e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
-    result |= READ_REG(e->state.JOYP.down, JOYP_DPAD_DOWN) |
-              READ_REG(e->state.JOYP.up, JOYP_DPAD_UP) |
-              READ_REG(e->state.JOYP.left, JOYP_DPAD_LEFT) |
-              READ_REG(e->state.JOYP.right, JOYP_DPAD_RIGHT);
+    result |= READ_REG(down, JOYP_DPAD_DOWN) | READ_REG(up, JOYP_DPAD_UP) |
+              READ_REG(left, JOYP_DPAD_LEFT) | READ_REG(right, JOYP_DPAD_RIGHT);
   }
   /* The bits are low when the buttons are pressed. */
   return ~result;
