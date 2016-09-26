@@ -196,8 +196,7 @@ typedef u32 RGBA;
 #define ENVELOPE_MAX_VOLUME 15
 #define DUTY_CYCLE_COUNT 8
 #define SOUND_OUTPUT_COUNT 2
-#define SO1_MAX_VOLUME 7
-#define SO2_MAX_VOLUME 7
+#define SOUND_OUTPUT_MAX_VOLUME 7
 /* Additional samples so the AudioBuffer doesn't overflow. This could happen
  * because the audio buffer is updated at the granularity of an instruction, so
  * the most extra samples that could be added is equal to the APU cycle count
@@ -2997,10 +2996,10 @@ static void update_channel_sweep(Channel* channel, Sweep* sweep) {
 
 static u8 update_square_wave(Channel* channel, SquareWave* wave) {
   static u8 duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] = {
-      {0, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_12_5 */
-      {1, 0, 0, 0, 0, 0, 0, 1}, /* WAVE_DUTY_25 */
-      {1, 0, 0, 0, 0, 1, 1, 1}, /* WAVE_DUTY_50 */
-      {0, 1, 1, 1, 1, 1, 1, 0}, /* WAVE_DUTY_75 */
+          [WAVE_DUTY_12_5] = {0, 0, 0, 0, 0, 0, 0, 1},
+          [WAVE_DUTY_25] = {1, 0, 0, 0, 0, 0, 0, 1},
+          [WAVE_DUTY_50] = {1, 0, 0, 0, 0, 1, 1, 1},
+          [WAVE_DUTY_75] = {0, 1, 1, 1, 1, 1, 1, 0},
   };
 
   if (wave->cycles <= APU_CYCLES) {
@@ -3102,99 +3101,108 @@ static void write_sample(AudioBuffer* buffer, u8 so1, u8 so2) {
   *buffer->position++ = so2;
 }
 
-static void apu_update(Emulator* e) {
-  APU* apu = &e->state.apu;
-  Bool do_length = FALSE;
-  Bool do_envelope = FALSE;
-  Bool do_sweep = FALSE;
-  apu->cycles += APU_CYCLES;
-  apu->frame_cycles += APU_CYCLES;
-  if (VALUE_WRAPPED(apu->frame_cycles, FRAME_SEQUENCER_CYCLES)) {
-    apu->frame++;
-    VALUE_WRAPPED(apu->frame, FRAME_SEQUENCER_COUNT);
-
-    switch (apu->frame) {
-      case 0: do_length = TRUE; break;
-      case 1: break;
-      case 2: do_length = do_sweep = TRUE; break;
-      case 3: break;
-      case 4: do_length = TRUE; break;
-      case 5: break;
-      case 6: do_length = do_sweep = TRUE; break;
-      case 7: do_envelope = TRUE; break;
-    }
-
-    VERBOSE(apu, "%s: %c%c%c frame: %u cy: %u\n", __func__,
-            do_length ? 'L' : '.', do_envelope ? 'E' : '.',
-            do_sweep ? 'S' : '.', apu->frame, e->state.cycles);
+static void apu_mix_sample(Emulator *e, int channel, u8 sample,
+                           u16 *out_so1_sample, u16 *out_so2_sample) {
+  if (!e->config.disable_sound[channel]) {
+    *out_so1_sample += sample * e->state.apu.so1_output[channel];
+    *out_so2_sample += sample * e->state.apu.so2_output[channel];
   }
+}
 
-  u8 sample = 0;
-  u16 so1_mixed_sample = 0;
-  u16 so2_mixed_sample = 0;
-
-#define MIX_SAMPLE(channel, get_sample)      \
-  do {                                       \
-    if (!e->config.disable_sound[channel]) { \
-      sample = get_sample;                   \
-      if (apu->so1_output[channel]) {        \
-        so1_mixed_sample += sample;          \
-      }                                      \
-      if (apu->so2_output[channel]) {        \
-        so2_mixed_sample += sample;          \
-      }                                      \
-    }                                        \
-  } while (0)
-
-  /* Channel 1 */
+static void apu_update_channel_1(Emulator *e, Bool length, Bool envelope,
+                                 Bool sweep, u16 *out_so1_sample,
+                                 u16 *out_so2_sample) {
+  APU* apu = &e->state.apu;
   Channel* channel1 = &apu->channel[CHANNEL1];
+  u8 sample = 0;
   if (channel1->status) {
-    if (do_sweep) update_channel_sweep(channel1, &apu->sweep);
+    if (sweep) update_channel_sweep(channel1, &apu->sweep);
     sample = update_square_wave(channel1, &channel1->square_wave);
   }
-  if (do_length) update_channel_length(channel1);
+  if (length) update_channel_length(channel1);
   if (channel1->status) {
-    if (do_envelope) update_channel_envelope(e, channel1);
-    MIX_SAMPLE(CHANNEL1, channelx_sample(channel1, sample));
+    if (envelope) update_channel_envelope(e, channel1);
+    apu_mix_sample(e, CHANNEL1, channelx_sample(channel1, sample),
+                   out_so1_sample, out_so2_sample);
   }
+}
 
-  /* Channel 2 */
+static void apu_update_channel_2(Emulator *e, Bool length, Bool envelope,
+                                 u16 *out_so1_sample, u16 *out_so2_sample) {
+  APU* apu = &e->state.apu;
   Channel* channel2 = &apu->channel[CHANNEL2];
+  u8 sample = 0;
   if (channel2->status) {
     sample = update_square_wave(channel2, &channel2->square_wave);
   }
-  if (do_length) update_channel_length(channel2);
+  if (length) update_channel_length(channel2);
   if (channel2->status) {
-    if (do_envelope) update_channel_envelope(e, channel2);
-    MIX_SAMPLE(CHANNEL2, channelx_sample(channel2, sample));
+    if (envelope) update_channel_envelope(e, channel2);
+    apu_mix_sample(e, CHANNEL2, channelx_sample(channel2, sample),
+                   out_so1_sample, out_so2_sample);
   }
+}
 
-  /* Channel 3 */
+static void apu_update_channel_3(Emulator *e, Bool length, u16 *out_so1_sample,
+                                 u16 *out_so2_sample) {
+  APU* apu = &e->state.apu;
   Channel* channel3 = &apu->channel[CHANNEL3];
+  u8 sample = 0;
   if (channel3->status) {
     sample = update_wave(apu, &apu->wave);
   }
-  if (do_length) update_channel_length(channel3);
+  if (length) update_channel_length(channel3);
   if (channel3->status) {
-    MIX_SAMPLE(CHANNEL3, channel3_sample(channel3, &apu->wave, sample));
+    apu_mix_sample(e, CHANNEL3, channel3_sample(channel3, &apu->wave, sample),
+                   out_so1_sample, out_so2_sample);
   }
+}
 
-  /* Channel 4 */
+static void apu_update_channel_4(Emulator *e, Bool length, Bool envelope,
+                                 u16 *out_so1_sample, u16 *out_so2_sample) {
+  APU* apu = &e->state.apu;
   Channel* channel4 = &apu->channel[CHANNEL4];
+  u8 sample = 0;
   if (channel4->status) {
     sample = update_noise(apu, &apu->noise);
   }
-  if (do_length) update_channel_length(channel4);
+  if (length) update_channel_length(channel4);
   if (channel4->status) {
-    if (do_envelope) update_channel_envelope(e, channel4);
-    MIX_SAMPLE(CHANNEL4, channelx_sample(channel4, sample));
+    if (envelope) update_channel_envelope(e, channel4);
+    apu_mix_sample(e, CHANNEL4, channelx_sample(channel4, sample),
+                   out_so1_sample, out_so2_sample);
   }
+}
 
-  so1_mixed_sample *= (apu->so1_volume + 1);
-  so1_mixed_sample /= ((SO1_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  so2_mixed_sample *= (apu->so2_volume + 1);
-  so2_mixed_sample /= ((SO2_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  write_sample(&e->audio_buffer, so1_mixed_sample, so2_mixed_sample);
+static void apu_update_channels(Emulator *e, Bool length, Bool envelope,
+                                Bool sweep) {
+  APU* apu = &e->state.apu;
+  u16 so1_sample = 0;
+  u16 so2_sample = 0;
+  apu_update_channel_1(e, length, envelope, sweep, &so1_sample, &so2_sample);
+  apu_update_channel_2(e, length, envelope, &so1_sample, &so2_sample);
+  apu_update_channel_3(e, length, &so1_sample, &so2_sample);
+  apu_update_channel_4(e, length, envelope, &so1_sample, &so2_sample);
+  so1_sample *= (apu->so1_volume + 1);
+  so1_sample /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  so2_sample *= (apu->so2_volume + 1);
+  so2_sample /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  write_sample(&e->audio_buffer, so1_sample, so2_sample);
+}
+
+static void apu_update(Emulator* e) {
+  e->state.apu.cycles += APU_CYCLES;
+  e->state.apu.frame_cycles += APU_CYCLES;
+  if (VALUE_WRAPPED(e->state.apu.frame_cycles, FRAME_SEQUENCER_CYCLES)) {
+    e->state.apu.frame++;
+    VALUE_WRAPPED(e->state.apu.frame, FRAME_SEQUENCER_COUNT);
+    switch (e->state.apu.frame) {
+      case 0: case 4: apu_update_channels(e, TRUE, FALSE, FALSE); return;
+      case 2: case 6: apu_update_channels(e, TRUE, FALSE, TRUE); return;
+      case 7: apu_update_channels(e, FALSE, TRUE, FALSE); return;
+    }
+  }
+  apu_update_channels(e, FALSE, FALSE, FALSE);
 }
 
 static void apu_mcycle(Emulator* e) {
