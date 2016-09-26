@@ -404,30 +404,29 @@ typedef u32 RGBA;
   V(CARTRIDGE_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                       \
   V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
 
-#define FOREACH_ROM_SIZE(V)        \
-  V(ROM_SIZE_32K, 0, 2, 0x1)       \
-  V(ROM_SIZE_64K, 1, 4, 0x3)       \
-  V(ROM_SIZE_128K, 2, 8, 0x7)      \
-  V(ROM_SIZE_256K, 3, 16, 0xf)     \
-  V(ROM_SIZE_512K, 4, 32, 0x1f)    \
-  V(ROM_SIZE_1M, 5, 64, 0x3f)      \
-  V(ROM_SIZE_2M, 6, 128, 0x7f)     \
-  V(ROM_SIZE_4M, 7, 256, 0xff)     \
+#define FOREACH_ROM_SIZE(V)     \
+  V(ROM_SIZE_32K, 0, 2, 0x1)    \
+  V(ROM_SIZE_64K, 1, 4, 0x3)    \
+  V(ROM_SIZE_128K, 2, 8, 0x7)   \
+  V(ROM_SIZE_256K, 3, 16, 0xf)  \
+  V(ROM_SIZE_512K, 4, 32, 0x1f) \
+  V(ROM_SIZE_1M, 5, 64, 0x3f)   \
+  V(ROM_SIZE_2M, 6, 128, 0x7f)  \
+  V(ROM_SIZE_4M, 7, 256, 0xff)  \
   V(ROM_SIZE_8M, 8, 512, 0x1ff)
 
-#define FOREACH_EXT_RAM_SIZE(V)                                                \
-  V(EXT_RAM_SIZE_NONE, 0, 0, 0)                                                \
-  V(EXT_RAM_SIZE_2K, 1, 2048, 0x7ff)                                           \
-  V(EXT_RAM_SIZE_8K, 2, 8192, 0x1fff)                                          \
-  V(EXT_RAM_SIZE_32K, 3, 32768, 0x7fff)                                        \
-  V(EXT_RAM_SIZE_128K, 4, 131072, 0x1ffff)                                     \
+#define FOREACH_EXT_RAM_SIZE(V)            \
+  V(EXT_RAM_SIZE_NONE, 0, 0, 0)            \
+  V(EXT_RAM_SIZE_2K, 1, 2048, 0x7ff)       \
+  V(EXT_RAM_SIZE_8K, 2, 8192, 0x1fff)      \
+  V(EXT_RAM_SIZE_32K, 3, 32768, 0x7fff)    \
+  V(EXT_RAM_SIZE_128K, 4, 131072, 0x1ffff) \
   V(EXT_RAM_SIZE_64K, 5, 65536, 0xffff)
 
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_STRING(name, code, ...) [code] = #name,
 
-static const char* get_enum_string(const char** strings,
-                                   size_t string_count,
+static const char* get_enum_string(const char** strings, size_t string_count,
                                    size_t value) {
   const char* result = value < string_count ? strings[value] : "unknown";
   return result ? result : "unknown";
@@ -637,10 +636,7 @@ typedef enum {
   OBJ_SIZE_8X8 = 0,
   OBJ_SIZE_8X16 = 1,
 } ObjSize;
-static u8 s_obj_size_to_height[] = {
-  [OBJ_SIZE_8X8] = 8,
-  [OBJ_SIZE_8X16] = 16,
-};
+static u8 s_obj_size_to_height[] = {[OBJ_SIZE_8X8] = 8, [OBJ_SIZE_8X16] = 16};
 
 typedef enum {
   PPU_MODE_HBLANK = 0, /* PPU mode 0 */
@@ -655,12 +651,10 @@ typedef enum {
   COLOR_DARK_GRAY = 2,
   COLOR_BLACK = 3,
 } Color;
-static RGBA s_color_to_rgba[] = {
-  [COLOR_WHITE] = RGBA_WHITE,
-  [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
-  [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
-  [COLOR_BLACK] = RGBA_BLACK,
-};
+static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
+                                 [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
+                                 [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
+                                 [COLOR_BLACK] = RGBA_BLACK};
 
 typedef enum {
   OBJ_PRIORITY_ABOVE_BG = 0,
@@ -769,9 +763,7 @@ typedef struct {
   u8 data[VIDEO_RAM_SIZE];
 } VideoRam;
 
-typedef struct {
-  Color color[PALETTE_COLOR_COUNT];
-} Palette;
+typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
 typedef struct {
   u8 y;
@@ -807,8 +799,8 @@ typedef struct {
   u8 TIMA;                 /* Incremented at rate defined by clock_select */
   u8 TMA;                  /* When TIMA overflows, it is set to this value */
   TimerClock clock_select; /* Select the rate of TIMA */
-  u16 DIV_counter;      /* Internal clock counter, upper 8 bits are DIV. */
-  TimaState TIMA_state; /* Used to implement TIMA overflow delay. */
+  u16 DIV_counter;         /* Internal clock counter, upper 8 bits are DIV. */
+  TimaState TIMA_state;    /* Used to implement TIMA overflow delay. */
   Bool on;
 } Timer;
 
@@ -1057,8 +1049,7 @@ static Result read_rom_data_from_file(const char* filename,
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
-static void get_rom_title(RomData* rom_data,
-                          const char** out_title_start,
+static void get_rom_title(RomData* rom_data, const char** out_title_start,
                           size_t* out_title_length) {
   const char* start = (char*)rom_data->data + TITLE_START_ADDR;
   const char* end = start + TITLE_END_ADDR;
@@ -1146,8 +1137,7 @@ static u8 gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
   return e->state.ram.data[0x1000 + addr];
 }
 
-static void gb_write_work_ram_bank_switch(Emulator* e,
-                                          MaskedAddress addr,
+static void gb_write_work_ram_bank_switch(Emulator* e, MaskedAddress addr,
                                           u8 value) {
   assert(addr <= ADDR_MASK_4K);
   e->state.ram.data[0x1000 + addr] = value;
@@ -1216,9 +1206,7 @@ static u8 gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
   }
 }
 
-static void gb_write_ext_ram(Emulator* e,
-                                  MaskedAddress addr,
-                                  u8 value) {
+static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
   if (e->state.memory_map_state.ext_ram_enabled) {
     e->state.ext_ram.data[get_ext_ram_address(e, addr)] = value;
   } else {
@@ -1949,9 +1937,7 @@ static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 }
 
-static void write_oam_no_mode_check(Emulator* e,
-                                    MaskedAddress addr,
-                                    u8 value) {
+static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
   Obj* obj = &e->state.oam[addr >> 2];
   switch (addr & 3) {
     case 0: obj->y = value - OBJ_Y_OFFSET; break;
@@ -2289,9 +2275,7 @@ static void write_nrx3_reg(Emulator* e, Channel* channel, u8 value) {
 }
 
 /* Returns TRUE if this channel was triggered. */
-static Bool write_nrx4_reg(Emulator* e,
-                           Channel* channel,
-                           u8 value,
+static Bool write_nrx4_reg(Emulator* e, Channel* channel, u8 value,
                            u16 max_length) {
   Bool trigger = WRITE_REG(value, NRX4_INITIAL);
   Bool was_length_enabled = channel->length_enabled;
@@ -2995,12 +2979,11 @@ static void update_channel_sweep(Channel* channel, Sweep* sweep) {
 }
 
 static u8 update_square_wave(Channel* channel, SquareWave* wave) {
-  static u8 duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] = {
-          [WAVE_DUTY_12_5] = {0, 0, 0, 0, 0, 0, 0, 1},
-          [WAVE_DUTY_25] = {1, 0, 0, 0, 0, 0, 0, 1},
-          [WAVE_DUTY_50] = {1, 0, 0, 0, 0, 1, 1, 1},
-          [WAVE_DUTY_75] = {0, 1, 1, 1, 1, 1, 1, 0},
-  };
+  static u8 duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] =
+      {[WAVE_DUTY_12_5] = {0, 0, 0, 0, 0, 0, 0, 1},
+       [WAVE_DUTY_25] = {1, 0, 0, 0, 0, 0, 0, 1},
+       [WAVE_DUTY_50] = {1, 0, 0, 0, 0, 1, 1, 1},
+       [WAVE_DUTY_75] = {0, 1, 1, 1, 1, 1, 1, 0}};
 
   if (wave->cycles <= APU_CYCLES) {
     wave->cycles += wave->period;
@@ -3112,11 +3095,10 @@ static void apu_mix_sample(Emulator *e, int channel, u8 sample,
 static void apu_update_channel_1(Emulator *e, Bool length, Bool envelope,
                                  Bool sweep, u16 *out_so1_sample,
                                  u16 *out_so2_sample) {
-  APU* apu = &e->state.apu;
-  Channel* channel1 = &apu->channel[CHANNEL1];
+  Channel* channel1 = &e->state.apu.channel[CHANNEL1];
   u8 sample = 0;
   if (channel1->status) {
-    if (sweep) update_channel_sweep(channel1, &apu->sweep);
+    if (sweep) update_channel_sweep(channel1, &e->state.apu.sweep);
     sample = update_square_wave(channel1, &channel1->square_wave);
   }
   if (length) update_channel_length(channel1);
@@ -3129,8 +3111,7 @@ static void apu_update_channel_1(Emulator *e, Bool length, Bool envelope,
 
 static void apu_update_channel_2(Emulator *e, Bool length, Bool envelope,
                                  u16 *out_so1_sample, u16 *out_so2_sample) {
-  APU* apu = &e->state.apu;
-  Channel* channel2 = &apu->channel[CHANNEL2];
+  Channel* channel2 = &e->state.apu.channel[CHANNEL2];
   u8 sample = 0;
   if (channel2->status) {
     sample = update_square_wave(channel2, &channel2->square_wave);
@@ -3145,26 +3126,25 @@ static void apu_update_channel_2(Emulator *e, Bool length, Bool envelope,
 
 static void apu_update_channel_3(Emulator *e, Bool length, u16 *out_so1_sample,
                                  u16 *out_so2_sample) {
-  APU* apu = &e->state.apu;
-  Channel* channel3 = &apu->channel[CHANNEL3];
+  Channel* channel3 = &e->state.apu.channel[CHANNEL3];
   u8 sample = 0;
   if (channel3->status) {
-    sample = update_wave(apu, &apu->wave);
+    sample = update_wave(&e->state.apu, &e->state.apu.wave);
   }
   if (length) update_channel_length(channel3);
   if (channel3->status) {
-    apu_mix_sample(e, CHANNEL3, channel3_sample(channel3, &apu->wave, sample),
+    apu_mix_sample(e, CHANNEL3,
+                   channel3_sample(channel3, &e->state.apu.wave, sample),
                    out_so1_sample, out_so2_sample);
   }
 }
 
 static void apu_update_channel_4(Emulator *e, Bool length, Bool envelope,
                                  u16 *out_so1_sample, u16 *out_so2_sample) {
-  APU* apu = &e->state.apu;
-  Channel* channel4 = &apu->channel[CHANNEL4];
+  Channel* channel4 = &e->state.apu.channel[CHANNEL4];
   u8 sample = 0;
   if (channel4->status) {
-    sample = update_noise(apu, &apu->noise);
+    sample = update_noise(&e->state.apu, &e->state.apu.noise);
   }
   if (length) update_channel_length(channel4);
   if (channel4->status) {
@@ -3176,16 +3156,15 @@ static void apu_update_channel_4(Emulator *e, Bool length, Bool envelope,
 
 static void apu_update_channels(Emulator *e, Bool length, Bool envelope,
                                 Bool sweep) {
-  APU* apu = &e->state.apu;
   u16 so1_sample = 0;
   u16 so2_sample = 0;
   apu_update_channel_1(e, length, envelope, sweep, &so1_sample, &so2_sample);
   apu_update_channel_2(e, length, envelope, &so1_sample, &so2_sample);
   apu_update_channel_3(e, length, &so1_sample, &so2_sample);
   apu_update_channel_4(e, length, envelope, &so1_sample, &so2_sample);
-  so1_sample *= (apu->so1_volume + 1);
+  so1_sample *= (e->state.apu.so1_volume + 1);
   so1_sample /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  so2_sample *= (apu->so2_volume + 1);
+  so2_sample *= (e->state.apu.so2_volume + 1);
   so2_sample /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
   write_sample(&e->audio_buffer, so1_sample, so2_sample);
 }
