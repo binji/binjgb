@@ -73,6 +73,7 @@ typedef double f64;
 typedef u16 Address;
 typedef u16 MaskedAddress;
 typedef u32 RGBA;
+typedef enum { FALSE = 0, TRUE = 1 } Bool;
 
 /* Configurable constants */
 #define RGBA_WHITE 0xffffffffu
@@ -260,36 +261,35 @@ typedef u32 RGBA;
 
 #define INVALID_READ_BYTE 0xff
 
-#define WRITE_REG(X, MACRO) MACRO(X, DECODE)
-#define READ_REG(X, MACRO) MACRO(X, ENCODE)
-#define BITS_MASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
-#define ENCODE(X, HI, LO) (((X) & BITS_MASK(HI, LO)) << (LO))
-#define DECODE(X, HI, LO) (((X) >> (LO)) & BITS_MASK(HI, LO))
-#define BITS(X, OP, HI, LO) OP(X, HI, LO)
-#define BIT(X, OP, B) OP(X, B, B)
+#define GET_LO(HI, LO) (LO)
+#define GET_BITMASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
+#define UNPACK(X, BITS) (((X) >> BITS(GET_LO)) & BITS(GET_BITMASK))
+#define PACK(X, BITS) (((X) & BITS(GET_BITMASK)) << BITS(GET_LO))
+#define BITS(X, HI, LO) X(HI, LO)
+#define BIT(X, B) X(B, B)
 
-#define CPU_FLAG_Z(X, OP) BIT(X, OP, 7)
-#define CPU_FLAG_N(X, OP) BIT(X, OP, 6)
-#define CPU_FLAG_H(X, OP) BIT(X, OP, 5)
-#define CPU_FLAG_C(X, OP) BIT(X, OP, 4)
+#define CPU_FLAG_Z(X) BIT(X, 7)
+#define CPU_FLAG_N(X) BIT(X, 6)
+#define CPU_FLAG_H(X) BIT(X, 5)
+#define CPU_FLAG_C(X) BIT(X, 4)
 
 #define JOYP_UNUSED 0xc0
 #define JOYP_RESULT_MASK 0x0f
-#define JOYP_JOYPAD_SELECT(X, OP) BITS(X, OP, 5, 4)
-#define JOYP_DPAD_DOWN(X, OP) BIT(X, OP, 3)
-#define JOYP_DPAD_UP(X, OP) BIT(X, OP, 2)
-#define JOYP_DPAD_LEFT(X, OP) BIT(X, OP, 1)
-#define JOYP_DPAD_RIGHT(X, OP) BIT(X, OP, 0)
-#define JOYP_BUTTON_START(X, OP) BIT(X, OP, 3)
-#define JOYP_BUTTON_SELECT(X, OP) BIT(X, OP, 2)
-#define JOYP_BUTTON_B(X, OP) BIT(X, OP, 1)
-#define JOYP_BUTTON_A(X, OP) BIT(X, OP, 0)
+#define JOYP_JOYPAD_SELECT(X) BITS(X, 5, 4)
+#define JOYP_DPAD_DOWN(X) BIT(X, 3)
+#define JOYP_DPAD_UP(X) BIT(X, 2)
+#define JOYP_DPAD_LEFT(X) BIT(X, 1)
+#define JOYP_DPAD_RIGHT(X) BIT(X, 0)
+#define JOYP_BUTTON_START(X) BIT(X, 3)
+#define JOYP_BUTTON_SELECT(X) BIT(X, 2)
+#define JOYP_BUTTON_B(X) BIT(X, 1)
+#define JOYP_BUTTON_A(X) BIT(X, 0)
 #define SC_UNUSED 0x7e
-#define SC_TRANSFER_START(X, OP) BIT(X, OP, 7)
-#define SC_SHIFT_CLOCK(X, OP) BIT(X, OP, 0)
+#define SC_TRANSFER_START(X) BIT(X, 7)
+#define SC_SHIFT_CLOCK(X) BIT(X, 0)
 #define TAC_UNUSED 0xf8
-#define TAC_TIMER_ON(X, OP) BIT(X, OP, 2)
-#define TAC_CLOCK_SELECT(X, OP) BITS(X, OP, 1, 0)
+#define TAC_TIMER_ON(X) BIT(X, 2)
+#define TAC_CLOCK_SELECT(X) BITS(X, 1, 0)
 #define IF_UNUSED 0xe0
 #define IF_ALL 0x1f
 #define IF_JOYPAD 0x10
@@ -297,63 +297,63 @@ typedef u32 RGBA;
 #define IF_TIMER 0x04
 #define IF_STAT 0x02
 #define IF_VBLANK 0x01
-#define LCDC_DISPLAY(X, OP) BIT(X, OP, 7)
-#define LCDC_WINDOW_TILE_MAP_SELECT(X, OP) BIT(X, OP, 6)
-#define LCDC_WINDOW_DISPLAY(X, OP) BIT(X, OP, 5)
-#define LCDC_BG_TILE_DATA_SELECT(X, OP) BIT(X, OP, 4)
-#define LCDC_BG_TILE_MAP_SELECT(X, OP) BIT(X, OP, 3)
-#define LCDC_OBJ_SIZE(X, OP) BIT(X, OP, 2)
-#define LCDC_OBJ_DISPLAY(X, OP) BIT(X, OP, 1)
-#define LCDC_BG_DISPLAY(X, OP) BIT(X, OP, 0)
+#define LCDC_DISPLAY(X) BIT(X, 7)
+#define LCDC_WINDOW_TILE_MAP_SELECT(X) BIT(X, 6)
+#define LCDC_WINDOW_DISPLAY(X) BIT(X, 5)
+#define LCDC_BG_TILE_DATA_SELECT(X) BIT(X, 4)
+#define LCDC_BG_TILE_MAP_SELECT(X) BIT(X, 3)
+#define LCDC_OBJ_SIZE(X) BIT(X, 2)
+#define LCDC_OBJ_DISPLAY(X) BIT(X, 1)
+#define LCDC_BG_DISPLAY(X) BIT(X, 0)
 #define STAT_UNUSED 0x80
-#define STAT_YCOMPARE_INTR(X, OP) BIT(X, OP, 6)
-#define STAT_MODE2_INTR(X, OP) BIT(X, OP, 5)
-#define STAT_VBLANK_INTR(X, OP) BIT(X, OP, 4)
-#define STAT_HBLANK_INTR(X, OP) BIT(X, OP, 3)
-#define STAT_YCOMPARE(X, OP) BIT(X, OP, 2)
-#define STAT_MODE(X, OP) BITS(X, OP, 1, 0)
-#define PALETTE_COLOR3(X, OP) BITS(X, OP, 7, 6)
-#define PALETTE_COLOR2(X, OP) BITS(X, OP, 5, 4)
-#define PALETTE_COLOR1(X, OP) BITS(X, OP, 3, 2)
-#define PALETTE_COLOR0(X, OP) BITS(X, OP, 1, 0)
-#define NR10_SWEEP_PERIOD(X, OP) BITS(X, OP, 6, 4)
-#define NR10_SWEEP_DIRECTION(X, OP) BIT(X, OP, 3)
-#define NR10_SWEEP_SHIFT(X, OP) BITS(X, OP, 2, 0)
-#define NRX1_WAVE_DUTY(X, OP) BITS(X, OP, 7, 6)
-#define NRX1_LENGTH(X, OP) BITS(X, OP, 5, 0)
-#define NRX2_INITIAL_VOLUME(X, OP) BITS(X, OP, 7, 4)
-#define NRX2_DAC_ENABLED(X, OP) BITS(X, OP, 7, 3)
-#define NRX2_ENVELOPE_DIRECTION(X, OP) BIT(X, OP, 3)
-#define NRX2_ENVELOPE_PERIOD(X, OP) BITS(X, OP, 2, 0)
-#define NRX4_INITIAL(X, OP) BIT(X, OP, 7)
-#define NRX4_LENGTH_ENABLED(X, OP) BIT(X, OP, 6)
-#define NRX4_FREQUENCY_HI(X, OP) BITS(X, OP, 2, 0)
-#define NR30_DAC_ENABLED(X, OP) BIT(X, OP, 7)
-#define NR32_SELECT_WAVE_VOLUME(X, OP) BITS(X, OP, 6, 5)
-#define NR43_CLOCK_SHIFT(X, OP) BITS(X, OP, 7, 4)
-#define NR43_LFSR_WIDTH(X, OP) BIT(X, OP, 3)
-#define NR43_DIVISOR(X, OP) BITS(X, OP, 2, 0)
-#define OBJ_PRIORITY(X, OP) BIT(X, OP, 7)
-#define OBJ_YFLIP(X, OP) BIT(X, OP, 6)
-#define OBJ_XFLIP(X, OP) BIT(X, OP, 5)
-#define OBJ_PALETTE(X, OP) BIT(X, OP, 4)
-#define NR50_VIN_SO2(X, OP) BIT(X, OP, 7)
-#define NR50_SO2_VOLUME(X, OP) BITS(X, OP, 6, 4)
-#define NR50_VIN_SO1(X, OP) BIT(X, OP, 3)
-#define NR50_SO1_VOLUME(X, OP) BITS(X, OP, 2, 0)
-#define NR51_SOUND4_SO2(X, OP) BIT(X, OP, 7)
-#define NR51_SOUND3_SO2(X, OP) BIT(X, OP, 6)
-#define NR51_SOUND2_SO2(X, OP) BIT(X, OP, 5)
-#define NR51_SOUND1_SO2(X, OP) BIT(X, OP, 4)
-#define NR51_SOUND4_SO1(X, OP) BIT(X, OP, 3)
-#define NR51_SOUND3_SO1(X, OP) BIT(X, OP, 2)
-#define NR51_SOUND2_SO1(X, OP) BIT(X, OP, 1)
-#define NR51_SOUND1_SO1(X, OP) BIT(X, OP, 0)
-#define NR52_ALL_SOUND_ENABLED(X, OP) BIT(X, OP, 7)
-#define NR52_SOUND4_ON(X, OP) BIT(X, OP, 3)
-#define NR52_SOUND3_ON(X, OP) BIT(X, OP, 2)
-#define NR52_SOUND2_ON(X, OP) BIT(X, OP, 1)
-#define NR52_SOUND1_ON(X, OP) BIT(X, OP, 0)
+#define STAT_YCOMPARE_INTR(X) BIT(X, 6)
+#define STAT_MODE2_INTR(X) BIT(X, 5)
+#define STAT_VBLANK_INTR(X) BIT(X, 4)
+#define STAT_HBLANK_INTR(X) BIT(X, 3)
+#define STAT_YCOMPARE(X) BIT(X, 2)
+#define STAT_MODE(X) BITS(X, 1, 0)
+#define PALETTE_COLOR3(X) BITS(X, 7, 6)
+#define PALETTE_COLOR2(X) BITS(X, 5, 4)
+#define PALETTE_COLOR1(X) BITS(X, 3, 2)
+#define PALETTE_COLOR0(X) BITS(X, 1, 0)
+#define NR10_SWEEP_PERIOD(X) BITS(X, 6, 4)
+#define NR10_SWEEP_DIRECTION(X) BIT(X, 3)
+#define NR10_SWEEP_SHIFT(X) BITS(X, 2, 0)
+#define NRX1_WAVE_DUTY(X) BITS(X, 7, 6)
+#define NRX1_LENGTH(X) BITS(X, 5, 0)
+#define NRX2_INITIAL_VOLUME(X) BITS(X, 7, 4)
+#define NRX2_DAC_ENABLED(X) BITS(X, 7, 3)
+#define NRX2_ENVELOPE_DIRECTION(X) BIT(X, 3)
+#define NRX2_ENVELOPE_PERIOD(X) BITS(X, 2, 0)
+#define NRX4_INITIAL(X) BIT(X, 7)
+#define NRX4_LENGTH_ENABLED(X) BIT(X, 6)
+#define NRX4_FREQUENCY_HI(X) BITS(X, 2, 0)
+#define NR30_DAC_ENABLED(X) BIT(X, 7)
+#define NR32_SELECT_WAVE_VOLUME(X) BITS(X, 6, 5)
+#define NR43_CLOCK_SHIFT(X) BITS(X, 7, 4)
+#define NR43_LFSR_WIDTH(X) BIT(X, 3)
+#define NR43_DIVISOR(X) BITS(X, 2, 0)
+#define OBJ_PRIORITY(X) BIT(X, 7)
+#define OBJ_YFLIP(X) BIT(X, 6)
+#define OBJ_XFLIP(X) BIT(X, 5)
+#define OBJ_PALETTE(X) BIT(X, 4)
+#define NR50_VIN_SO2(X) BIT(X, 7)
+#define NR50_SO2_VOLUME(X) BITS(X, 6, 4)
+#define NR50_VIN_SO1(X) BIT(X, 3)
+#define NR50_SO1_VOLUME(X) BITS(X, 2, 0)
+#define NR51_SOUND4_SO2(X) BIT(X, 7)
+#define NR51_SOUND3_SO2(X) BIT(X, 6)
+#define NR51_SOUND2_SO2(X) BIT(X, 5)
+#define NR51_SOUND1_SO2(X) BIT(X, 4)
+#define NR51_SOUND4_SO1(X) BIT(X, 3)
+#define NR51_SOUND3_SO1(X) BIT(X, 2)
+#define NR51_SOUND2_SO1(X) BIT(X, 1)
+#define NR51_SOUND1_SO1(X) BIT(X, 0)
+#define NR52_ALL_SOUND_ENABLED(X) BIT(X, 7)
+#define NR52_SOUND4_ON(X) BIT(X, 3)
+#define NR52_SOUND3_ON(X) BIT(X, 2)
+#define NR52_SOUND2_ON(X) BIT(X, 1)
+#define NR52_SOUND1_ON(X) BIT(X, 0)
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -424,6 +424,8 @@ typedef u32 RGBA;
   V(EXT_RAM_SIZE_64K, 5, 65536, 0xffff)
 
 #define DEFINE_ENUM(name, code, ...) name = code,
+#define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
+#define DEFINE_APU_REG_ENUM(name, code, ...) APU_##name##_ADDR = code,
 #define DEFINE_STRING(name, code, ...) [code] = #name,
 
 static const char* get_enum_string(const char** strings, size_t string_count,
@@ -432,38 +434,26 @@ static const char* get_enum_string(const char** strings, size_t string_count,
   return result ? result : "unknown";
 }
 
-#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach)                           \
-  typedef enum { foreach (DEFINE_ENUM) NAME##_COUNT } Name;                    \
-  static Result is_##name##_valid(Name value) { return value < NAME##_COUNT; } \
-  static const char* get_##name##_string(Name value) {                         \
-    static const char* s_strings[] = {foreach (DEFINE_STRING)};                \
-    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value);           \
+#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach, enum_def)               \
+  typedef enum { foreach (enum_def) NAME##_COUNT } Name;                     \
+  static Bool is_##name##_valid(Name value) { return value < NAME##_COUNT; } \
+  static const char* get_##name##_string(Name value) {                       \
+    static const char* s_strings[] = {foreach (DEFINE_STRING)};              \
+    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value);         \
   }
 
-DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT)
-DEFINE_NAMED_ENUM(BOOL, Bool, bool, FOREACH_BOOL)
-DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG)
-DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG)
+DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT, DEFINE_ENUM)
+DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG, DEFINE_ENUM)
+DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(CARTRIDGE_TYPE, CartridgeType, cartridge_type,
-                  FOREACH_CARTRIDGE_TYPE)
-DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE)
-DEFINE_NAMED_ENUM(EXT_RAM_SIZE, ExtRamSize, ext_ram_size, FOREACH_EXT_RAM_SIZE)
+                  FOREACH_CARTRIDGE_TYPE, DEFINE_ENUM)
+DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE, DEFINE_ENUM)
+DEFINE_NAMED_ENUM(EXT_RAM_SIZE, ExtRamSize, ext_ram_size, FOREACH_EXT_RAM_SIZE,
+                  DEFINE_ENUM)
+DEFINE_NAMED_ENUM(IO, IOReg, io_reg, FOREACH_IO_REG, DEFINE_IO_REG_ENUM)
+DEFINE_NAMED_ENUM(APU, APUReg, apu_reg, FOREACH_APU_REG, DEFINE_APU_REG_ENUM)
 
-#define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
-#define DEFINE_APU_REG_ENUM(name, code, ...) APU_##name##_ADDR = code,
-
-#define DEFINE_NAMED_REG(NAME, Name, name, foreach, enum_def)        \
-  typedef enum { foreach (enum_def) NAME##_REG_COUNT } Name;         \
-  static Result is_##name##_valid(Name value) {                      \
-    return value < NAME##_REG_COUNT;                                 \
-  }                                                                  \
-  static const char* get_##name##_string(Name value) {               \
-    static const char* s_strings[] = {foreach (DEFINE_STRING)};      \
-    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
-  }
-
-DEFINE_NAMED_REG(IO, IOReg, io_reg, FOREACH_IO_REG, DEFINE_IO_REG_ENUM)
-DEFINE_NAMED_REG(APU, APUReg, apu_reg, FOREACH_APU_REG, DEFINE_APU_REG_ENUM)
+#define APU_REG_COUNT APU_COUNT
 
 static u32 s_rom_bank_count[] = {
 #define V(name, code, bank_count, bank_mask) [code] = bank_count,
@@ -691,10 +681,6 @@ typedef struct {
   CartridgeType cartridge_type;
   RomSize rom_size;
   ExtRamSize ext_ram_size;
-  u8 header_checksum;
-  u16 global_checksum;
-  Result header_checksum_valid;
-  Result global_checksum_valid;
 } RomInfo;
 
 struct Emulator;
@@ -1087,8 +1073,7 @@ static Result validate_global_checksum(RomData* rom_data) {
 
 static u32 get_rom_byte_size(RomSize rom_size) {
   assert(is_rom_size_valid(rom_size));
-  u32 rom_bank_count = s_rom_bank_count[rom_size];
-  return rom_bank_count << ROM_BANK_SHIFT;
+  return s_rom_bank_count[rom_size] << ROM_BANK_SHIFT;
 }
 
 static Result get_rom_info(RomData* rom_data, RomInfo* rom_info) {
@@ -1107,8 +1092,8 @@ static Result get_rom_info(RomData* rom_data, RomInfo* rom_info) {
   rom_info->ext_ram_size = ROM_U8(ExtRamSize, EXT_RAM_SIZE_ADDR);
   CHECK_MSG(is_ext_ram_size_valid(rom_info->ext_ram_size),
             "Invalid ext ram size: %u\n", rom_info->ext_ram_size);
-  rom_info->header_checksum = ROM_U8(u8, HEADER_CHECKSUM_ADDR);
-  rom_info->global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
+  u8 header_checksum = ROM_U8(u8, HEADER_CHECKSUM_ADDR);
+  u16 global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
 
   LOG("title: \"%.*s\"\n", (int)rom_info->title_length, rom_info->title_start);
   LOG("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
@@ -1117,9 +1102,9 @@ static Result get_rom_info(RomData* rom_data, RomInfo* rom_info) {
       get_cartridge_type_string(rom_info->cartridge_type));
   LOG("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
   LOG("ext ram size: %s\n", get_ext_ram_size_string(rom_info->ext_ram_size));
-  LOG("header checksum: 0x%02x [%s]\n", rom_info->header_checksum,
+  LOG("header checksum: 0x%02x [%s]\n", header_checksum,
       get_result_string(validate_header_checksum(rom_data)));
-  LOG("global checksum: 0x%04x [%s]\n", rom_info->global_checksum,
+  LOG("global checksum: 0x%04x [%s]\n", global_checksum,
       get_result_string(validate_global_checksum(rom_data)));
   return OK;
 error:
@@ -1409,17 +1394,17 @@ static Result init_memory_map(Emulator* e) {
 }
 
 static u16 get_af_reg(Registers* reg) {
-  return (reg->A << 8) | READ_REG(reg->F.Z, CPU_FLAG_Z) |
-         READ_REG(reg->F.N, CPU_FLAG_N) | READ_REG(reg->F.H, CPU_FLAG_H) |
-         READ_REG(reg->F.C, CPU_FLAG_C);
+  return (reg->A << 8) | PACK(reg->F.Z, CPU_FLAG_Z) |
+         PACK(reg->F.N, CPU_FLAG_N) | PACK(reg->F.H, CPU_FLAG_H) |
+         PACK(reg->F.C, CPU_FLAG_C);
 }
 
 static void set_af_reg(Registers* reg, u16 af) {
   reg->A = af >> 8;
-  reg->F.Z = WRITE_REG(af, CPU_FLAG_Z);
-  reg->F.N = WRITE_REG(af, CPU_FLAG_N);
-  reg->F.H = WRITE_REG(af, CPU_FLAG_H);
-  reg->F.C = WRITE_REG(af, CPU_FLAG_C);
+  reg->F.Z = UNPACK(af, CPU_FLAG_Z);
+  reg->F.N = UNPACK(af, CPU_FLAG_N);
+  reg->F.H = UNPACK(af, CPU_FLAG_H);
+  reg->F.C = UNPACK(af, CPU_FLAG_C);
 }
 
 static Result init_emulator(Emulator* e) {
@@ -1574,10 +1559,10 @@ static u8 read_joyp_p10_p13(Emulator* e) {
   u8 result = 0;
   if (e->state.JOYP.joypad_select == JOYPAD_SELECT_BUTTONS ||
       e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
-    result |= READ_REG(e->state.JOYP.start, JOYP_BUTTON_START) |
-              READ_REG(e->state.JOYP.select, JOYP_BUTTON_SELECT) |
-              READ_REG(e->state.JOYP.B, JOYP_BUTTON_B) |
-              READ_REG(e->state.JOYP.A, JOYP_BUTTON_A);
+    result |= PACK(e->state.JOYP.start, JOYP_BUTTON_START) |
+              PACK(e->state.JOYP.select, JOYP_BUTTON_SELECT) |
+              PACK(e->state.JOYP.B, JOYP_BUTTON_B) |
+              PACK(e->state.JOYP.A, JOYP_BUTTON_A);
   }
 
   Bool left = e->state.JOYP.left;
@@ -1594,8 +1579,8 @@ static u8 read_joyp_p10_p13(Emulator* e) {
 
   if (e->state.JOYP.joypad_select == JOYPAD_SELECT_DPAD ||
       e->state.JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
-    result |= READ_REG(down, JOYP_DPAD_DOWN) | READ_REG(up, JOYP_DPAD_UP) |
-              READ_REG(left, JOYP_DPAD_LEFT) | READ_REG(right, JOYP_DPAD_RIGHT);
+    result |= PACK(down, JOYP_DPAD_DOWN) | PACK(up, JOYP_DPAD_UP) |
+              PACK(left, JOYP_DPAD_LEFT) | PACK(right, JOYP_DPAD_RIGHT);
   }
   /* The bits are low when the buttons are pressed. */
   return ~result;
@@ -1605,14 +1590,13 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR:
       return JOYP_UNUSED |
-             READ_REG(e->state.JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
+             PACK(e->state.JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
              (read_joyp_p10_p13(e) & JOYP_RESULT_MASK);
     case IO_SB_ADDR:
       return e->state.serial.SB;
     case IO_SC_ADDR:
-      return SC_UNUSED |
-             READ_REG(e->state.serial.transferring, SC_TRANSFER_START) |
-             READ_REG(e->state.serial.clock, SC_SHIFT_CLOCK);
+      return SC_UNUSED | PACK(e->state.serial.transferring, SC_TRANSFER_START) |
+             PACK(e->state.serial.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
       return e->state.timer.DIV_counter >> 8;
     case IO_TIMA_ADDR:
@@ -1620,30 +1604,30 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_TMA_ADDR:
       return e->state.timer.TMA;
     case IO_TAC_ADDR:
-      return TAC_UNUSED | READ_REG(e->state.timer.on, TAC_TIMER_ON) |
-             READ_REG(e->state.timer.clock_select, TAC_CLOCK_SELECT);
+      return TAC_UNUSED | PACK(e->state.timer.on, TAC_TIMER_ON) |
+             PACK(e->state.timer.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
       return IF_UNUSED | e->state.interrupt.IF;
     case IO_LCDC_ADDR:
-      return READ_REG(e->state.ppu.LCDC.display, LCDC_DISPLAY) |
-             READ_REG(e->state.ppu.LCDC.window_tile_map_select,
-                      LCDC_WINDOW_TILE_MAP_SELECT) |
-             READ_REG(e->state.ppu.LCDC.window_display, LCDC_WINDOW_DISPLAY) |
-             READ_REG(e->state.ppu.LCDC.bg_tile_data_select,
-                      LCDC_BG_TILE_DATA_SELECT) |
-             READ_REG(e->state.ppu.LCDC.bg_tile_map_select,
-                      LCDC_BG_TILE_MAP_SELECT) |
-             READ_REG(e->state.ppu.LCDC.obj_size, LCDC_OBJ_SIZE) |
-             READ_REG(e->state.ppu.LCDC.obj_display, LCDC_OBJ_DISPLAY) |
-             READ_REG(e->state.ppu.LCDC.bg_display, LCDC_BG_DISPLAY);
+      return PACK(e->state.ppu.LCDC.display, LCDC_DISPLAY) |
+             PACK(e->state.ppu.LCDC.window_tile_map_select,
+                  LCDC_WINDOW_TILE_MAP_SELECT) |
+             PACK(e->state.ppu.LCDC.window_display, LCDC_WINDOW_DISPLAY) |
+             PACK(e->state.ppu.LCDC.bg_tile_data_select,
+                  LCDC_BG_TILE_DATA_SELECT) |
+             PACK(e->state.ppu.LCDC.bg_tile_map_select,
+                  LCDC_BG_TILE_MAP_SELECT) |
+             PACK(e->state.ppu.LCDC.obj_size, LCDC_OBJ_SIZE) |
+             PACK(e->state.ppu.LCDC.obj_display, LCDC_OBJ_DISPLAY) |
+             PACK(e->state.ppu.LCDC.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
       return STAT_UNUSED |
-             READ_REG(e->state.ppu.STAT.y_compare.irq, STAT_YCOMPARE_INTR) |
-             READ_REG(e->state.ppu.STAT.mode2.irq, STAT_MODE2_INTR) |
-             READ_REG(e->state.ppu.STAT.vblank.irq, STAT_VBLANK_INTR) |
-             READ_REG(e->state.ppu.STAT.hblank.irq, STAT_HBLANK_INTR) |
-             READ_REG(e->state.ppu.STAT.LY_eq_LYC, STAT_YCOMPARE) |
-             READ_REG(e->state.ppu.STAT.mode, STAT_MODE);
+             PACK(e->state.ppu.STAT.y_compare.irq, STAT_YCOMPARE_INTR) |
+             PACK(e->state.ppu.STAT.mode2.irq, STAT_MODE2_INTR) |
+             PACK(e->state.ppu.STAT.vblank.irq, STAT_VBLANK_INTR) |
+             PACK(e->state.ppu.STAT.hblank.irq, STAT_HBLANK_INTR) |
+             PACK(e->state.ppu.STAT.LY_eq_LYC, STAT_YCOMPARE) |
+             PACK(e->state.ppu.STAT.mode, STAT_MODE);
     case IO_SCY_ADDR:
       return e->state.ppu.SCY;
     case IO_SCX_ADDR:
@@ -1655,20 +1639,20 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_DMA_ADDR:
       return INVALID_READ_BYTE; /* Write only. */
     case IO_BGP_ADDR:
-      return READ_REG(e->state.ppu.BGP.color[3], PALETTE_COLOR3) |
-             READ_REG(e->state.ppu.BGP.color[2], PALETTE_COLOR2) |
-             READ_REG(e->state.ppu.BGP.color[1], PALETTE_COLOR1) |
-             READ_REG(e->state.ppu.BGP.color[0], PALETTE_COLOR0);
+      return PACK(e->state.ppu.BGP.color[3], PALETTE_COLOR3) |
+             PACK(e->state.ppu.BGP.color[2], PALETTE_COLOR2) |
+             PACK(e->state.ppu.BGP.color[1], PALETTE_COLOR1) |
+             PACK(e->state.ppu.BGP.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return READ_REG(e->state.ppu.OBP[0].color[3], PALETTE_COLOR3) |
-             READ_REG(e->state.ppu.OBP[0].color[2], PALETTE_COLOR2) |
-             READ_REG(e->state.ppu.OBP[0].color[1], PALETTE_COLOR1) |
-             READ_REG(e->state.ppu.OBP[0].color[0], PALETTE_COLOR0);
+      return PACK(e->state.ppu.OBP[0].color[3], PALETTE_COLOR3) |
+             PACK(e->state.ppu.OBP[0].color[2], PALETTE_COLOR2) |
+             PACK(e->state.ppu.OBP[0].color[1], PALETTE_COLOR1) |
+             PACK(e->state.ppu.OBP[0].color[0], PALETTE_COLOR0);
     case IO_OBP1_ADDR:
-      return READ_REG(e->state.ppu.OBP[1].color[3], PALETTE_COLOR3) |
-             READ_REG(e->state.ppu.OBP[1].color[2], PALETTE_COLOR2) |
-             READ_REG(e->state.ppu.OBP[1].color[1], PALETTE_COLOR1) |
-             READ_REG(e->state.ppu.OBP[1].color[0], PALETTE_COLOR0);
+      return PACK(e->state.ppu.OBP[1].color[3], PALETTE_COLOR3) |
+             PACK(e->state.ppu.OBP[1].color[2], PALETTE_COLOR2) |
+             PACK(e->state.ppu.OBP[1].color[1], PALETTE_COLOR1) |
+             PACK(e->state.ppu.OBP[1].color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
       return e->state.ppu.WY;
     case IO_WX_ADDR:
@@ -1683,17 +1667,17 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
 }
 
 static u8 read_nrx1_reg(Channel* channel) {
-  return READ_REG(channel->square_wave.duty, NRX1_WAVE_DUTY);
+  return PACK(channel->square_wave.duty, NRX1_WAVE_DUTY);
 }
 
 static u8 read_nrx2_reg(Channel* channel) {
-  return READ_REG(channel->envelope.initial_volume, NRX2_INITIAL_VOLUME) |
-         READ_REG(channel->envelope.direction, NRX2_ENVELOPE_DIRECTION) |
-         READ_REG(channel->envelope.period, NRX2_ENVELOPE_PERIOD);
+  return PACK(channel->envelope.initial_volume, NRX2_INITIAL_VOLUME) |
+         PACK(channel->envelope.direction, NRX2_ENVELOPE_DIRECTION) |
+         PACK(channel->envelope.period, NRX2_ENVELOPE_PERIOD);
 }
 
 static u8 read_nrx4_reg(Channel* channel) {
-  return READ_REG(channel->length_enabled, NRX4_LENGTH_ENABLED);
+  return PACK(channel->length_enabled, NRX4_LENGTH_ENABLED);
 }
 
 static u8 read_apu(Emulator* e, MaskedAddress addr) {
@@ -1714,9 +1698,9 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
 
   switch (addr) {
     case APU_NR10_ADDR:
-      result |= READ_REG(apu->sweep.period, NR10_SWEEP_PERIOD) |
-                READ_REG(apu->sweep.direction, NR10_SWEEP_DIRECTION) |
-                READ_REG(apu->sweep.shift, NR10_SWEEP_SHIFT);
+      result |= PACK(apu->sweep.period, NR10_SWEEP_PERIOD) |
+                PACK(apu->sweep.direction, NR10_SWEEP_DIRECTION) |
+                PACK(apu->sweep.shift, NR10_SWEEP_SHIFT);
       break;
     case APU_NR11_ADDR:
       result |= read_nrx1_reg(&apu->channel[CHANNEL1]);
@@ -1743,13 +1727,13 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
       result |= read_nrx4_reg(&apu->channel[CHANNEL2]);
       break;
     case APU_NR30_ADDR:
-      result |= READ_REG(apu->channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
+      result |= PACK(apu->channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
       break;
     case APU_NR31_ADDR:
       result |= INVALID_READ_BYTE;
       break;
     case APU_NR32_ADDR:
-      result |= READ_REG(apu->wave.volume, NR32_SELECT_WAVE_VOLUME);
+      result |= PACK(apu->wave.volume, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
       result |= INVALID_READ_BYTE;
@@ -1764,35 +1748,35 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
       result |= read_nrx2_reg(&apu->channel[CHANNEL4]);
       break;
     case APU_NR43_ADDR:
-      result |= READ_REG(apu->noise.clock_shift, NR43_CLOCK_SHIFT) |
-                READ_REG(apu->noise.lfsr_width, NR43_LFSR_WIDTH) |
-                READ_REG(apu->noise.divisor, NR43_DIVISOR);
+      result |= PACK(apu->noise.clock_shift, NR43_CLOCK_SHIFT) |
+                PACK(apu->noise.lfsr_width, NR43_LFSR_WIDTH) |
+                PACK(apu->noise.divisor, NR43_DIVISOR);
       break;
     case APU_NR44_ADDR:
       result |= read_nrx4_reg(&apu->channel[CHANNEL4]);
       break;
     case APU_NR50_ADDR:
-      result |= READ_REG(apu->so2_output[VIN], NR50_VIN_SO2) |
-                READ_REG(apu->so2_volume, NR50_SO2_VOLUME) |
-                READ_REG(apu->so1_output[VIN], NR50_VIN_SO1) |
-                READ_REG(apu->so1_volume, NR50_SO1_VOLUME);
+      result |= PACK(apu->so2_output[VIN], NR50_VIN_SO2) |
+                PACK(apu->so2_volume, NR50_SO2_VOLUME) |
+                PACK(apu->so1_output[VIN], NR50_VIN_SO1) |
+                PACK(apu->so1_volume, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      result |= READ_REG(apu->so2_output[SOUND4], NR51_SOUND4_SO2) |
-                READ_REG(apu->so2_output[SOUND3], NR51_SOUND3_SO2) |
-                READ_REG(apu->so2_output[SOUND2], NR51_SOUND2_SO2) |
-                READ_REG(apu->so2_output[SOUND1], NR51_SOUND1_SO2) |
-                READ_REG(apu->so1_output[SOUND4], NR51_SOUND4_SO1) |
-                READ_REG(apu->so1_output[SOUND3], NR51_SOUND3_SO1) |
-                READ_REG(apu->so1_output[SOUND2], NR51_SOUND2_SO1) |
-                READ_REG(apu->so1_output[SOUND1], NR51_SOUND1_SO1);
+      result |= PACK(apu->so2_output[SOUND4], NR51_SOUND4_SO2) |
+                PACK(apu->so2_output[SOUND3], NR51_SOUND3_SO2) |
+                PACK(apu->so2_output[SOUND2], NR51_SOUND2_SO2) |
+                PACK(apu->so2_output[SOUND1], NR51_SOUND1_SO2) |
+                PACK(apu->so1_output[SOUND4], NR51_SOUND4_SO1) |
+                PACK(apu->so1_output[SOUND3], NR51_SOUND3_SO1) |
+                PACK(apu->so1_output[SOUND2], NR51_SOUND2_SO1) |
+                PACK(apu->so1_output[SOUND1], NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR:
-      result |= READ_REG(apu->enabled, NR52_ALL_SOUND_ENABLED) |
-                READ_REG(apu->channel[CHANNEL4].status, NR52_SOUND4_ON) |
-                READ_REG(apu->channel[CHANNEL3].status, NR52_SOUND3_ON) |
-                READ_REG(apu->channel[CHANNEL2].status, NR52_SOUND2_ON) |
-                READ_REG(apu->channel[CHANNEL1].status, NR52_SOUND1_ON);
+      result |= PACK(apu->enabled, NR52_ALL_SOUND_ENABLED) |
+                PACK(apu->channel[CHANNEL4].status, NR52_SOUND4_ON) |
+                PACK(apu->channel[CHANNEL3].status, NR52_SOUND3_ON) |
+                PACK(apu->channel[CHANNEL2].status, NR52_SOUND2_ON) |
+                PACK(apu->channel[CHANNEL1].status, NR52_SOUND1_ON);
       VERBOSE(apu, "read nr52: 0x%02x de=0x%04x\n", result, e->state.reg.DE);
       break;
     default:
@@ -1945,10 +1929,10 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
     case 2: obj->tile = value; break;
     case 3:
       obj->byte3 = value;
-      obj->priority = WRITE_REG(value, OBJ_PRIORITY);
-      obj->yflip = WRITE_REG(value, OBJ_YFLIP);
-      obj->xflip = WRITE_REG(value, OBJ_XFLIP);
-      obj->palette = WRITE_REG(value, OBJ_PALETTE);
+      obj->priority = UNPACK(value, OBJ_PRIORITY);
+      obj->yflip = UNPACK(value, OBJ_YFLIP);
+      obj->xflip = UNPACK(value, OBJ_XFLIP);
+      obj->palette = UNPACK(value, OBJ_PALETTE);
       break;
   }
 }
@@ -2055,15 +2039,15 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         get_io_reg_string(addr), value, e->state.cycles);
   switch (addr) {
     case IO_JOYP_ADDR:
-      e->state.JOYP.joypad_select = WRITE_REG(value, JOYP_JOYPAD_SELECT);
+      e->state.JOYP.joypad_select = UNPACK(value, JOYP_JOYPAD_SELECT);
       check_joyp_intr(e);
       break;
     case IO_SB_ADDR:
       e->state.serial.SB = value;
       break;
     case IO_SC_ADDR:
-      e->state.serial.transferring = WRITE_REG(value, SC_TRANSFER_START);
-      e->state.serial.clock = WRITE_REG(value, SC_SHIFT_CLOCK);
+      e->state.serial.transferring = UNPACK(value, SC_TRANSFER_START);
+      e->state.serial.clock = UNPACK(value, SC_SHIFT_CLOCK);
       if (e->state.serial.transferring) {
         e->state.serial.cycles = 0;
         e->state.serial.transferred_bits = 0;
@@ -2096,8 +2080,8 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_TAC_ADDR: {
       Bool old_timer_on = e->state.timer.on;
       u16 old_tima_mask = s_tima_mask[e->state.timer.clock_select];
-      e->state.timer.clock_select = WRITE_REG(value, TAC_CLOCK_SELECT);
-      e->state.timer.on = WRITE_REG(value, TAC_TIMER_ON);
+      e->state.timer.clock_select = UNPACK(value, TAC_CLOCK_SELECT);
+      e->state.timer.on = UNPACK(value, TAC_TIMER_ON);
       /* TIMA is incremented when a specific bit of DIV_counter transitions
        * from 1 to 0. This can happen as a result of writing to DIV, or in this
        * case modifying which bit we're looking at. */
@@ -2122,15 +2106,14 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_LCDC_ADDR: {
       LCDControl* LCDC = &e->state.ppu.LCDC;
       Bool was_enabled = LCDC->display;
-      LCDC->display = WRITE_REG(value, LCDC_DISPLAY);
-      LCDC->window_tile_map_select =
-          WRITE_REG(value, LCDC_WINDOW_TILE_MAP_SELECT);
-      LCDC->window_display = WRITE_REG(value, LCDC_WINDOW_DISPLAY);
-      LCDC->bg_tile_data_select = WRITE_REG(value, LCDC_BG_TILE_DATA_SELECT);
-      LCDC->bg_tile_map_select = WRITE_REG(value, LCDC_BG_TILE_MAP_SELECT);
-      LCDC->obj_size = WRITE_REG(value, LCDC_OBJ_SIZE);
-      LCDC->obj_display = WRITE_REG(value, LCDC_OBJ_DISPLAY);
-      LCDC->bg_display = WRITE_REG(value, LCDC_BG_DISPLAY);
+      LCDC->display = UNPACK(value, LCDC_DISPLAY);
+      LCDC->window_tile_map_select = UNPACK(value, LCDC_WINDOW_TILE_MAP_SELECT);
+      LCDC->window_display = UNPACK(value, LCDC_WINDOW_DISPLAY);
+      LCDC->bg_tile_data_select = UNPACK(value, LCDC_BG_TILE_DATA_SELECT);
+      LCDC->bg_tile_map_select = UNPACK(value, LCDC_BG_TILE_MAP_SELECT);
+      LCDC->obj_size = UNPACK(value, LCDC_OBJ_SIZE);
+      LCDC->obj_display = UNPACK(value, LCDC_OBJ_DISPLAY);
+      LCDC->bg_display = UNPACK(value, LCDC_BG_DISPLAY);
       if (was_enabled ^ LCDC->display) {
         if (LCDC->display) {
           DEBUG(ppu, "Enabling display. [cy: %u]\n", e->state.cycles);
@@ -2173,10 +2156,10 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           STAT->IF = TRUE;
         }
       }
-      e->state.ppu.STAT.y_compare.irq = WRITE_REG(value, STAT_YCOMPARE_INTR);
-      e->state.ppu.STAT.mode2.irq = WRITE_REG(value, STAT_MODE2_INTR);
-      e->state.ppu.STAT.vblank.irq = WRITE_REG(value, STAT_VBLANK_INTR);
-      e->state.ppu.STAT.hblank.irq = WRITE_REG(value, STAT_HBLANK_INTR);
+      e->state.ppu.STAT.y_compare.irq = UNPACK(value, STAT_YCOMPARE_INTR);
+      e->state.ppu.STAT.mode2.irq = UNPACK(value, STAT_MODE2_INTR);
+      e->state.ppu.STAT.vblank.irq = UNPACK(value, STAT_VBLANK_INTR);
+      e->state.ppu.STAT.hblank.irq = UNPACK(value, STAT_HBLANK_INTR);
       break;
     }
     case IO_SCY_ADDR:
@@ -2203,22 +2186,22 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       e->state.dma.cycles = 0;
       break;
     case IO_BGP_ADDR:
-      e->state.ppu.BGP.color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->state.ppu.BGP.color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->state.ppu.BGP.color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->state.ppu.BGP.color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.BGP.color[3] = UNPACK(value, PALETTE_COLOR3);
+      e->state.ppu.BGP.color[2] = UNPACK(value, PALETTE_COLOR2);
+      e->state.ppu.BGP.color[1] = UNPACK(value, PALETTE_COLOR1);
+      e->state.ppu.BGP.color[0] = UNPACK(value, PALETTE_COLOR0);
       break;
     case IO_OBP0_ADDR:
-      e->state.ppu.OBP[0].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->state.ppu.OBP[0].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->state.ppu.OBP[0].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->state.ppu.OBP[0].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.OBP[0].color[3] = UNPACK(value, PALETTE_COLOR3);
+      e->state.ppu.OBP[0].color[2] = UNPACK(value, PALETTE_COLOR2);
+      e->state.ppu.OBP[0].color[1] = UNPACK(value, PALETTE_COLOR1);
+      e->state.ppu.OBP[0].color[0] = UNPACK(value, PALETTE_COLOR0);
       break;
     case IO_OBP1_ADDR:
-      e->state.ppu.OBP[1].color[3] = WRITE_REG(value, PALETTE_COLOR3);
-      e->state.ppu.OBP[1].color[2] = WRITE_REG(value, PALETTE_COLOR2);
-      e->state.ppu.OBP[1].color[1] = WRITE_REG(value, PALETTE_COLOR1);
-      e->state.ppu.OBP[1].color[0] = WRITE_REG(value, PALETTE_COLOR0);
+      e->state.ppu.OBP[1].color[3] = UNPACK(value, PALETTE_COLOR3);
+      e->state.ppu.OBP[1].color[2] = UNPACK(value, PALETTE_COLOR2);
+      e->state.ppu.OBP[1].color[1] = UNPACK(value, PALETTE_COLOR1);
+      e->state.ppu.OBP[1].color[0] = UNPACK(value, PALETTE_COLOR0);
       break;
     case IO_WY_ADDR:
       e->state.ppu.WY = value;
@@ -2239,16 +2222,16 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
 
 static void write_nrx1_reg(Emulator* e, Channel* channel, u8 value) {
   if (e->state.apu.enabled) {
-    channel->square_wave.duty = WRITE_REG(value, NRX1_WAVE_DUTY);
+    channel->square_wave.duty = UNPACK(value, NRX1_WAVE_DUTY);
   }
-  channel->length = NRX1_MAX_LENGTH - WRITE_REG(value, NRX1_LENGTH);
+  channel->length = NRX1_MAX_LENGTH - UNPACK(value, NRX1_LENGTH);
   VERBOSE(apu, "write_nrx1_reg(%zu, 0x%02x) length=%u\n",
           CHANNEL_INDEX(channel), value, channel->length);
 }
 
 static void write_nrx2_reg(Emulator* e, Channel* channel, u8 value) {
-  channel->envelope.initial_volume = WRITE_REG(value, NRX2_INITIAL_VOLUME);
-  channel->dac_enabled = WRITE_REG(value, NRX2_DAC_ENABLED) != 0;
+  channel->envelope.initial_volume = UNPACK(value, NRX2_INITIAL_VOLUME);
+  channel->dac_enabled = UNPACK(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
     VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
@@ -2263,25 +2246,24 @@ static void write_nrx2_reg(Emulator* e, Channel* channel, u8 value) {
       channel->envelope.volume = new_volume;
     }
   }
-  channel->envelope.direction = WRITE_REG(value, NRX2_ENVELOPE_DIRECTION);
-  channel->envelope.period = WRITE_REG(value, NRX2_ENVELOPE_PERIOD);
+  channel->envelope.direction = UNPACK(value, NRX2_ENVELOPE_DIRECTION);
+  channel->envelope.period = UNPACK(value, NRX2_ENVELOPE_PERIOD);
   VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
           CHANNEL_INDEX(channel), value, channel->envelope.initial_volume);
 }
 
 static void write_nrx3_reg(Emulator* e, Channel* channel, u8 value) {
-  channel->frequency &= ~0xff;
-  channel->frequency |= value;
+  channel->frequency = (channel->frequency & ~0xff) | value;
 }
 
 /* Returns TRUE if this channel was triggered. */
 static Bool write_nrx4_reg(Emulator* e, Channel* channel, u8 value,
                            u16 max_length) {
-  Bool trigger = WRITE_REG(value, NRX4_INITIAL);
+  Bool trigger = UNPACK(value, NRX4_INITIAL);
   Bool was_length_enabled = channel->length_enabled;
-  channel->length_enabled = WRITE_REG(value, NRX4_LENGTH_ENABLED);
+  channel->length_enabled = UNPACK(value, NRX4_LENGTH_ENABLED);
   channel->frequency &= 0xff;
-  channel->frequency |= WRITE_REG(value, NRX4_FREQUENCY_HI) << 8;
+  channel->frequency |= UNPACK(value, NRX4_FREQUENCY_HI) << 8;
 
   /* Extra length clocking occurs on NRX4 writes if the next APU frame isn't a
    * length counter frame. This only occurs on transition from disabled to
@@ -2380,10 +2362,6 @@ static void trigger_nr34_reg(Emulator* e, Channel* channel, Wave* wave) {
   wave->playing = TRUE;
 }
 
-static void trigger_nr44_reg(Emulator* e, Channel* channel, Noise* noise) {
-  noise->lfsr = 0x7fff;
-}
-
 static void write_wave_period(Emulator* e, Channel* channel, Wave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
   DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
@@ -2435,9 +2413,9 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
   switch (addr) {
     case APU_NR10_ADDR: {
       SweepDirection old_direction = sweep->direction;
-      sweep->period = WRITE_REG(value, NR10_SWEEP_PERIOD);
-      sweep->direction = WRITE_REG(value, NR10_SWEEP_DIRECTION);
-      sweep->shift = WRITE_REG(value, NR10_SWEEP_SHIFT);
+      sweep->period = UNPACK(value, NR10_SWEEP_PERIOD);
+      sweep->direction = UNPACK(value, NR10_SWEEP_DIRECTION);
+      sweep->shift = UNPACK(value, NR10_SWEEP_SHIFT);
       if (old_direction == SWEEP_DIRECTION_SUBTRACTION &&
           sweep->direction == SWEEP_DIRECTION_ADDITION &&
           sweep->calculated_subtract) {
@@ -2483,7 +2461,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case APU_NR30_ADDR:
-      channel3->dac_enabled = WRITE_REG(value, NR30_DAC_ENABLED);
+      channel3->dac_enabled = UNPACK(value, NR30_DAC_ENABLED);
       if (!channel3->dac_enabled) {
         channel3->status = FALSE;
         wave->playing = FALSE;
@@ -2493,7 +2471,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       channel3->length = NR31_MAX_LENGTH - value;
       break;
     case APU_NR32_ADDR:
-      wave->volume = WRITE_REG(value, NR32_SELECT_WAVE_VOLUME);
+      wave->volume = UNPACK(value, NR32_SELECT_WAVE_VOLUME);
       break;
     case APU_NR33_ADDR:
       write_nrx3_reg(e, channel3, value);
@@ -2514,9 +2492,9 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       write_nrx2_reg(e, channel4, value);
       break;
     case APU_NR43_ADDR: {
-      noise->clock_shift = WRITE_REG(value, NR43_CLOCK_SHIFT);
-      noise->lfsr_width = WRITE_REG(value, NR43_LFSR_WIDTH);
-      noise->divisor = WRITE_REG(value, NR43_DIVISOR);
+      noise->clock_shift = UNPACK(value, NR43_CLOCK_SHIFT);
+      noise->lfsr_width = UNPACK(value, NR43_LFSR_WIDTH);
+      noise->divisor = UNPACK(value, NR43_DIVISOR);
       write_noise_period(channel4, noise);
       break;
     }
@@ -2525,29 +2503,29 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       if (trigger) {
         write_noise_period(channel4, noise);
         trigger_nrx4_envelope(e, &channel4->envelope);
-        trigger_nr44_reg(e, channel4, noise);
+        noise->lfsr = 0x7fff;
       }
       break;
     }
     case APU_NR50_ADDR:
-      apu->so2_output[VIN] = WRITE_REG(value, NR50_VIN_SO2);
-      apu->so2_volume = WRITE_REG(value, NR50_SO2_VOLUME);
-      apu->so1_output[VIN] = WRITE_REG(value, NR50_VIN_SO1);
-      apu->so1_volume = WRITE_REG(value, NR50_SO1_VOLUME);
+      apu->so2_output[VIN] = UNPACK(value, NR50_VIN_SO2);
+      apu->so2_volume = UNPACK(value, NR50_SO2_VOLUME);
+      apu->so1_output[VIN] = UNPACK(value, NR50_VIN_SO1);
+      apu->so1_volume = UNPACK(value, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      apu->so2_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO2);
-      apu->so2_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO2);
-      apu->so2_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO2);
-      apu->so2_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO2);
-      apu->so1_output[SOUND4] = WRITE_REG(value, NR51_SOUND4_SO1);
-      apu->so1_output[SOUND3] = WRITE_REG(value, NR51_SOUND3_SO1);
-      apu->so1_output[SOUND2] = WRITE_REG(value, NR51_SOUND2_SO1);
-      apu->so1_output[SOUND1] = WRITE_REG(value, NR51_SOUND1_SO1);
+      apu->so2_output[SOUND4] = UNPACK(value, NR51_SOUND4_SO2);
+      apu->so2_output[SOUND3] = UNPACK(value, NR51_SOUND3_SO2);
+      apu->so2_output[SOUND2] = UNPACK(value, NR51_SOUND2_SO2);
+      apu->so2_output[SOUND1] = UNPACK(value, NR51_SOUND1_SO2);
+      apu->so1_output[SOUND4] = UNPACK(value, NR51_SOUND4_SO1);
+      apu->so1_output[SOUND3] = UNPACK(value, NR51_SOUND3_SO1);
+      apu->so1_output[SOUND2] = UNPACK(value, NR51_SOUND2_SO1);
+      apu->so1_output[SOUND1] = UNPACK(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
       Bool was_enabled = apu->enabled;
-      Bool is_enabled = WRITE_REG(value, NR52_ALL_SOUND_ENABLED);
+      Bool is_enabled = UNPACK(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
         DEBUG(apu, "Powered down APU. Clearing registers.\n");
         int i;
@@ -3421,17 +3399,14 @@ static void print_emulator_info(Emulator* e) {
 #define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
 #define REG(R) e->state.reg.R
-#define FLAG(x) e->state.reg.F.x
 #define INTR(m) e->state.interrupt.m
 #define CY mcycle(e)
 #define RA REG(A)
 #define RSP REG(SP)
-#define FZ FLAG(Z)
-#define FC FLAG(C)
-#define FH FLAG(H)
-#define FN FLAG(N)
-#define FNZ (!FZ)
-#define FNC (!FC)
+#define FZ e->state.reg.F.Z
+#define FC e->state.reg.F.C
+#define FH e->state.reg.F.H
+#define FN e->state.reg.F.N
 #define FZ_EQ0(X) FZ = (u8)(X) == 0
 #define MASK8(X) ((X) & 0xf)
 #define MASK16(X) ((X) & 0xfff)
@@ -3661,207 +3636,185 @@ static void execute_instruction(Emulator* e) {
   case code + 5: name##_R(N, L); break;   \
   case code + 6: name##_MR(N, HL); break; \
   case code + 7: name##_R(N, A); break;
-#define LD_R_OPS(code, R) \
-  case code + 0: LD_R_R(R, B); break;   \
-  case code + 1: LD_R_R(R, C); break;   \
-  case code + 2: LD_R_R(R, D); break;   \
-  case code + 3: LD_R_R(R, E); break;   \
-  case code + 4: LD_R_R(R, H); break;   \
-  case code + 5: LD_R_R(R, L); break;   \
-  case code + 6: LD_R_MR(R, HL); break; \
-  case code + 7: LD_R_R(R, A); break;
+#define LD_R_OPS(code, R) REG_OPS_N(code, LD_R, R)
 
-  if (opcode == 0xcb) {
-    u8 opcode = read_u8_cy(e, e->state.reg.PC + 1);
-    switch (opcode) {
-      REG_OPS(0x00, RLC)
-      REG_OPS(0x08, RRC)
-      REG_OPS(0x10, RL)
-      REG_OPS(0x18, RR)
-      REG_OPS(0x20, SLA)
-      REG_OPS(0x28, SRA)
-      REG_OPS(0x30, SWAP)
-      REG_OPS(0x38, SRL)
-      REG_OPS_N(0x40, BIT, 0)
-      REG_OPS_N(0x48, BIT, 1)
-      REG_OPS_N(0x50, BIT, 2)
-      REG_OPS_N(0x58, BIT, 3)
-      REG_OPS_N(0x60, BIT, 4)
-      REG_OPS_N(0x68, BIT, 5)
-      REG_OPS_N(0x70, BIT, 6)
-      REG_OPS_N(0x78, BIT, 7)
-      REG_OPS_N(0x80, RES, 0)
-      REG_OPS_N(0x88, RES, 1)
-      REG_OPS_N(0x90, RES, 2)
-      REG_OPS_N(0x98, RES, 3)
-      REG_OPS_N(0xa0, RES, 4)
-      REG_OPS_N(0xa8, RES, 5)
-      REG_OPS_N(0xb0, RES, 6)
-      REG_OPS_N(0xb8, RES, 7)
-      REG_OPS_N(0xc0, SET, 0)
-      REG_OPS_N(0xc8, SET, 1)
-      REG_OPS_N(0xd0, SET, 2)
-      REG_OPS_N(0xd8, SET, 3)
-      REG_OPS_N(0xe0, SET, 4)
-      REG_OPS_N(0xe8, SET, 5)
-      REG_OPS_N(0xf0, SET, 6)
-      REG_OPS_N(0xf8, SET, 7)
-    }
-  } else {
-    switch (opcode) {
-      case 0x00: break;
-      case 0x01: LD_RR_NN(BC); break;
-      case 0x02: LD_MR_R(BC, A); break;
-      case 0x03: INC_RR(BC); break;
-      case 0x04: INC_R(B); break;
-      case 0x05: DEC_R(B); break;
-      case 0x06: LD_R_N(B); break;
-      case 0x07: RLCA; break;
-      case 0x08: LD_MNN_SP; break;
-      case 0x09: ADD_HL_RR(BC); break;
-      case 0x0a: LD_R_MR(A, BC); break;
-      case 0x0b: DEC_RR(BC); break;
-      case 0x0c: INC_R(C); break;
-      case 0x0d: DEC_R(C); break;
-      case 0x0e: LD_R_N(C); break;
-      case 0x0f: RRCA; break;
-      case 0x10: STOP; break;
-      case 0x11: LD_RR_NN(DE); break;
-      case 0x12: LD_MR_R(DE, A); break;
-      case 0x13: INC_RR(DE); break;
-      case 0x14: INC_R(D); break;
-      case 0x15: DEC_R(D); break;
-      case 0x16: LD_R_N(D); break;
-      case 0x17: RLA; break;
-      case 0x18: JR_N; break;
-      case 0x19: ADD_HL_RR(DE); break;
-      case 0x1a: LD_R_MR(A, DE); break;
-      case 0x1b: DEC_RR(DE); break;
-      case 0x1c: INC_R(E); break;
-      case 0x1d: DEC_R(E); break;
-      case 0x1e: LD_R_N(E); break;
-      case 0x1f: RRA; break;
-      case 0x20: JR_F_N(FNZ); break;
-      case 0x21: LD_RR_NN(HL); break;
-      case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
-      case 0x23: INC_RR(HL); break;
-      case 0x24: INC_R(H); break;
-      case 0x25: DEC_R(H); break;
-      case 0x26: LD_R_N(H); break;
-      case 0x27: DAA; break;
-      case 0x28: JR_F_N(FZ); break;
-      case 0x29: ADD_HL_RR(HL); break;
-      case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
-      case 0x2b: DEC_RR(HL); break;
-      case 0x2c: INC_R(L); break;
-      case 0x2d: DEC_R(L); break;
-      case 0x2e: LD_R_N(L); break;
-      case 0x2f: CPL; break;
-      case 0x30: JR_F_N(FNC); break;
-      case 0x31: LD_RR_NN(SP); break;
-      case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
-      case 0x33: INC_RR(SP); break;
-      case 0x34: INC_MR(HL); break;
-      case 0x35: DEC_MR(HL); break;
-      case 0x36: LD_MR_N(HL); break;
-      case 0x37: SCF; break;
-      case 0x38: JR_F_N(FC); break;
-      case 0x39: ADD_HL_RR(SP); break;
-      case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
-      case 0x3b: DEC_RR(SP); break;
-      case 0x3c: INC_R(A); break;
-      case 0x3d: DEC_R(A); break;
-      case 0x3e: LD_R_N(A); break;
-      case 0x3f: CCF; break;
-      LD_R_OPS(0x40, B)
-      LD_R_OPS(0x48, C)
-      LD_R_OPS(0x50, D)
-      LD_R_OPS(0x58, E)
-      LD_R_OPS(0x60, H)
-      LD_R_OPS(0x68, L)
-      case 0x70: LD_MR_R(HL, B); break;
-      case 0x71: LD_MR_R(HL, C); break;
-      case 0x72: LD_MR_R(HL, D); break;
-      case 0x73: LD_MR_R(HL, E); break;
-      case 0x74: LD_MR_R(HL, H); break;
-      case 0x75: LD_MR_R(HL, L); break;
-      case 0x76: HALT; break;
-      case 0x77: LD_MR_R(HL, A); break;
-      LD_R_OPS(0x78, A)
-      REG_OPS(0x80, ADD)
-      REG_OPS(0x88, ADC)
-      REG_OPS(0x90, SUB)
-      REG_OPS(0x98, SBC)
-      REG_OPS(0xa0, AND)
-      REG_OPS(0xa8, XOR)
-      REG_OPS(0xb0, OR)
-      REG_OPS(0xb8, CP)
-      case 0xc0: RET_F(FNZ); break;
-      case 0xc1: POP_RR(BC); break;
-      case 0xc2: JP_F_NN(FNZ); break;
-      case 0xc3: JP_NN; break;
-      case 0xc4: CALL_F_NN(FNZ); break;
-      case 0xc5: PUSH_RR(BC); break;
-      case 0xc6: ADD_N; break;
-      case 0xc7: CALL(0x00); break;
-      case 0xc8: RET_F(FZ); break;
-      case 0xc9: RET; break;
-      case 0xca: JP_F_NN(FZ); break;
-      case 0xcb: INVALID; break;
-      case 0xcc: CALL_F_NN(FZ); break;
-      case 0xcd: CALL_NN; break;
-      case 0xce: ADC_N; break;
-      case 0xcf: CALL(0x08); break;
-      case 0xd0: RET_F(FNC); break;
-      case 0xd1: POP_RR(DE); break;
-      case 0xd2: JP_F_NN(FNC); break;
-      case 0xd3: INVALID; break;
-      case 0xd4: CALL_F_NN(FNC); break;
-      case 0xd5: PUSH_RR(DE); break;
-      case 0xd6: SUB_N; break;
-      case 0xd7: CALL(0x10); break;
-      case 0xd8: RET_F(FC); break;
-      case 0xd9: RETI; break;
-      case 0xda: JP_F_NN(FC); break;
-      case 0xdb: INVALID; break;
-      case 0xdc: CALL_F_NN(FC); break;
-      case 0xdd: INVALID; break;
-      case 0xde: SBC_N; break;
-      case 0xdf: CALL(0x18); break;
-      case 0xe0: LD_MFF00_N_R(A); break;
-      case 0xe1: POP_RR(HL); break;
-      case 0xe2: LD_MFF00_R_R(C, A); break;
-      case 0xe3: INVALID; break;
-      case 0xe4: INVALID; break;
-      case 0xe5: PUSH_RR(HL); break;
-      case 0xe6: AND_N; break;
-      case 0xe7: CALL(0x20); break;
-      case 0xe8: ADD_SP_N; break;
-      case 0xe9: JP_RR(HL); break;
-      case 0xea: LD_MN_R(A); break;
-      case 0xeb: INVALID; break;
-      case 0xec: INVALID; break;
-      case 0xed: INVALID; break;
-      case 0xee: XOR_N; break;
-      case 0xef: CALL(0x28); break;
-      case 0xf0: LD_R_MFF00_N(A); break;
-      case 0xf1: POP_AF; break;
-      case 0xf2: LD_R_MFF00_R(A, C); break;
-      case 0xf3: DI; break;
-      case 0xf4: INVALID; break;
-      case 0xf5: PUSH_AF; break;
-      case 0xf6: OR_N; break;
-      case 0xf7: CALL(0x30); break;
-      case 0xf8: LD_HL_SP_N; break;
-      case 0xf9: LD_RR_RR(SP, HL); break;
-      case 0xfa: LD_R_MN(A); break;
-      case 0xfb: EI; break;
-      case 0xfc: INVALID; break;
-      case 0xfd: INVALID; break;
-      case 0xfe: CP_N; break;
-      case 0xff: CALL(0x38); break;
-      default: INVALID; break;
-    }
+  switch (opcode) {
+    case 0x00: break;
+    case 0x01: LD_RR_NN(BC); break;
+    case 0x02: LD_MR_R(BC, A); break;
+    case 0x03: INC_RR(BC); break;
+    case 0x04: INC_R(B); break;
+    case 0x05: DEC_R(B); break;
+    case 0x06: LD_R_N(B); break;
+    case 0x07: RLCA; break;
+    case 0x08: LD_MNN_SP; break;
+    case 0x09: ADD_HL_RR(BC); break;
+    case 0x0a: LD_R_MR(A, BC); break;
+    case 0x0b: DEC_RR(BC); break;
+    case 0x0c: INC_R(C); break;
+    case 0x0d: DEC_R(C); break;
+    case 0x0e: LD_R_N(C); break;
+    case 0x0f: RRCA; break;
+    case 0x10: STOP; break;
+    case 0x11: LD_RR_NN(DE); break;
+    case 0x12: LD_MR_R(DE, A); break;
+    case 0x13: INC_RR(DE); break;
+    case 0x14: INC_R(D); break;
+    case 0x15: DEC_R(D); break;
+    case 0x16: LD_R_N(D); break;
+    case 0x17: RLA; break;
+    case 0x18: JR_N; break;
+    case 0x19: ADD_HL_RR(DE); break;
+    case 0x1a: LD_R_MR(A, DE); break;
+    case 0x1b: DEC_RR(DE); break;
+    case 0x1c: INC_R(E); break;
+    case 0x1d: DEC_R(E); break;
+    case 0x1e: LD_R_N(E); break;
+    case 0x1f: RRA; break;
+    case 0x20: JR_F_N(!FZ); break;
+    case 0x21: LD_RR_NN(HL); break;
+    case 0x22: LD_MR_R(HL, A); REG(HL)++; break;
+    case 0x23: INC_RR(HL); break;
+    case 0x24: INC_R(H); break;
+    case 0x25: DEC_R(H); break;
+    case 0x26: LD_R_N(H); break;
+    case 0x27: DAA; break;
+    case 0x28: JR_F_N(FZ); break;
+    case 0x29: ADD_HL_RR(HL); break;
+    case 0x2a: LD_R_MR(A, HL); REG(HL)++; break;
+    case 0x2b: DEC_RR(HL); break;
+    case 0x2c: INC_R(L); break;
+    case 0x2d: DEC_R(L); break;
+    case 0x2e: LD_R_N(L); break;
+    case 0x2f: CPL; break;
+    case 0x30: JR_F_N(!FC); break;
+    case 0x31: LD_RR_NN(SP); break;
+    case 0x32: LD_MR_R(HL, A); REG(HL)--; break;
+    case 0x33: INC_RR(SP); break;
+    case 0x34: INC_MR(HL); break;
+    case 0x35: DEC_MR(HL); break;
+    case 0x36: LD_MR_N(HL); break;
+    case 0x37: SCF; break;
+    case 0x38: JR_F_N(FC); break;
+    case 0x39: ADD_HL_RR(SP); break;
+    case 0x3a: LD_R_MR(A, HL); REG(HL)--; break;
+    case 0x3b: DEC_RR(SP); break;
+    case 0x3c: INC_R(A); break;
+    case 0x3d: DEC_R(A); break;
+    case 0x3e: LD_R_N(A); break;
+    case 0x3f: CCF; break;
+    LD_R_OPS(0x40, B)
+    LD_R_OPS(0x48, C)
+    LD_R_OPS(0x50, D)
+    LD_R_OPS(0x58, E)
+    LD_R_OPS(0x60, H)
+    LD_R_OPS(0x68, L)
+    case 0x70: LD_MR_R(HL, B); break;
+    case 0x71: LD_MR_R(HL, C); break;
+    case 0x72: LD_MR_R(HL, D); break;
+    case 0x73: LD_MR_R(HL, E); break;
+    case 0x74: LD_MR_R(HL, H); break;
+    case 0x75: LD_MR_R(HL, L); break;
+    case 0x76: HALT; break;
+    case 0x77: LD_MR_R(HL, A); break;
+    LD_R_OPS(0x78, A)
+    REG_OPS(0x80, ADD)
+    REG_OPS(0x88, ADC)
+    REG_OPS(0x90, SUB)
+    REG_OPS(0x98, SBC)
+    REG_OPS(0xa0, AND)
+    REG_OPS(0xa8, XOR)
+    REG_OPS(0xb0, OR)
+    REG_OPS(0xb8, CP)
+    case 0xc0: RET_F(!FZ); break;
+    case 0xc1: POP_RR(BC); break;
+    case 0xc2: JP_F_NN(!FZ); break;
+    case 0xc3: JP_NN; break;
+    case 0xc4: CALL_F_NN(!FZ); break;
+    case 0xc5: PUSH_RR(BC); break;
+    case 0xc6: ADD_N; break;
+    case 0xc7: CALL(0x00); break;
+    case 0xc8: RET_F(FZ); break;
+    case 0xc9: RET; break;
+    case 0xca: JP_F_NN(FZ); break;
+    case 0xcb:
+      switch (read_u8_cy(e, REG(PC) + 1)) {
+        REG_OPS(0x00, RLC)
+        REG_OPS(0x08, RRC)
+        REG_OPS(0x10, RL)
+        REG_OPS(0x18, RR)
+        REG_OPS(0x20, SLA)
+        REG_OPS(0x28, SRA)
+        REG_OPS(0x30, SWAP)
+        REG_OPS(0x38, SRL)
+        REG_OPS_N(0x40, BIT, 0)
+        REG_OPS_N(0x48, BIT, 1)
+        REG_OPS_N(0x50, BIT, 2)
+        REG_OPS_N(0x58, BIT, 3)
+        REG_OPS_N(0x60, BIT, 4)
+        REG_OPS_N(0x68, BIT, 5)
+        REG_OPS_N(0x70, BIT, 6)
+        REG_OPS_N(0x78, BIT, 7)
+        REG_OPS_N(0x80, RES, 0)
+        REG_OPS_N(0x88, RES, 1)
+        REG_OPS_N(0x90, RES, 2)
+        REG_OPS_N(0x98, RES, 3)
+        REG_OPS_N(0xa0, RES, 4)
+        REG_OPS_N(0xa8, RES, 5)
+        REG_OPS_N(0xb0, RES, 6)
+        REG_OPS_N(0xb8, RES, 7)
+        REG_OPS_N(0xc0, SET, 0)
+        REG_OPS_N(0xc8, SET, 1)
+        REG_OPS_N(0xd0, SET, 2)
+        REG_OPS_N(0xd8, SET, 3)
+        REG_OPS_N(0xe0, SET, 4)
+        REG_OPS_N(0xe8, SET, 5)
+        REG_OPS_N(0xf0, SET, 6)
+        REG_OPS_N(0xf8, SET, 7)
+      }
+      break;
+    case 0xcc: CALL_F_NN(FZ); break;
+    case 0xcd: CALL_NN; break;
+    case 0xce: ADC_N; break;
+    case 0xcf: CALL(0x08); break;
+    case 0xd0: RET_F(!FC); break;
+    case 0xd1: POP_RR(DE); break;
+    case 0xd2: JP_F_NN(!FC); break;
+    case 0xd4: CALL_F_NN(!FC); break;
+    case 0xd5: PUSH_RR(DE); break;
+    case 0xd6: SUB_N; break;
+    case 0xd7: CALL(0x10); break;
+    case 0xd8: RET_F(FC); break;
+    case 0xd9: RETI; break;
+    case 0xda: JP_F_NN(FC); break;
+    case 0xdc: CALL_F_NN(FC); break;
+    case 0xde: SBC_N; break;
+    case 0xdf: CALL(0x18); break;
+    case 0xe0: LD_MFF00_N_R(A); break;
+    case 0xe1: POP_RR(HL); break;
+    case 0xe2: LD_MFF00_R_R(C, A); break;
+    case 0xe5: PUSH_RR(HL); break;
+    case 0xe6: AND_N; break;
+    case 0xe7: CALL(0x20); break;
+    case 0xe8: ADD_SP_N; break;
+    case 0xe9: JP_RR(HL); break;
+    case 0xea: LD_MN_R(A); break;
+    case 0xee: XOR_N; break;
+    case 0xef: CALL(0x28); break;
+    case 0xf0: LD_R_MFF00_N(A); break;
+    case 0xf1: POP_AF; break;
+    case 0xf2: LD_R_MFF00_R(A, C); break;
+    case 0xf3: DI; break;
+    case 0xf5: PUSH_AF; break;
+    case 0xf6: OR_N; break;
+    case 0xf7: CALL(0x30); break;
+    case 0xf8: LD_HL_SP_N; break;
+    case 0xf9: LD_RR_RR(SP, HL); break;
+    case 0xfa: LD_R_MN(A); break;
+    case 0xfb: EI; break;
+    case 0xfe: CP_N; break;
+    case 0xff: CALL(0x38); break;
+    default: INVALID; break;
   }
   e->state.reg.PC = new_pc;
 }
