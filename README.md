@@ -125,7 +125,7 @@ $ scripts/tester.py gpu
 | acceptance/gpu/intr\_1\_2\_timing-GS | :ok: |
 | acceptance/gpu/intr\_2\_0\_timing | :ok: |
 | acceptance/gpu/intr\_2\_mode0\_timing | :ok: |
-| acceptance/gpu/intr\_2\_mode0\_timing\_sprites | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites | :ok: |
 | acceptance/gpu/intr\_2\_mode3\_timing | :ok: |
 | acceptance/gpu/intr\_2\_oam\_ok\_timing | :ok: |
 | acceptance/gpu/stat\_irq\_blocking | :ok: |
@@ -165,6 +165,7 @@ $ scripts/tester.py gpu
 | acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx1\_nops | :x: |
 | acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx2\_nops | :x: |
 | acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx3\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx4\_nops | :x: |
 | acceptance/gpu/intr\_2\_timing | :ok: |
 | acceptance/gpu/lcdon\_mode\_timing | :ok: |
 | acceptance/gpu/ly00\_01\_mode0\_2 | :ok: |

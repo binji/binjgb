@@ -121,9 +121,8 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define APU_CYCLES_PER_SECOND (CPU_CYCLES_PER_SECOND / APU_CYCLES)
 #define APU_CYCLES 2 /* APU runs at 2MHz */
 #define PPU_MODE2_CYCLES 80
-#define PPU_MODE3_CYCLES 172  /* TODO: This and HBLANK are not */
-#define PPU_HBLANK_CYCLES 204 /* correct, they need to vary based on */
-#define PPU_LINE_CYCLES 456   /* SCX, window, sprites, etc. */
+#define PPU_MODE3_MIN_CYCLES 172
+#define PPU_LINE_CYCLES 456
 #define PPU_VBLANK_CYCLES (PPU_LINE_CYCLES * 10)
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
 #define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
@@ -2660,6 +2659,35 @@ static void ppu_mode2_mcycle(Emulator* e) {
   }
 }
 
+static u32 mode3_cycle_count(Emulator* e) {
+  s32 buckets[SCREEN_WIDTH / 8 + 2];
+  ZERO_MEMORY(buckets);
+  u8 scx_fine = e->state.ppu.SCX & 7;
+  u32 cycles = PPU_MODE3_MIN_CYCLES + scx_fine;
+  Bool has_zero = FALSE;
+  int i;
+  for (i = 0; i < e->state.ppu.line_obj_count; ++i) {
+    Obj* o = &e->state.ppu.line_obj[i];
+    u8 x = o->x + OBJ_X_OFFSET;
+    if (x >= SCREEN_WIDTH + OBJ_X_OFFSET) {
+      continue;
+    }
+    if (!has_zero && x == 0) {
+      has_zero = TRUE;
+      cycles += scx_fine;
+    }
+    x += scx_fine;
+    int bucket = x >> 3;
+    buckets[bucket] = MAX(buckets[bucket], 5 - (x & 7));
+    cycles += 6;
+  }
+  for (i = 0; i < (int)ARRAY_SIZE(buckets); ++i) {
+    cycles += buckets[i];
+  }
+  cycles &= ~3;
+  return cycles;
+}
+
 static void ppu_mode3_mcycle(Emulator* e) {
   int i;
   PPU* ppu = &e->state.ppu;
@@ -2828,9 +2856,9 @@ static void ppu_mcycle(Emulator* e) {
         break;
       case PPU_MODE_MODE3:
         STAT->trigger_mode = PPU_MODE_MODE3;
-        STAT->mode_cycles = PPU_MODE3_CYCLES;
+        STAT->mode_cycles = mode3_cycle_count(e);
         STAT->next_mode = PPU_MODE_HBLANK;
-        STAT->hblank.cycles = PPU_MODE3_CYCLES - CPU_MCYCLE;
+        STAT->hblank.cycles = STAT->mode_cycles - CPU_MCYCLE;
         ppu->render_x = 0;
         ppu->rendering_window = FALSE;
         break;
@@ -3846,6 +3874,12 @@ static void handle_interrupts(Emulator* e) {
           e->state.ppu.STAT.hblank.irq ? 'H' : '.', e->state.cycles);
     vector = 0x48;
     mask = IF_STAT;
+#if 0
+    /* I'm pretty sure this is right, but it currently breaks a lot of tests;
+     * need to figure out how to fix the rest of the tests to handle this extra
+     * delay. */
+    delay = e->state.interrupt.halt && e->state.ppu.STAT.mode2.irq;
+#endif
   } else if (interrupt & IF_TIMER) {
     DEBUG(interrupt, ">> TIMER interrupt\n");
     vector = 0x50;

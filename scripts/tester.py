@@ -57,6 +57,22 @@ TESTS = [
   (GPU + 'intr_1_timing.gb', 2, 'b6e1acefdababf4c053789912e4408e1fcb1b8e7'),
   (GPU + 'intr_2_0_timing.gb', 2, '66b8bd35827b39a5778780693844ed8ef9796f67'),
   (GPU + 'intr_2_mode0_timing.gb', 2, '094840252ecd6b5321a9b9812767e435bdce3464'),
+  (GPU + 'intr_2_mode0_timing_sprites.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
+
+  (GPU + 'intr_2_mode0_scx1_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx2_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx3_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx4_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx5_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx6_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx7_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+  (GPU + 'intr_2_mode0_scx8_timing_nops.gb', 221, '58a77f0044ee4400bbf9d035cae54c1b3ddd6728'),
+
+  (GPU + 'intr_2_mode0_timing_sprites_nops.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
+  (GPU + 'intr_2_mode0_timing_sprites_scx1_nops.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
+  (GPU + 'intr_2_mode0_timing_sprites_scx2_nops.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
+  (GPU + 'intr_2_mode0_timing_sprites_scx3_nops.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
+  (GPU + 'intr_2_mode0_timing_sprites_scx4_nops.gb', 221, '87b78089df5d0c12b73e7e0b9f34f67fb9c2d74e'),
   (GPU + 'intr_2_mode3_timing.gb', 2, '369978e18825ec7a3fc5f39bdee1dff4c9a0e9af'),
   (GPU + 'intr_2_oam_ok_timing.gb', 2, 'a10a51597f97912c59e1006a23eda5852a39f199'),
   (GPU + 'intr_2_timing.gb', 6, '92db41dde5c25f8627f307d7866db7348717e91d'),
@@ -112,9 +128,9 @@ TESTS = [
 ]
 
 
-def RunTest(rom, frames, expected, debug_exe):
+def RunTest(rom, frames, expected, options):
   ppm = os.path.basename(os.path.splitext(rom)[0]) + '.ppm'
-  common.RunTester(rom, frames, ppm, debug_exe=debug_exe)
+  common.RunTester(rom, frames, ppm, debug_exe=options.debug_exe)
   actual = common.HashFile(ppm)
   if expected.startswith('!'):
     expect_fail = True
@@ -125,7 +141,8 @@ def RunTest(rom, frames, expected, debug_exe):
     if expect_fail:
       print('[X]  %s => %s' % (rom, actual))
     else:
-      print('[OK] %s' % rom)
+      if options.verbose:
+        print('[OK] %s' % rom)
       os.remove(ppm)
       return True
   else:
@@ -142,6 +159,8 @@ def main(args):
                       help='test patterns.')
   parser.add_argument('-d', '--debug-exe', action='store_true',
                       help='run debug tester')
+  parser.add_argument('-v', '--verbose', action='store_true',
+                      help='show more info')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
   total = 0
@@ -151,7 +170,7 @@ def main(args):
       total += 1
       rom = os.path.join(common.ROOT_DIR, rom)
       try:
-        if RunTest(rom, frames, expected, options.debug_exe):
+        if RunTest(rom, frames, expected, options):
           passed += 1
       except common.Error as e:
         print(e)
