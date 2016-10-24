@@ -429,20 +429,19 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
   V(PPU_MODE_MODE2, 2)      \
   V(PPU_MODE_MODE3, 3)
 
-#define FOREACH_PPU_STATE(V)             \
-  V(PPU_STATE_HBLANK, 0)                 \
-  V(PPU_STATE_HBLANK_PLUS_4, 1)          \
-  V(PPU_STATE_VBLANK, 2)                 \
-  V(PPU_STATE_VBLANK_PLUS_4, 3)          \
-  V(PPU_STATE_VBLANK_LY_0, 4)            \
-  V(PPU_STATE_VBLANK_LY_0_PLUS_4, 5)     \
-  V(PPU_STATE_VBLANK_LINE_Y_0, 6)        \
-  V(PPU_STATE_VBLANK_LINE_Y_0_PLUS_4, 7) \
-  V(PPU_STATE_LCD_ON_MODE2, 8)           \
-  V(PPU_STATE_MODE2, 9)                  \
-  V(PPU_STATE_LCD_ON_MODE3, 10)          \
-  V(PPU_STATE_MODE3, 11)                 \
-  V(PPU_STATE_MODE3_PLUS_4, 12)
+#define FOREACH_PPU_STATE(V)         \
+  V(PPU_STATE_HBLANK, 0)             \
+  V(PPU_STATE_HBLANK_PLUS_4, 1)      \
+  V(PPU_STATE_VBLANK, 2)             \
+  V(PPU_STATE_VBLANK_PLUS_4, 3)      \
+  V(PPU_STATE_VBLANK_LY_0, 4)        \
+  V(PPU_STATE_VBLANK_LY_0_PLUS_4, 5) \
+  V(PPU_STATE_VBLANK_LINE_Y_0, 6)    \
+  V(PPU_STATE_LCD_ON_MODE2, 7)       \
+  V(PPU_STATE_MODE2, 8)              \
+  V(PPU_STATE_LCD_ON_MODE3, 9)       \
+  V(PPU_STATE_MODE3, 10)             \
+  V(PPU_STATE_MODE3_PLUS_4, 11)
 
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
@@ -918,8 +917,6 @@ typedef struct {
 typedef struct {
   Bool irq;
   Bool trigger;
-  u8 delay;
-  s32 cycles;
 } LCDStatusInterrupt;
 
 typedef struct {
@@ -930,9 +927,7 @@ typedef struct {
   Bool LY_eq_LYC;       /* TRUE if LY=LYC, delayed by 1 M-cycle. */
   PPUMode mode;         /* The current PPU mode. */
   Bool IF;              /* Internal interrupt flag for STAT interrupts. */
-  PPUMode next_mode;    /* When mode_cycles==0, switch to this mode. */
   PPUMode trigger_mode; /* This mode is used for checking STAT IRQ triggers. */
-  u32 mode_cycles;      /* Counts cycles until the next mode. */
   Bool new_LY_eq_LYC;   /* The new value for LY_eq_LYC, updated in 1 M-cycle. */
 } LCDStatus;
 
@@ -947,10 +942,11 @@ typedef struct {
   u8 WX;                          /* Window X */
   Palette BGP;                    /* BG Palette */
   Palette OBP[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
+  PPUState state;
+  u32 state_cycles;
+  u32 line_cycles;                /* Counts cycles until line_y changes. */
   u32 frame;                      /* The currently rendering frame. */
   u8 last_LY;                     /* LY from the previous M-cycle. */
-  u32 LY_cycles;                  /* Counts cycles until LY changes. */
-  u32 line_cycles;                /* Counts cycles until line_y changes. */
   u8 render_x;                    /* Currently rendering X coordinate. */
   u8 line_y;   /* The currently rendering line. Can be different than LY. */
   u8 win_y;    /* The window Y is only incremented when rendered. */
@@ -962,14 +958,6 @@ typedef struct {
   Bool new_frame_edge;
   u8 display_delay_frames; /* Wait this many frames before displaying. */
 } PPU;
-
-typedef struct {
-  PPUState state;
-  u32 cycles2;
-  u32 line_cycles;
-  u32 lcd_cycles;
-} PPU2;
-PPU2 ppu2;
 
 typedef struct {
   DMAState state;
@@ -2140,27 +2128,17 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       LCDC->obj_display = UNPACK(value, LCDC_OBJ_DISPLAY);
       LCDC->bg_display = UNPACK(value, LCDC_BG_DISPLAY);
       if (was_enabled ^ LCDC->display) {
+        e->state.ppu.STAT.mode = PPU_MODE_HBLANK;
+        e->state.ppu.LY = e->state.ppu.line_y = 0;
         if (LCDC->display) {
           DEBUG(ppu, "Enabling display. [cy: %u]\n", e->state.cycles);
-          e->state.ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
-          e->state.ppu.STAT.mode = PPU_MODE_HBLANK;
-          e->state.ppu.STAT.next_mode = PPU_MODE_MODE3;
-          e->state.ppu.STAT.trigger_mode = PPU_MODE_MODE2;
-          e->state.ppu.STAT.hblank.delay = CPU_MCYCLE;
-          e->state.ppu.STAT.mode_cycles = PPU_MODE2_CYCLES;
-          e->state.ppu.LY_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
+          e->state.ppu.state = PPU_STATE_LCD_ON_MODE2;
+          e->state.ppu.state_cycles = PPU_MODE2_CYCLES;
           e->state.ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
-          e->state.ppu.LY = e->state.ppu.line_y = 0;
-
-          // foobar
-          ppu2.state = PPU_STATE_LCD_ON_MODE2;
-          ppu2.cycles2 = PPU_MODE2_CYCLES;
-          ppu2.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
-          ppu2.lcd_cycles = 0;
+          e->state.ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
+          e->state.ppu.STAT.trigger_mode = PPU_MODE_MODE2;
         } else {
           DEBUG(ppu, "Disabling display. [cy: %u]\n", e->state.cycles);
-          e->state.ppu.STAT.mode = PPU_MODE_HBLANK;
-          e->state.ppu.LY = e->state.ppu.line_y = 0;
           /* Clear the framebuffer. */
           size_t i;
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
@@ -2827,35 +2805,21 @@ static void ppu_mode3_mcycle(Emulator* e) {
   ppu->render_x += 4;
 }
 
-static void ppu_mcycle_1(Emulator* e) {
+static void ppu_mcycle(Emulator* e) {
   PPU* ppu = &e->state.ppu;
   LCDStatus* STAT = &ppu->STAT;
   if (!ppu->LCDC.display) {
     return;
   }
 
-  u32 cycle = e->state.cycles + CPU_MCYCLE;
   PPUMode last_trigger_mode = STAT->trigger_mode;
   Bool last_mode2_trigger = STAT->mode2.trigger;
   Bool last_y_compare_trigger = STAT->y_compare.trigger;
 
-#if 1
-  /* hblank interrupt */
-  if (STAT->next_mode == PPU_MODE_HBLANK) {
-    STAT->hblank.cycles -= CPU_MCYCLE;
-    if (STAT->hblank.cycles <= 0) {
-      if (STAT->hblank.delay > 0) {
-        STAT->hblank.delay -= CPU_MCYCLE;
-      } else {
-        VERBOSE(ppu, ">> trigger mode 0 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
-        STAT->trigger_mode = PPU_MODE_HBLANK;
-        /* Add an arbitrary value large enough that it doesn't retrigger; this
-         * value will be reset before the next hblank should occur. */
-        STAT->hblank.cycles += PPU_FRAME_CYCLES;
-      }
-    }
-  }
-#endif
+  STAT->mode2.trigger = FALSE;
+  STAT->y_compare.trigger = FALSE;
+  STAT->LY_eq_LYC = STAT->new_LY_eq_LYC;
+  ppu->last_LY = ppu->LY;
 
   switch (STAT->mode) {
     case PPU_MODE_MODE2: ppu_mode2_mcycle(e); break;
@@ -2863,168 +2827,23 @@ static void ppu_mcycle_1(Emulator* e) {
     default: break;
   }
 
-  /* STAT mode */
-  STAT->mode_cycles -= CPU_MCYCLE;
-  if (STAT->mode_cycles == 0) {
-    VERBOSE(ppu, ">> mode %u => %u [cy: %u]\n", STAT->mode, STAT->next_mode,
-            cycle);
-    PPUMode last_mode = STAT->mode;
-    STAT->mode = STAT->next_mode;
-    switch (STAT->mode) {
-      case PPU_MODE_HBLANK:
-        /* Normal Hblank will run until it the line changes, so we don't need
-         * to track the mode cycles; it's fine to use an arbitrary value. */
-#if 0
-        STAT->trigger_mode = PPU_MODE_HBLANK;
-#endif
-        STAT->mode_cycles =
-            (last_mode == PPU_MODE_VBLANK) ? CPU_MCYCLE : PPU_FRAME_CYCLES;
-        STAT->next_mode = PPU_MODE_MODE2;
-        break;
-      case PPU_MODE_VBLANK:
-        STAT->mode_cycles = PPU_VBLANK_CYCLES - CPU_MCYCLE;
-        STAT->next_mode = PPU_MODE_HBLANK;
-        break;
-      case PPU_MODE_MODE2:
-        STAT->mode_cycles = PPU_MODE2_CYCLES;
-        STAT->next_mode = PPU_MODE_MODE3;
-        ppu->oam_index = 0;
-        ppu->line_obj_count = 0;
-        break;
-      case PPU_MODE_MODE3:
-        STAT->trigger_mode = PPU_MODE_MODE3;
-        STAT->mode_cycles = mode3_cycle_count(e);
-        STAT->next_mode = PPU_MODE_HBLANK;
-        STAT->hblank.cycles = STAT->mode_cycles - CPU_MCYCLE;
-        ppu->render_x = 0;
-        ppu->rendering_window = FALSE;
-        break;
-      case PPU_MODE_COUNT:
-        assert(0);
-        break;
-    }
-  }
-
-  /* LYC */
-  STAT->LY_eq_LYC = STAT->new_LY_eq_LYC;
-  STAT->y_compare.trigger = FALSE;
-  if (STAT->y_compare.delay > 0) {
-    STAT->y_compare.delay -= CPU_MCYCLE;
-    if (STAT->y_compare.delay == 0) {
-      check_ly_eq_lyc(e, FALSE);
-    }
-  }
-
-  /* line_y */
-  STAT->mode2.trigger = FALSE;
+  ppu->state_cycles -= CPU_MCYCLE;
   ppu->line_cycles -= CPU_MCYCLE;
-  if (ppu->line_cycles == 0) {
-    ppu->line_cycles = PPU_LINE_CYCLES;
-    ppu->line_y++;
-    if (ppu->LY < SCREEN_HEIGHT) {
-      VERBOSE(ppu, ">> trigger mode 2 [LY: %u] [cy: %u]\n", ppu->LY, cycle);
-      STAT->mode2.trigger = TRUE;
-      STAT->trigger_mode = PPU_MODE_MODE2;
-    }
-    if (ppu->rendering_window) {
-      ppu->win_y++;
-    }
-    if (VALUE_WRAPPED(ppu->line_y, SCREEN_HEIGHT_WITH_VBLANK)) {
-      ppu->frame_WY = ppu->WY;
-      ppu->win_y = 0;
-    }
-  }
-
-  /* LY */
-  ppu->last_LY = ppu->LY;
-  ppu->LY_cycles -= CPU_MCYCLE;
-  if (ppu->LY_cycles == 0) {
-    ++ppu->LY;
-    if (ppu->LY < SCREEN_HEIGHT) {
-      STAT->next_mode = PPU_MODE_MODE2;
-      STAT->mode_cycles = CPU_MCYCLE;
-    }
-    if (ppu->LY == SCREEN_HEIGHT) {
-      VERBOSE(ppu, ">> trigger mode 1 [cy: %u]\n", cycle);
-      STAT->next_mode = PPU_MODE_VBLANK;
-      STAT->mode_cycles = CPU_MCYCLE;
-      STAT->trigger_mode = PPU_MODE_VBLANK;
-      /* Trigger vblank. */
-      e->state.interrupt.new_IF |= IF_VBLANK;
-      if (e->state.ppu.display_delay_frames == 0) {
-        e->state.ppu.new_frame_edge = TRUE;
-      } else {
-        e->state.ppu.display_delay_frames--;
-      }
-      e->state.ppu.frame++;
-    }
-    if (ppu->LY == SCREEN_HEIGHT_WITH_VBLANK - 1) {
-      ppu->LY_cycles = CPU_MCYCLE;
-    } else if (ppu->LY == SCREEN_HEIGHT_WITH_VBLANK) {
-      ppu->LY = 0;
-      ppu->LY_cycles = PPU_LINE_CYCLES + PPU_LINE_CYCLES - CPU_MCYCLE;
-    } else {
-      ppu->LY_cycles = PPU_LINE_CYCLES;
-    }
-    if (ppu->LY == 0) {
-      STAT->y_compare.delay = CPU_MCYCLE;
-    } else {
-      check_ly_eq_lyc(e, FALSE);
-    }
-  }
-
-  if (STAT->trigger_mode != last_trigger_mode ||
-      STAT->mode2.trigger != last_mode2_trigger ||
-      STAT->y_compare.trigger != last_y_compare_trigger) {
-    check_stat(e);
-  }
-}
-
-// quux
-static void ppu_mcycle_2(Emulator* e) {
-  PPU* ppu = &e->state.ppu;
-  LCDStatus* STAT = &ppu->STAT;
-  if (!ppu->LCDC.display) {
-    return;
-  }
-
-  PPUMode last_trigger_mode = STAT->trigger_mode;
-  Bool last_mode2_trigger = STAT->mode2.trigger;
-  Bool last_y_compare_trigger = STAT->y_compare.trigger;
-
-  STAT->mode2.trigger = FALSE;
-  STAT->y_compare.trigger = FALSE;
-  STAT->LY_eq_LYC = STAT->new_LY_eq_LYC;
-  ppu->last_LY = ppu->LY;
-
-  switch (STAT->mode) {
-    case PPU_MODE_MODE2: ppu_mode2_mcycle(e); break;
-    case PPU_MODE_MODE3: ppu_mode3_mcycle(e); break;
-    default: break;
-  }
-
-  ppu2.cycles2 -= CPU_MCYCLE;
-  ppu2.line_cycles -= CPU_MCYCLE;
-  if (ppu2.cycles2 == 0) {
-    VERBOSE(ppu, "%u [%u] (%u): %s -> ", e->state.cycles, ppu2.lcd_cycles,
-            ppu2.lcd_cycles % PPU_LINE_CYCLES,
-            get_ppu_state_string(ppu2.state));
-    switch (ppu2.state) {
+  if (ppu->state_cycles == 0) {
+    switch (ppu->state) {
       case PPU_STATE_HBLANK:
       case PPU_STATE_VBLANK_PLUS_4:
         ppu->line_y++;
         ppu->LY++;
-        ppu2.line_cycles = PPU_LINE_CYCLES;
+        ppu->line_cycles = PPU_LINE_CYCLES;
+        check_ly_eq_lyc(e, FALSE);
+        ppu->state_cycles = CPU_MCYCLE;
 
-        /* TODO: only here to match ppu_mcycle_1's behavior */
-        if (ppu->rendering_window) {
-          ppu->win_y++;
-        }
-
-        if (ppu2.state == PPU_STATE_HBLANK) {
-          ppu2.cycles2 = CPU_MCYCLE;
+        if (ppu->state == PPU_STATE_HBLANK) {
           STAT->mode2.trigger = TRUE;
           if (ppu->LY == SCREEN_HEIGHT) {
+            ppu->state = PPU_STATE_VBLANK;
+            STAT->trigger_mode = PPU_MODE_VBLANK;
             ppu->frame++;
             e->state.interrupt.new_IF |= IF_VBLANK;
             if (ppu->display_delay_frames == 0) {
@@ -3032,53 +2851,53 @@ static void ppu_mcycle_2(Emulator* e) {
             } else {
               ppu->display_delay_frames--;
             }
-            ppu2.state = PPU_STATE_VBLANK;
-            STAT->trigger_mode = PPU_MODE_VBLANK;
           } else {
-            ppu2.state = PPU_STATE_HBLANK_PLUS_4;
+            ppu->state = PPU_STATE_HBLANK_PLUS_4;
             STAT->trigger_mode = PPU_MODE_MODE2;
+            if (ppu->rendering_window) {
+              ppu->win_y++;
+            }
           }
         } else {
-          assert(ppu2.state == PPU_STATE_HBLANK_PLUS_4);
+          assert(ppu->state == PPU_STATE_VBLANK_PLUS_4);
           if (ppu->LY == SCREEN_HEIGHT_WITH_VBLANK - 1) {
-            ppu2.state = PPU_STATE_VBLANK_LY_0;
-            ppu2.cycles2 = CPU_MCYCLE;
+            ppu->state = PPU_STATE_VBLANK_LY_0;
           } else {
-            ppu2.cycles2 = ppu2.line_cycles;
+            ppu->state_cycles = PPU_LINE_CYCLES;
           }
         }
-        check_ly_eq_lyc(e, FALSE);
         break;
 
       case PPU_STATE_HBLANK_PLUS_4:
-        ppu2.state = PPU_STATE_MODE2;
-        ppu2.cycles2 = PPU_MODE2_CYCLES;
+        ppu->state = PPU_STATE_MODE2;
+        ppu->state_cycles = PPU_MODE2_CYCLES;
         STAT->mode = PPU_MODE_MODE2;
         ppu->oam_index = 0;
         ppu->line_obj_count = 0;
         break;
 
       case PPU_STATE_VBLANK:
-        ppu2.state = PPU_STATE_VBLANK_PLUS_4;
-        ppu2.cycles2 = ppu2.line_cycles;
+        ppu->state = PPU_STATE_VBLANK_PLUS_4;
+        ppu->state_cycles = ppu->line_cycles;
         STAT->mode = PPU_MODE_VBLANK;
         break;
 
       case PPU_STATE_VBLANK_LY_0:
-        ppu2.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
-        ppu2.cycles2 = CPU_MCYCLE;
+        ppu->state = PPU_STATE_VBLANK_LY_0_PLUS_4;
+        ppu->state_cycles = CPU_MCYCLE;
         ppu->LY = 0;
         break;
 
       case PPU_STATE_VBLANK_LY_0_PLUS_4:
-        ppu2.state = PPU_STATE_VBLANK_LINE_Y_0;
-        ppu2.cycles2 = PPU_LINE_CYCLES - CPU_MCYCLE - CPU_MCYCLE;
+        ppu->state = PPU_STATE_VBLANK_LINE_Y_0;
+        ppu->state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE - CPU_MCYCLE;
         check_ly_eq_lyc(e, FALSE);
         break;
 
       case PPU_STATE_VBLANK_LINE_Y_0:
-        ppu2.state = PPU_STATE_VBLANK_LINE_Y_0_PLUS_4;
-        ppu2.cycles2 = CPU_MCYCLE;
+        ppu->state = PPU_STATE_HBLANK_PLUS_4;
+        ppu->state_cycles = CPU_MCYCLE;
+        ppu->line_cycles = PPU_LINE_CYCLES;
         ppu->line_y = 0;
         ppu->frame_WY = ppu->WY;
         ppu->win_y = 0;
@@ -3087,134 +2906,47 @@ static void ppu_mcycle_2(Emulator* e) {
         STAT->trigger_mode = PPU_MODE_MODE2;
         break;
 
-      case PPU_STATE_VBLANK_LINE_Y_0_PLUS_4:
-        ppu2.state = PPU_STATE_MODE2;
-        ppu2.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
-        ppu2.cycles2 = PPU_MODE2_CYCLES;
-        STAT->mode = PPU_MODE_MODE2;
-        ppu->oam_index = 0;
-        ppu->line_obj_count = 0;
-        break;
-
       case PPU_STATE_LCD_ON_MODE2:
-        ppu2.state = PPU_STATE_LCD_ON_MODE3;
-        ppu2.cycles2 = mode3_cycle_count(e);
-        STAT->mode = STAT->trigger_mode = PPU_MODE_MODE3;
-        ppu->render_x = 0;
-        ppu->rendering_window = FALSE;
-        break;
-
       case PPU_STATE_MODE2:
-        ppu2.state = PPU_STATE_MODE3;
-        ppu2.cycles2 = mode3_cycle_count(e) - CPU_MCYCLE;
+        ppu->state_cycles = mode3_cycle_count(e);
+        if (ppu->state == PPU_STATE_LCD_ON_MODE2) {
+          ppu->state = PPU_STATE_LCD_ON_MODE3;
+        } else {
+          assert(ppu->state == PPU_STATE_MODE2);
+          ppu->state = PPU_STATE_MODE3;
+          ppu->state_cycles -= CPU_MCYCLE;
+        }
         STAT->mode = STAT->trigger_mode = PPU_MODE_MODE3;
         ppu->render_x = 0;
         ppu->rendering_window = FALSE;
-        break;
-
-      case PPU_STATE_LCD_ON_MODE3:
-        ppu2.state = PPU_STATE_HBLANK;
-        ppu2.cycles2 = ppu2.line_cycles;
-        STAT->mode = STAT->trigger_mode = PPU_MODE_HBLANK;
         break;
 
       case PPU_STATE_MODE3:
-        ppu2.state = PPU_STATE_MODE3_PLUS_4;
-        ppu2.cycles2 = CPU_MCYCLE;
+        ppu->state = PPU_STATE_MODE3_PLUS_4;
+        ppu->state_cycles = CPU_MCYCLE;
         STAT->trigger_mode = PPU_MODE_HBLANK;
         break;
 
+      case PPU_STATE_LCD_ON_MODE3:
+        STAT->trigger_mode = PPU_MODE_HBLANK;
+        /* fallthrough */
+
       case PPU_STATE_MODE3_PLUS_4:
-        ppu2.state = PPU_STATE_HBLANK;
-        ppu2.cycles2 = ppu2.line_cycles;
+        ppu->state = PPU_STATE_HBLANK;
+        ppu->state_cycles = ppu->line_cycles;
         STAT->mode = PPU_MODE_HBLANK;
         break;
 
       case PPU_STATE_COUNT:
         assert(0);
+        break;
     }
-    VERBOSE(ppu, "%s.\n", get_ppu_state_string(ppu2.state));
   }
   if (STAT->trigger_mode != last_trigger_mode ||
       STAT->mode2.trigger != last_mode2_trigger ||
       STAT->y_compare.trigger != last_y_compare_trigger) {
     check_stat(e);
   }
-  ppu2.lcd_cycles += CPU_MCYCLE;
-}
-
-static void print_bytes(const char* name, char* data, size_t size) {
-  fprintf(stderr, "%s: ", name);
-  size_t i;
-  for (i = 0; i < size; ++i) {
-    fprintf(stderr, "0x%02x ", (u8)data[i]);
-  }
-  fprintf(stderr, "\n");
-}
-
-static void ppu_mcycle(Emulator* e) {
-  static EmulatorState es_saved;
-  static EmulatorState es1;
-  static EmulatorState es2;
-
-#define COPY(d, s) memcpy(&d, &s, sizeof(EmulatorState))
-
-#define PPU_MCYCLE 2
-
-#if PPU_MCYCLE == 1
-  ppu_mcycle_1(e);
-#elif PPU_MCYCLE == 2
-  ppu_mcycle_2(e);
-#elif PPU_MCYCLE == 3
-  COPY(es_saved, e->state);
-  ppu_mcycle_2(e);
-  COPY(es2, e->state);
-  COPY(e->state, es_saved);
-  ppu_mcycle_1(e);
-  COPY(es1, e->state);
-
-  Bool OK = TRUE;
-#define C(f)                                                       \
-  if (memcmp(&es1.f, &es2.f, sizeof(es1.f)) != 0) {                \
-    fprintf(stderr, "%u [%u] (%u): " #f " differs.\n", es1.cycles, \
-            ppu2.lcd_cycles, ppu2.lcd_cycles % PPU_LINE_CYCLES);   \
-    print_bytes("  expected", (char*)&es1.f, sizeof(es1.f));       \
-    print_bytes("    actual", (char*)&es2.f, sizeof(es2.f));       \
-    OK = FALSE;                                                    \
-  }
-  C(ppu.STAT.y_compare.trigger)
-  C(ppu.STAT.mode2.trigger)
-  C(ppu.STAT.vblank.trigger)
-  C(ppu.STAT.hblank.trigger)
-  C(ppu.STAT.LY_eq_LYC)
-  C(ppu.STAT.mode)
-  C(ppu.STAT.IF)
-  C(ppu.STAT.trigger_mode)
-  C(ppu.STAT.new_LY_eq_LYC)
-  C(ppu.LY);
-  C(ppu.frame)
-  C(ppu.last_LY)
-  C(ppu.render_x)
-  C(ppu.line_y)
-  C(ppu.win_y)
-  C(ppu.frame_WY)
-  C(ppu.line_obj)
-  C(ppu.line_obj_count)
-  C(ppu.oam_index)
-  C(ppu.rendering_window)
-  C(ppu.new_frame_edge)
-  C(ppu.display_delay_frames)
-  C(interrupt.IF)
-  C(interrupt.new_IF)
-  if (!OK) {
-    fprintf(stderr, "      mode: %s trigger: %s\n",
-            get_ppu_mode_string(e->state.ppu.STAT.mode),
-            get_ppu_mode_string(e->state.ppu.STAT.trigger_mode));
-    fprintf(stderr, "     state: %s cycles: %u LY: %u\n",
-            get_ppu_state_string(ppu2.state), ppu2.cycles2, e->state.ppu.LY);
-    exit(1);
-  }
-#endif
 }
 
 static void timer_mcycle(Emulator* e) {
