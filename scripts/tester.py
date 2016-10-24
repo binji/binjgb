@@ -176,7 +176,7 @@ def main(args):
         if RunTest(rom, frames, expected, options):
           passed += 1
       except common.Error as e:
-        print(e)
+        print('[X]  %s\n' % rom, e)
   print('Passed %d/%d' % (passed, total))
   if total == passed:
     return 0

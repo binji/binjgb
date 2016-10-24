@@ -82,12 +82,22 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(emulator);
   Emulator* e = &emulator;
 
+#if 1
   s_never_trace = 1;
   s_log_level_memory = 0;
   s_log_level_ppu = 0;
   s_log_level_apu = 0;
   s_log_level_io = 0;
   s_log_level_interrupt = 0;
+#else
+  s_trace = 0;
+  s_never_trace = 0;
+  s_log_level_memory = 0;
+  s_log_level_ppu = 3;
+  s_log_level_apu = 0;
+  s_log_level_io = 0;
+  s_log_level_interrupt = 2;
+#endif
 
   int frames = DEFAULT_FRAMES;
   const char* output_ppm = NULL;
