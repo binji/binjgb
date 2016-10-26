@@ -52,6 +52,9 @@ TESTS = [
   (BITS + 'reg_f.gb', 1, '6252ab378e3e3d4f0c8d52b88fa1aa08663d8c3e'),
   (BITS + 'unused_hwio-GS.gb', 1, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
 
+  (GPU + 'hblank_ly_scx_timing-GS.gb', 36, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
+  (GPU + 'hblank_ly_scx_timing_nops.gb', 60, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
+  (GPU + 'hblank_ly_scx_timing_variant_nops.gb', 66, 'd2c5e9902e751f0ac0dc9cd2438c9b54d76dc125'),
   (GPU + 'intr_0_timing.gb', 2, '16ea3ff60cf26b408fe014b27bc92b85617ad004'),
   (GPU + 'intr_1_2_timing-GS.gb', 6, 'facd6c9c63e44b4b3f41bbce29e665d63b150c9d'),
   (GPU + 'intr_1_timing.gb', 2, 'b6e1acefdababf4c053789912e4408e1fcb1b8e7'),
