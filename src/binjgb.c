@@ -429,19 +429,19 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
   V(PPU_MODE_MODE2, 2)      \
   V(PPU_MODE_MODE3, 3)
 
-#define FOREACH_PPU_STATE(V)         \
-  V(PPU_STATE_HBLANK, 0)             \
-  V(PPU_STATE_HBLANK_PLUS_4, 1)      \
-  V(PPU_STATE_VBLANK, 2)             \
-  V(PPU_STATE_VBLANK_PLUS_4, 3)      \
-  V(PPU_STATE_VBLANK_LY_0, 4)        \
-  V(PPU_STATE_VBLANK_LY_0_PLUS_4, 5) \
-  V(PPU_STATE_VBLANK_LINE_Y_0, 6)    \
-  V(PPU_STATE_LCD_ON_MODE2, 7)       \
-  V(PPU_STATE_MODE2, 8)              \
-  V(PPU_STATE_LCD_ON_MODE3, 9)       \
-  V(PPU_STATE_MODE3, 10)             \
-  V(PPU_STATE_MODE3_PLUS_4, 11)
+#define FOREACH_PPU_STATE(V)          \
+  V(PPU_STATE_HBLANK, 0)              \
+  V(PPU_STATE_HBLANK_PLUS_4, 1)       \
+  V(PPU_STATE_VBLANK, 2)              \
+  V(PPU_STATE_VBLANK_PLUS_4, 3)       \
+  V(PPU_STATE_VBLANK_LY_0, 4)         \
+  V(PPU_STATE_VBLANK_LY_0_PLUS_4, 5)  \
+  V(PPU_STATE_VBLANK_LINE_Y_0, 6)     \
+  V(PPU_STATE_LCD_ON_MODE2, 7)        \
+  V(PPU_STATE_MODE2, 8)               \
+  V(PPU_STATE_MODE3_EARLY_TRIGGER, 9) \
+  V(PPU_STATE_MODE3, 10)              \
+  V(PPU_STATE_MODE3_COMMON, 11)
 
 #define DEFINE_ENUM(name, code, ...) name = code,
 #define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
@@ -2694,7 +2694,6 @@ static u32 mode3_cycle_count(Emulator* e) {
   for (i = 0; i < (int)ARRAY_SIZE(buckets); ++i) {
     cycles += buckets[i];
   }
-  cycles &= ~3;
   return cycles;
 }
 
@@ -2878,7 +2877,7 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_VBLANK:
         ppu->state = PPU_STATE_VBLANK_PLUS_4;
-        ppu->state_cycles = ppu->line_cycles;
+        ppu->state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
         STAT->mode = PPU_MODE_VBLANK;
         break;
 
@@ -2909,29 +2908,30 @@ static void ppu_mcycle(Emulator* e) {
       case PPU_STATE_LCD_ON_MODE2:
       case PPU_STATE_MODE2:
         ppu->state_cycles = mode3_cycle_count(e);
-        if (ppu->state == PPU_STATE_LCD_ON_MODE2) {
-          ppu->state = PPU_STATE_LCD_ON_MODE3;
-        } else {
-          assert(ppu->state == PPU_STATE_MODE2);
+        if (ppu->state == PPU_STATE_LCD_ON_MODE2 ||
+            (ppu->state_cycles & 3) != 0) {
           ppu->state = PPU_STATE_MODE3;
-          ppu->state_cycles -= CPU_MCYCLE;
+        } else {
+          ppu->state = PPU_STATE_MODE3_EARLY_TRIGGER;
+          ppu->state_cycles--;
         }
+        ppu->state_cycles &= ~3;
         STAT->mode = STAT->trigger_mode = PPU_MODE_MODE3;
         ppu->render_x = 0;
         ppu->rendering_window = FALSE;
         break;
 
-      case PPU_STATE_MODE3:
-        ppu->state = PPU_STATE_MODE3_PLUS_4;
+      case PPU_STATE_MODE3_EARLY_TRIGGER:
+        ppu->state = PPU_STATE_MODE3_COMMON;
         ppu->state_cycles = CPU_MCYCLE;
         STAT->trigger_mode = PPU_MODE_HBLANK;
         break;
 
-      case PPU_STATE_LCD_ON_MODE3:
+      case PPU_STATE_MODE3:
         STAT->trigger_mode = PPU_MODE_HBLANK;
         /* fallthrough */
 
-      case PPU_STATE_MODE3_PLUS_4:
+      case PPU_STATE_MODE3_COMMON:
         ppu->state = PPU_STATE_HBLANK;
         ppu->state_cycles = ppu->line_cycles;
         STAT->mode = PPU_MODE_HBLANK;

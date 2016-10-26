@@ -121,7 +121,7 @@ $ scripts/tester.py gpu
 | acceptance/bits/mem\_oam | :ok: |
 | acceptance/bits/reg\_f | :ok: |
 | acceptance/bits/unused\_hwio-GS | :ok: |
-| acceptance/gpu/hblank\_ly\_scx\_timing-GS | :x: |
+| acceptance/gpu/hblank\_ly\_scx\_timing-GS | :ok: |
 | acceptance/gpu/intr\_1\_2\_timing-GS | :ok: |
 | acceptance/gpu/intr\_2\_0\_timing | :ok: |
 | acceptance/gpu/intr\_2\_mode0\_timing | :ok: |
@@ -151,6 +151,7 @@ $ scripts/tester.py gpu
 | Test | Result |
 | --- | --- |
 | acceptance/gpu/hblank\_ly\_scx\_timing\_nops | :x: |
+| acceptance/gpu/hblank\_ly\_scx\_timing\_variant\_nops | :x: |
 | acceptance/gpu/intr\_0\_timing | :ok: |
 | acceptance/gpu/intr\_1\_timing | :ok: |
 | acceptance/gpu/intr\_2\_mode0\_scx1\_timing\_nops | :x: |
