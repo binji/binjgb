@@ -135,25 +135,30 @@ def RunTest(rom, frames, expected, options):
   ppm = os.path.basename(os.path.splitext(rom)[0]) + '.ppm'
   common.RunTester(rom, frames, ppm, debug_exe=options.debug_exe)
   actual = common.HashFile(ppm)
+
   if expected.startswith('!'):
     expect_fail = True
     expected = expected[1:]
   else:
     expect_fail = False
+
+  ok = False
   if actual == expected:
     if expect_fail:
       print('[X]  %s => %s' % (rom, actual))
     else:
       if options.verbose:
         print('[OK] %s' % rom)
-      os.remove(ppm)
-      return True
+      ok = True
   else:
     if expected == '' or expect_fail:
       print('[?]  %s => %s' % (rom, actual))
     else:
       print('[X]  %s => %s' % (rom, actual))
-    return False
+
+  if ok or options.remove:
+    os.remove(ppm)
+  return ok
 
 
 def main(args):
@@ -164,6 +169,8 @@ def main(args):
                       help='run debug tester')
   parser.add_argument('-v', '--verbose', action='store_true',
                       help='show more info')
+  parser.add_argument('-r', '--remove', action='store_true',
+                      help='always remove the ppm files')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
   total = 0
