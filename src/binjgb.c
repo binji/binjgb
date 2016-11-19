@@ -171,11 +171,9 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
 #define TILE_COUNT 256 + 128
-#define TILE_WIDTH 8
 #define TILE_HEIGHT 8
-#define TILE_MAP_COUNT 2
+#define TILE_ROW_BYTES 2
 #define TILE_MAP_WIDTH 32
-#define TILE_MAP_HEIGHT 32
 #define WINDOW_MAX_X 166
 #define WINDOW_X_OFFSET 7
 #define OBJ_COUNT 40
@@ -756,15 +754,6 @@ typedef struct {
   struct { Bool Z, N, H, C; } F;
 } Registers;
 
-typedef u8 Tile[TILE_WIDTH * TILE_HEIGHT];
-typedef u8 TileMap[TILE_MAP_WIDTH * TILE_MAP_HEIGHT];
-
-typedef struct {
-  Tile tile[TILE_COUNT];
-  TileMap map[TILE_MAP_COUNT];
-  u8 data[VIDEO_RAM_SIZE];
-} VideoRam;
-
 typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
 typedef struct {
@@ -982,7 +971,7 @@ typedef struct {
 typedef struct {
   MemoryMapState memory_map_state;
   Registers reg;
-  VideoRam vram;
+  u8 vram[VIDEO_RAM_SIZE];
   ExtRam ext_ram;
   WorkRam ram;
   Interrupt interrupt;
@@ -1542,7 +1531,7 @@ static u8 read_vram(Emulator* e, MaskedAddress addr) {
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
-    return e->state.vram.data[addr];
+    return e->state.vram[addr];
   }
 }
 
@@ -1888,26 +1877,6 @@ static u8 read_u8(Emulator* e, Address addr) {
   return read_u8_no_dma_check(e, pair);
 }
 
-static void write_vram_tile_data(Emulator* e,
-                                 u32 index,
-                                 u32 plane,
-                                 u32 y,
-                                 u8 value) {
-  VERBOSE(ppu, "write_vram_tile_data: [%u] (%u, %u) = %u\n", index, plane, y,
-          value);
-  assert(index < TILE_COUNT);
-  Tile* tile = &e->state.vram.tile[index];
-  u32 data_index = y * TILE_WIDTH;
-  assert(data_index < TILE_WIDTH * TILE_HEIGHT);
-  u8* data = &(*tile)[data_index];
-  u8 i;
-  u8 mask = 1 << plane;
-  u8 not_mask = ~mask;
-  for (i = 0; i < 8; ++i) {
-    data[i] = (data[i] & not_mask) | (((value >> (7 - i)) << plane) & mask);
-  }
-}
-
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   if (e->state.ppu.STAT.mode == PPU_MODE_MODE3) {
     DEBUG(ppu, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
@@ -1916,22 +1885,7 @@ static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 
   assert(addr <= ADDR_MASK_8K);
-  /* Store the raw data so it doesn't have to be re-packed when reading. */
-  e->state.vram.data[addr] = value;
-
-  if (addr < 0x1800) {
-    /* 0x8000-0x97ff: Tile data */
-    u32 tile_index = addr >> 4;     /* 16 bytes per tile. */
-    u32 tile_y = (addr >> 1) & 0x7; /* 2 bytes per row. */
-    u32 plane = addr & 1;
-    write_vram_tile_data(e, tile_index, plane, tile_y, value);
-  } else {
-    /* 0x9800-0x9fff: Tile map data */
-    addr -= 0x1800; /* Adjust to range 0x000-0x7ff. */
-    u32 map_index = addr >> 10;
-    assert(map_index < TILE_MAP_COUNT);
-    e->state.vram.map[map_index][addr & ADDR_MASK_1K] = value;
-  }
+  e->state.vram[addr] = value;
 }
 
 static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
@@ -2697,6 +2651,12 @@ static u32 mode3_cycle_count(Emulator* e) {
   return cycles;
 }
 
+static u8 reverse_bits_u8(u8 x) {
+  return ((x >> 7) & 0x01) | ((x >> 5) & 0x02) | ((x >> 3) & 0x04) |
+         ((x >> 1) & 0x08) | ((x << 1) & 0x10) | ((x << 3) & 0x20) |
+         ((x << 5) & 0x40) | ((x << 7) & 0x80);
+}
+
 static void ppu_mode3_mcycle(Emulator* e) {
   int i;
   PPU* ppu = &e->state.ppu;
@@ -2705,7 +2665,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
   if (x + 4 > SCREEN_WIDTH) {
     return;
   }
-  VideoRam* vram = &e->state.vram;
+  u8* vram = e->state.vram;
   /* Each M-cycle writes 4 pixels. */
   Color pixels[4];
   ZERO_MEMORY(pixels);
@@ -2733,12 +2693,16 @@ static void ppu_mode3_mcycle(Emulator* e) {
         mx = ppu->SCX + xi;
         my = ppu->SCY + y;
       }
-      TileMap* map = &vram->map[map_select == TILE_MAP_9800_9BFF ? 0 : 1];
-      u8 tile_index = (*map)[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
-      Tile* tile =
-          &vram->tile[data_select == TILE_DATA_8800_97FF ? 256 + (s8)tile_index
-                                                         : tile_index];
-      u8 palette_index = (*tile)[(my & 7) * TILE_WIDTH | (mx & 7)];
+      u8* map = &vram[map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00];
+      u16 tile_index = map[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
+      if (data_select == TILE_DATA_8800_97FF) {
+        tile_index = 256 + (s8)tile_index;
+      }
+      u16 tile_addr = (tile_index * TILE_HEIGHT + (my & 7)) * TILE_ROW_BYTES;
+      u8 lo = vram[tile_addr];
+      u8 hi = vram[tile_addr + 1];
+      u8 shift = 7 - (mx & 7);
+      u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
       pixels[i] = ppu->BGP.color[palette_index];
       bg_is_zero[i] = palette_index == 0;
     }
@@ -2762,32 +2726,36 @@ static void ppu_mode3_mcycle(Emulator* e) {
         oy = obj_height - 1 - oy;
       }
 
-      u8 *tile_data;
-      if (obj_height == 8) {
-        tile_data = &vram->tile[o->tile][oy * TILE_HEIGHT];
-      } else if (oy < 8) {
-        /* Top tile of 8x16 sprite. */
-        tile_data = &vram->tile[o->tile & 0xfe][oy * TILE_HEIGHT];
-      } else {
-        /* Bottom tile of 8x16 sprite. */
-        tile_data = &vram->tile[o->tile | 0x01][(oy - 8) * TILE_HEIGHT];
+      u8 tile_index = o->tile;
+      if (obj_height == 16) {
+        if (oy < 8) {
+          /* Top tile of 8x16 sprite. */
+          tile_index &= 0xfe;
+        } else {
+          /* Bottom tile of 8x16 sprite. */
+          tile_index |= 0x01;
+          oy -= 8;
+        }
+      }
+      u16 tile_addr = (tile_index * TILE_HEIGHT + (oy & 7)) * TILE_ROW_BYTES;
+      u8 lo = vram[tile_addr];
+      u8 hi = vram[tile_addr + 1];
+      if (!o->xflip) {
+        lo = reverse_bits_u8(lo);
+        hi = reverse_bits_u8(hi);
       }
 
       int tile_data_offset = MAX(0, -ox_start);
       assert(tile_data_offset >= 0 && tile_data_offset < 8);
-      int d = 1;
-      if (o->xflip) {
-        tile_data_offset = 7 - tile_data_offset;
-        d = -1;
-      }
-      tile_data += tile_data_offset;
+      lo >>= tile_data_offset;
+      hi >>= tile_data_offset;
 
       int start = MAX(0, ox_start);
       assert(start >= 0 && start < 4);
       int end = MIN(3, ox_end); /* end is inclusive. */
       assert(end >= 0 && end < 4);
-      for (i = start; i <= end; ++i, tile_data += d) {
-        u8 palette_index = *tile_data;
+      for (i = start; i <= end; ++i, lo >>= 1, hi >>= 1) {
+        u8 palette_index = ((hi & 1) << 1) | (lo & 1);
         if (palette_index != 0 &&
             (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
           pixels[i] = ppu->OBP[o->palette].color[palette_index];
