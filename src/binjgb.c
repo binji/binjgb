@@ -3336,58 +3336,56 @@ static const char* s_cb_opcode_mnemonic[256] = {
     "SET 7,H",    "SET 7,L", "SET 7,(HL)", "SET 7,A",
 };
 
+static void sprint_hex(char* buffer, u8 val) {
+  const char hex_digits[] = "0123456789abcdef";
+  buffer[0] = hex_digits[(val >> 4) & 0xf];
+  buffer[1] = hex_digits[val & 0xf];
+}
+
 static void print_instruction(Emulator* e, Address addr) {
+  char buffer[64];
+  char bytes[][3] = {"  ", "  "};
+  const char* mnemonic = "*INVALID*";
+
+  u8 opcode = read_u8(e, addr);
+  u8 num_bytes = s_opcode_bytes[opcode];
+  switch (num_bytes) {
+    case 0: break;
+    case 1: mnemonic = s_opcode_mnemonic[opcode]; break;
+    case 2: {
+      u8 byte = read_u8(e, addr + 1);
+      sprint_hex(bytes[0], byte);
+      if (opcode == 0xcb) {
+        mnemonic = s_cb_opcode_mnemonic[byte];
+      } else {
+        snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode], byte);
+        mnemonic = buffer;
+      }
+      break;
+    }
+    case 3: {
+      u8 byte1 = read_u8(e, addr + 1);
+      u8 byte2 = read_u8(e, addr + 2);
+      sprint_hex(bytes[0], byte1);
+      sprint_hex(bytes[1], byte2);
+      snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode],
+               (byte2 << 8) | byte1);
+      mnemonic = buffer;
+      break;
+    }
+    default: assert(!"invalid opcode byte length.\n"); break;
+  }
+
   char bank[3] = "??";
   MemoryTypeAddressPair pair = map_address(addr);
   if (pair.type == MEMORY_MAP_ROM_BANK_SWITCH || pair.type == MEMORY_MAP_ROM) {
-    const char hex_digits[] = "0123456789abcdef";
-    u8 rom_bank = 0;
-    if (pair.type == MEMORY_MAP_ROM_BANK_SWITCH) {
-      rom_bank = e->state.memory_map_state.rom_bank;
-    }
-
-    bank[0] = hex_digits[(rom_bank >> 4) & 0xf];
-    bank[1] = hex_digits[rom_bank & 0xf];
+    sprint_hex(bank, pair.type == MEMORY_MAP_ROM_BANK_SWITCH
+                         ? e->state.memory_map_state.rom_bank
+                         : 0);
   }
 
-  u8 opcode = read_u8(e, addr);
-  if (opcode == 0xcb) {
-    u8 cb_opcode = read_u8(e, addr + 1);
-    const char* mnemonic = s_cb_opcode_mnemonic[cb_opcode];
-    printf("[%s]%#06x: cb %02x     %-15s", bank, addr, cb_opcode, mnemonic);
-  } else {
-    char buffer[64];
-    const char* mnemonic = s_opcode_mnemonic[opcode];
-    u8 bytes = s_opcode_bytes[opcode];
-    switch (bytes) {
-      case 0:
-        printf("[%s]%#06x: %02x        %-15s", bank, addr, opcode,
-               "*INVALID*");
-        break;
-      case 1:
-        printf("[%s]%#06x: %02x        %-15s", bank, addr, opcode, mnemonic);
-        break;
-      case 2: {
-        u8 byte = read_u8(e, addr + 1);
-        snprintf(buffer, sizeof(buffer), mnemonic, byte);
-        printf("[%s]%#06x: %02x %02x     %-15s", bank, addr, opcode, byte,
-               buffer);
-        break;
-      }
-      case 3: {
-        u8 byte1 = read_u8(e, addr + 1);
-        u8 byte2 = read_u8(e, addr + 2);
-        u16 word = (byte2 << 8) | byte1;
-        snprintf(buffer, sizeof(buffer), mnemonic, word);
-        printf("[%s]%#06x: %02x %02x %02x  %-15s", bank, addr, opcode, byte1,
-               byte2, buffer);
-        break;
-      }
-      default:
-        UNREACHABLE("invalid opcode byte length.\n");
-        break;
-    }
-  }
+  printf("[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode, bytes[0], bytes[1],
+         mnemonic);
 }
 
 static void print_emulator_info(Emulator* e) {
