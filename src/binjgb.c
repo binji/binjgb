@@ -3337,26 +3337,41 @@ static const char* s_cb_opcode_mnemonic[256] = {
 };
 
 static void print_instruction(Emulator* e, Address addr) {
+  char bank[3] = "??";
+  MemoryTypeAddressPair pair = map_address(addr);
+  if (pair.type == MEMORY_MAP_ROM_BANK_SWITCH || pair.type == MEMORY_MAP_ROM) {
+    const char hex_digits[] = "0123456789abcdef";
+    u8 rom_bank = 0;
+    if (pair.type == MEMORY_MAP_ROM_BANK_SWITCH) {
+      rom_bank = e->state.memory_map_state.rom_bank;
+    }
+
+    bank[0] = hex_digits[(rom_bank >> 4) & 0xf];
+    bank[1] = hex_digits[rom_bank & 0xf];
+  }
+
   u8 opcode = read_u8(e, addr);
   if (opcode == 0xcb) {
     u8 cb_opcode = read_u8(e, addr + 1);
     const char* mnemonic = s_cb_opcode_mnemonic[cb_opcode];
-    printf("0x%04x: cb %02x     %-15s", addr, cb_opcode, mnemonic);
+    printf("[%s]%#06x: cb %02x     %-15s", bank, addr, cb_opcode, mnemonic);
   } else {
     char buffer[64];
     const char* mnemonic = s_opcode_mnemonic[opcode];
     u8 bytes = s_opcode_bytes[opcode];
     switch (bytes) {
       case 0:
-        printf("0x%04x: %02x        %-15s", addr, opcode, "*INVALID*");
+        printf("[%s]%#06x: %02x        %-15s", bank, addr, opcode,
+               "*INVALID*");
         break;
       case 1:
-        printf("0x%04x: %02x        %-15s", addr, opcode, mnemonic);
+        printf("[%s]%#06x: %02x        %-15s", bank, addr, opcode, mnemonic);
         break;
       case 2: {
         u8 byte = read_u8(e, addr + 1);
         snprintf(buffer, sizeof(buffer), mnemonic, byte);
-        printf("0x%04x: %02x %02x     %-15s", addr, opcode, byte, buffer);
+        printf("[%s]%#06x: %02x %02x     %-15s", bank, addr, opcode, byte,
+               buffer);
         break;
       }
       case 3: {
@@ -3364,8 +3379,8 @@ static void print_instruction(Emulator* e, Address addr) {
         u8 byte2 = read_u8(e, addr + 2);
         u16 word = (byte2 << 8) | byte1;
         snprintf(buffer, sizeof(buffer), mnemonic, word);
-        printf("0x%04x: %02x %02x %02x  %-15s", addr, opcode, byte1, byte2,
-               buffer);
+        printf("[%s]%#06x: %02x %02x %02x  %-15s", bank, addr, opcode, byte1,
+               byte2, buffer);
         break;
       }
       default:
