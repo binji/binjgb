@@ -314,27 +314,28 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define PALETTE_COLOR2(X) BITS(X, 5, 4)
 #define PALETTE_COLOR1(X) BITS(X, 3, 2)
 #define PALETTE_COLOR0(X) BITS(X, 1, 0)
+#define NR10_UNUSED 0x80
 #define NR10_SWEEP_PERIOD(X) BITS(X, 6, 4)
 #define NR10_SWEEP_DIRECTION(X) BIT(X, 3)
 #define NR10_SWEEP_SHIFT(X) BITS(X, 2, 0)
+#define NRX1_UNUSED 0x3f
 #define NRX1_WAVE_DUTY(X) BITS(X, 7, 6)
 #define NRX1_LENGTH(X) BITS(X, 5, 0)
 #define NRX2_INITIAL_VOLUME(X) BITS(X, 7, 4)
 #define NRX2_DAC_ENABLED(X) BITS(X, 7, 3)
 #define NRX2_ENVELOPE_DIRECTION(X) BIT(X, 3)
 #define NRX2_ENVELOPE_PERIOD(X) BITS(X, 2, 0)
+#define NRX4_UNUSED 0xbf
 #define NRX4_INITIAL(X) BIT(X, 7)
 #define NRX4_LENGTH_ENABLED(X) BIT(X, 6)
 #define NRX4_FREQUENCY_HI(X) BITS(X, 2, 0)
+#define NR30_UNUSED 0x7f
 #define NR30_DAC_ENABLED(X) BIT(X, 7)
+#define NR32_UNUSED 0x9f
 #define NR32_SELECT_WAVE_VOLUME(X) BITS(X, 6, 5)
 #define NR43_CLOCK_SHIFT(X) BITS(X, 7, 4)
 #define NR43_LFSR_WIDTH(X) BIT(X, 3)
 #define NR43_DIVISOR(X) BITS(X, 2, 0)
-#define OBJ_PRIORITY(X) BIT(X, 7)
-#define OBJ_YFLIP(X) BIT(X, 6)
-#define OBJ_XFLIP(X) BIT(X, 5)
-#define OBJ_PALETTE(X) BIT(X, 4)
 #define NR50_VIN_SO2(X) BIT(X, 7)
 #define NR50_SO2_VOLUME(X) BITS(X, 6, 4)
 #define NR50_VIN_SO1(X) BIT(X, 3)
@@ -347,11 +348,17 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define NR51_SOUND3_SO1(X) BIT(X, 2)
 #define NR51_SOUND2_SO1(X) BIT(X, 1)
 #define NR51_SOUND1_SO1(X) BIT(X, 0)
+#define NR52_UNUSED 0x70
 #define NR52_ALL_SOUND_ENABLED(X) BIT(X, 7)
 #define NR52_SOUND4_ON(X) BIT(X, 3)
 #define NR52_SOUND3_ON(X) BIT(X, 2)
 #define NR52_SOUND2_ON(X) BIT(X, 1)
 #define NR52_SOUND1_ON(X) BIT(X, 0)
+
+#define OBJ_PRIORITY(X) BIT(X, 7)
+#define OBJ_YFLIP(X) BIT(X, 6)
+#define OBJ_XFLIP(X) BIT(X, 5)
+#define OBJ_PALETTE(X) BIT(X, 4)
 
 #define FOREACH_RESULT(V) \
   V(OK, 0)                \
@@ -1683,109 +1690,62 @@ static u8 read_nrx4_reg(Channel* channel) {
 }
 
 static u8 read_apu(Emulator* e, MaskedAddress addr) {
-  /* APU returns 1 for invalid bits. */
-  static u8 mask[] = {
-      0x80, 0x3f, 0x00, 0xff, 0xbf,                        /* NR10-NR14 */
-      0xff, 0x3f, 0x00, 0xff, 0xbf,                        /* NR20-NR24 */
-      0x7f, 0xff, 0x9f, 0xff, 0xbf,                        /* NR30-NR34 */
-      0xff, 0xff, 0x00, 0x00, 0xbf,                        /* NR40-NR44 */
-      0x00, 0x00, 0x70,                                    /* NR50-NR52 */
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff /* Unused. */
-  };
-
-  /* addr is relative to APU_START_ADDR. */
-  assert(addr < ARRAY_SIZE(mask));
-  u8 result = mask[addr];
   APU* apu = &e->state.apu;
-
   switch (addr) {
     case APU_NR10_ADDR:
-      result |= PACK(apu->sweep.period, NR10_SWEEP_PERIOD) |
-                PACK(apu->sweep.direction, NR10_SWEEP_DIRECTION) |
-                PACK(apu->sweep.shift, NR10_SWEEP_SHIFT);
-      break;
+      return NR10_UNUSED | PACK(apu->sweep.period, NR10_SWEEP_PERIOD) |
+             PACK(apu->sweep.direction, NR10_SWEEP_DIRECTION) |
+             PACK(apu->sweep.shift, NR10_SWEEP_SHIFT);
     case APU_NR11_ADDR:
-      result |= read_nrx1_reg(&apu->channel[CHANNEL1]);
-      break;
+      return NRX1_UNUSED | read_nrx1_reg(&apu->channel[CHANNEL1]);
     case APU_NR12_ADDR:
-      result |= read_nrx2_reg(&apu->channel[CHANNEL1]);
-      break;
-    case APU_NR13_ADDR:
-      result |= INVALID_READ_BYTE;
-      break;
+      return read_nrx2_reg(&apu->channel[CHANNEL1]);
     case APU_NR14_ADDR:
-      result |= read_nrx4_reg(&apu->channel[CHANNEL1]);
-      break;
+      return NRX4_UNUSED | read_nrx4_reg(&apu->channel[CHANNEL1]);
     case APU_NR21_ADDR:
-      result |= read_nrx1_reg(&apu->channel[CHANNEL2]);
-      break;
+      return NRX1_UNUSED | read_nrx1_reg(&apu->channel[CHANNEL2]);
     case APU_NR22_ADDR:
-      result |= read_nrx2_reg(&apu->channel[CHANNEL2]);
-      break;
-    case APU_NR23_ADDR:
-      result |= INVALID_READ_BYTE;
-      break;
+      return read_nrx2_reg(&apu->channel[CHANNEL2]);
     case APU_NR24_ADDR:
-      result |= read_nrx4_reg(&apu->channel[CHANNEL2]);
-      break;
+      return NRX4_UNUSED | read_nrx4_reg(&apu->channel[CHANNEL2]);
     case APU_NR30_ADDR:
-      result |= PACK(apu->channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
-      break;
-    case APU_NR31_ADDR:
-      result |= INVALID_READ_BYTE;
-      break;
+      return NR30_UNUSED |
+             PACK(apu->channel[CHANNEL3].dac_enabled, NR30_DAC_ENABLED);
     case APU_NR32_ADDR:
-      result |= PACK(apu->wave.volume, NR32_SELECT_WAVE_VOLUME);
-      break;
-    case APU_NR33_ADDR:
-      result |= INVALID_READ_BYTE;
-      break;
+      return NR32_UNUSED | PACK(apu->wave.volume, NR32_SELECT_WAVE_VOLUME);
     case APU_NR34_ADDR:
-      result |= read_nrx4_reg(&apu->channel[CHANNEL3]);
-      break;
-    case APU_NR41_ADDR:
-      result |= INVALID_READ_BYTE;
-      break;
+      return NRX4_UNUSED | read_nrx4_reg(&apu->channel[CHANNEL3]);
     case APU_NR42_ADDR:
-      result |= read_nrx2_reg(&apu->channel[CHANNEL4]);
-      break;
+      return read_nrx2_reg(&apu->channel[CHANNEL4]);
     case APU_NR43_ADDR:
-      result |= PACK(apu->noise.clock_shift, NR43_CLOCK_SHIFT) |
-                PACK(apu->noise.lfsr_width, NR43_LFSR_WIDTH) |
-                PACK(apu->noise.divisor, NR43_DIVISOR);
-      break;
+      return PACK(apu->noise.clock_shift, NR43_CLOCK_SHIFT) |
+             PACK(apu->noise.lfsr_width, NR43_LFSR_WIDTH) |
+             PACK(apu->noise.divisor, NR43_DIVISOR);
     case APU_NR44_ADDR:
-      result |= read_nrx4_reg(&apu->channel[CHANNEL4]);
-      break;
+      return NRX4_UNUSED | read_nrx4_reg(&apu->channel[CHANNEL4]);
     case APU_NR50_ADDR:
-      result |= PACK(apu->so2_output[VIN], NR50_VIN_SO2) |
-                PACK(apu->so2_volume, NR50_SO2_VOLUME) |
-                PACK(apu->so1_output[VIN], NR50_VIN_SO1) |
-                PACK(apu->so1_volume, NR50_SO1_VOLUME);
-      break;
+      return PACK(apu->so2_output[VIN], NR50_VIN_SO2) |
+             PACK(apu->so2_volume, NR50_SO2_VOLUME) |
+             PACK(apu->so1_output[VIN], NR50_VIN_SO1) |
+             PACK(apu->so1_volume, NR50_SO1_VOLUME);
     case APU_NR51_ADDR:
-      result |= PACK(apu->so2_output[SOUND4], NR51_SOUND4_SO2) |
-                PACK(apu->so2_output[SOUND3], NR51_SOUND3_SO2) |
-                PACK(apu->so2_output[SOUND2], NR51_SOUND2_SO2) |
-                PACK(apu->so2_output[SOUND1], NR51_SOUND1_SO2) |
-                PACK(apu->so1_output[SOUND4], NR51_SOUND4_SO1) |
-                PACK(apu->so1_output[SOUND3], NR51_SOUND3_SO1) |
-                PACK(apu->so1_output[SOUND2], NR51_SOUND2_SO1) |
-                PACK(apu->so1_output[SOUND1], NR51_SOUND1_SO1);
-      break;
+      return PACK(apu->so2_output[SOUND4], NR51_SOUND4_SO2) |
+             PACK(apu->so2_output[SOUND3], NR51_SOUND3_SO2) |
+             PACK(apu->so2_output[SOUND2], NR51_SOUND2_SO2) |
+             PACK(apu->so2_output[SOUND1], NR51_SOUND1_SO2) |
+             PACK(apu->so1_output[SOUND4], NR51_SOUND4_SO1) |
+             PACK(apu->so1_output[SOUND3], NR51_SOUND3_SO1) |
+             PACK(apu->so1_output[SOUND2], NR51_SOUND2_SO1) |
+             PACK(apu->so1_output[SOUND1], NR51_SOUND1_SO1);
     case APU_NR52_ADDR:
-      result |= PACK(apu->enabled, NR52_ALL_SOUND_ENABLED) |
-                PACK(apu->channel[CHANNEL4].status, NR52_SOUND4_ON) |
-                PACK(apu->channel[CHANNEL3].status, NR52_SOUND3_ON) |
-                PACK(apu->channel[CHANNEL2].status, NR52_SOUND2_ON) |
-                PACK(apu->channel[CHANNEL1].status, NR52_SOUND1_ON);
-      VERBOSE(apu, "read nr52: 0x%02x de=0x%04x\n", result, e->state.reg.DE);
-      break;
+      return NR52_UNUSED | PACK(apu->enabled, NR52_ALL_SOUND_ENABLED) |
+             PACK(apu->channel[CHANNEL4].status, NR52_SOUND4_ON) |
+             PACK(apu->channel[CHANNEL3].status, NR52_SOUND3_ON) |
+             PACK(apu->channel[CHANNEL2].status, NR52_SOUND2_ON) |
+             PACK(apu->channel[CHANNEL1].status, NR52_SOUND1_ON);
     default:
-      break;
+      return INVALID_READ_BYTE;
   }
-
-  return result;
 }
 
 static WaveSample* is_concurrent_wave_ram_access(Emulator* e,
@@ -4053,7 +4013,7 @@ static Result sdl_init_renderer(SDL* sdl, Bool vsync) {
   DESTROY_IF(sdl->renderer, SDL_DestroyRenderer);
   sdl->renderer = SDL_CreateRenderer(sdl->window, -1,
                                      vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
-  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateWindow failed.\n");
+  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateRenderer failed.\n");
   CHECK_MSG(
       SDL_RenderSetLogicalSize(sdl->renderer, SCREEN_WIDTH, SCREEN_HEIGHT) == 0,
       "SDL_SetRendererLogicalSize failed.\n");
