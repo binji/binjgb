@@ -105,7 +105,7 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 /* Sizes */
 #define MINIMUM_ROM_SIZE 32768
 #define VIDEO_RAM_SIZE 8192
-#define WORK_RAM_MAX_SIZE 32768
+#define WORK_RAM_SIZE 8192
 #define EXT_RAM_MAX_SIZE 32768
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
@@ -690,11 +690,6 @@ typedef struct {
 } ExtRam;
 
 typedef struct {
-  u8 data[WORK_RAM_MAX_SIZE];
-  size_t size; /* normally 8k, 32k in CGB mode */
-} WorkRam;
-
-typedef struct {
   const char* title_start;
   size_t title_length;
   CgbFlag cgb_flag;
@@ -719,10 +714,8 @@ typedef struct {
 } MBC5;
 
 typedef struct {
-  u8 (*read_work_ram_bank_switch)(struct Emulator*, MaskedAddress);
   u8 (*read_ext_ram)(struct Emulator*, MaskedAddress);
   void (*write_rom)(struct Emulator*, MaskedAddress, u8);
-  void (*write_work_ram_bank_switch)(struct Emulator*, MaskedAddress, u8);
   void (*write_ext_ram)(struct Emulator*, MaskedAddress, u8);
 } MemoryMap;
 
@@ -980,7 +973,7 @@ typedef struct {
   Registers reg;
   u8 vram[VIDEO_RAM_SIZE];
   ExtRam ext_ram;
-  WorkRam ram;
+  u8 wram[WORK_RAM_SIZE];
   Interrupt interrupt;
   Obj oam[OBJ_COUNT];
   Joypad JOYP;
@@ -1124,17 +1117,6 @@ static void dummy_write(Emulator* e, MaskedAddress addr, u8 value) {}
 
 static u8 dummy_read(Emulator* e, MaskedAddress addr) {
   return INVALID_READ_BYTE;
-}
-
-static u8 gb_read_work_ram_bank_switch(Emulator* e, MaskedAddress addr) {
-  assert(addr <= ADDR_MASK_4K);
-  return e->state.ram.data[0x1000 + addr];
-}
-
-static void gb_write_work_ram_bank_switch(Emulator* e, MaskedAddress addr,
-                                          u8 value) {
-  assert(addr <= ADDR_MASK_4K);
-  e->state.ram.data[0x1000 + addr] = value;
 }
 
 static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1803,13 +1785,13 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
     case MEMORY_MAP_EXT_RAM:
       return e->memory_map.read_ext_ram(e, pair.addr);
     case MEMORY_MAP_WORK_RAM:
-      return e->state.ram.data[pair.addr];
+      return e->state.wram[pair.addr];
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
-      return e->memory_map.read_work_ram_bank_switch(e, pair.addr);
+      return e->state.wram[0x1000 + pair.addr];
     case MEMORY_MAP_OAM:
       return read_oam(e, pair.addr);
     case MEMORY_MAP_UNUSED:
-      return 0;
+      return INVALID_READ_BYTE;
     case MEMORY_MAP_IO: {
       u8 value = read_io(e, pair.addr);
       VERBOSE(io, "read_io(0x%04x [%s]) = 0x%02x\n", pair.addr,
@@ -2503,10 +2485,10 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
       e->memory_map.write_ext_ram(e, pair.addr, value);
       break;
     case MEMORY_MAP_WORK_RAM:
-      e->state.ram.data[pair.addr] = value;
+      e->state.wram[pair.addr] = value;
       break;
     case MEMORY_MAP_WORK_RAM_BANK_SWITCH:
-      e->memory_map.write_work_ram_bank_switch(e, pair.addr, value);
+      e->state.wram[0x1000 + pair.addr] = value;
       break;
     case MEMORY_MAP_OAM:
       write_oam(e, pair.addr, value);
