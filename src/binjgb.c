@@ -519,28 +519,26 @@ typedef enum {
   MBC_TYPE_HUC3,
   MBC_TYPE_HUC1,
 } MBCType;
-static MBCType s_mbc_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = MBC_TYPE_##mbc,
-    FOREACH_CARTRIDGE_TYPE(V)
-#undef V
-};
 
 typedef enum {
   EXT_RAM_TYPE_NO_RAM,
   EXT_RAM_TYPE_WITH_RAM,
 } ExtRamType;
-static ExtRamType s_ext_ram_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = EXT_RAM_TYPE_##ram,
-    FOREACH_CARTRIDGE_TYPE(V)
-#undef V
-};
 
 typedef enum {
   BATTERY_TYPE_NO_BATTERY,
   BATTERY_TYPE_WITH_BATTERY,
 } BatteryType;
-static BatteryType s_battery_type[] = {
-#define V(name, code, mbc, ram, battery) [code] = BATTERY_TYPE_##battery,
+
+typedef struct {
+  MBCType mbc_type;
+  ExtRamType ext_ram_type;
+  BatteryType battery_type;
+} CartridgeInfo;
+
+static CartridgeInfo s_cartridge_info[] = {
+#define V(name, code, mbc, ram, battery) \
+  [code] = {MBC_TYPE_##mbc, EXT_RAM_TYPE_##ram, BATTERY_TYPE_##battery},
     FOREACH_CARTRIDGE_TYPE(V)
 #undef V
 };
@@ -1326,6 +1324,7 @@ static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static Result init_memory_map(Emulator* e) {
+  CartridgeInfo* cartridge_info = &s_cartridge_info[e->rom_info.cartridge_type];
   MemoryMap* memory_map = &e->memory_map;
   MemoryMapState* memory_map_state = &e->state.memory_map_state;
   ZERO_MEMORY(*memory_map);
@@ -1333,10 +1332,8 @@ static Result init_memory_map(Emulator* e) {
   memory_map_state->rom_bank_mask = s_rom_bank_mask[e->rom_info.rom_size];
   memory_map_state->ext_ram_addr_mask =
       s_ext_ram_addr_mask[e->rom_info.ext_ram_size];
-  memory_map->read_work_ram_bank_switch = gb_read_work_ram_bank_switch;
-  memory_map->write_work_ram_bank_switch = gb_write_work_ram_bank_switch;
 
-  switch (s_ext_ram_type[e->rom_info.cartridge_type]) {
+  switch (cartridge_info->ext_ram_type) {
     case EXT_RAM_TYPE_WITH_RAM:
       assert(is_ext_ram_size_valid(e->rom_info.ext_ram_size));
       memory_map->read_ext_ram = gb_read_ext_ram;
@@ -1351,7 +1348,7 @@ static Result init_memory_map(Emulator* e) {
       break;
   }
 
-  switch (s_mbc_type[e->rom_info.cartridge_type]) {
+  switch (cartridge_info->mbc_type) {
     case MBC_TYPE_NO_MBC:
       memory_map->write_rom = dummy_write;
       break;
@@ -1380,7 +1377,7 @@ static Result init_memory_map(Emulator* e) {
       return ERROR;
   }
 
-  e->state.ext_ram.battery_type = s_battery_type[e->rom_info.cartridge_type];
+  e->state.ext_ram.battery_type = cartridge_info->battery_type;
   return OK;
 }
 
