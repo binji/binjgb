@@ -2900,7 +2900,7 @@ static void update_channel_sweep(Channel* channel, Sweep* sweep) {
   }
 }
 
-static u8 update_square_wave(Channel* channel, SquareWave* wave) {
+static u8 update_square_wave(SquareWave* wave) {
   static u8 duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] =
       {[WAVE_DUTY_12_5] = {0, 0, 0, 0, 0, 0, 0, 1},
        [WAVE_DUTY_25] = {1, 0, 0, 0, 0, 0, 0, 1},
@@ -2925,8 +2925,7 @@ static void update_channel_length(Channel* channel) {
   }
 }
 
-static void update_channel_envelope(Emulator* e, Channel* channel) {
-  Envelope* envelope = &channel->envelope;
+static void update_envelope(Envelope* envelope) {
   if (envelope->period) {
     if (envelope->automatic && --envelope->timer == 0) {
       envelope->timer = envelope->period;
@@ -2966,7 +2965,7 @@ static u8 update_wave(APU* apu, Wave* wave) {
   return wave->sample[0].data;
 }
 
-static u8 update_noise(APU* apu, Noise* noise) {
+static u8 update_noise(Noise* noise) {
   if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
     if (noise->cycles <= APU_CYCLES) {
       noise->cycles += noise->period;
@@ -3021,11 +3020,11 @@ static void apu_update_channel_1(Emulator *e, Bool length, Bool envelope,
   u8 sample = 0;
   if (channel1->status) {
     if (sweep) update_channel_sweep(channel1, &e->state.apu.sweep);
-    sample = update_square_wave(channel1, &channel1->square_wave);
+    sample = update_square_wave(&channel1->square_wave);
   }
   if (length) update_channel_length(channel1);
   if (channel1->status) {
-    if (envelope) update_channel_envelope(e, channel1);
+    if (envelope) update_envelope(&channel1->envelope);
     apu_mix_sample(e, CHANNEL1, channelx_sample(channel1, sample),
                    out_so1_sample, out_so2_sample);
   }
@@ -3036,11 +3035,11 @@ static void apu_update_channel_2(Emulator *e, Bool length, Bool envelope,
   Channel* channel2 = &e->state.apu.channel[CHANNEL2];
   u8 sample = 0;
   if (channel2->status) {
-    sample = update_square_wave(channel2, &channel2->square_wave);
+    sample = update_square_wave(&channel2->square_wave);
   }
   if (length) update_channel_length(channel2);
   if (channel2->status) {
-    if (envelope) update_channel_envelope(e, channel2);
+    if (envelope) update_envelope(&channel2->envelope);
     apu_mix_sample(e, CHANNEL2, channelx_sample(channel2, sample),
                    out_so1_sample, out_so2_sample);
   }
@@ -3066,11 +3065,11 @@ static void apu_update_channel_4(Emulator *e, Bool length, Bool envelope,
   Channel* channel4 = &e->state.apu.channel[CHANNEL4];
   u8 sample = 0;
   if (channel4->status) {
-    sample = update_noise(&e->state.apu, &e->state.apu.noise);
+    sample = update_noise(&e->state.apu.noise);
   }
   if (length) update_channel_length(channel4);
   if (channel4->status) {
-    if (envelope) update_channel_envelope(e, channel4);
+    if (envelope) update_envelope(&channel4->envelope);
     apu_mix_sample(e, CHANNEL4, channelx_sample(channel4, sample),
                    out_so1_sample, out_so2_sample);
   }
