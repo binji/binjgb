@@ -984,6 +984,11 @@ typedef struct {
   u32 cycles;
 } EmulatorState;
 
+typedef struct JoypadCallback {
+  void (*func)(struct Emulator* e, void* user_data);
+  void* user_data;
+} JoypadCallback;
+
 typedef struct Emulator {
   EmulatorConfig config;
   RomInfo rom_info;
@@ -992,6 +997,7 @@ typedef struct Emulator {
   EmulatorState state;
   FrameBuffer frame_buffer;
   AudioBuffer audio_buffer;
+  JoypadCallback joypad_callback;
 } Emulator;
 
 static Bool s_never_trace = 0;
@@ -1577,6 +1583,9 @@ static u8 read_joyp_p10_p13(Emulator* e) {
 static u8 read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR:
+      if (e->joypad_callback.func) {
+        e->joypad_callback.func(e, e->joypad_callback.user_data);
+      }
       return JOYP_UNUSED |
              PACK(e->state.JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
              (read_joyp_p10_p13(e) & JOYP_RESULT_MASK);
@@ -3852,7 +3861,6 @@ typedef u32 EmulatorEvent;
 enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
-  EMULATOR_EVENT_TIMEOUT = 0x4,
 };
 
 static void reset_audio_buffer(Emulator* e) {
@@ -3881,8 +3889,7 @@ static f64 get_time_ms(void) {
 
 static EmulatorEvent run_emulator_until_event(Emulator* e,
                                               EmulatorEvent last_event,
-                                              u32 requested_samples,
-                                              f64 until_ms) {
+                                              u32 requested_samples) {
   if (last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
   }
@@ -3907,10 +3914,6 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
         result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
         running = FALSE;
       }
-    }
-    if (get_time_ms() >= until_ms) {
-      result |= EMULATOR_EVENT_TIMEOUT;
-      running = FALSE;
     }
   }
   return result;
@@ -4151,14 +4154,6 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
       case SDL_KEYUP: {
         Bool down = event.type == SDL_KEYDOWN;
         switch (event.key.keysym.scancode) {
-          case SDL_SCANCODE_UP: e->state.JOYP.up = down; break;
-          case SDL_SCANCODE_DOWN: e->state.JOYP.down = down; break;
-          case SDL_SCANCODE_LEFT: e->state.JOYP.left = down; break;
-          case SDL_SCANCODE_RIGHT: e->state.JOYP.right = down; break;
-          case SDL_SCANCODE_Z: e->state.JOYP.B = down; break;
-          case SDL_SCANCODE_X: e->state.JOYP.A = down; break;
-          case SDL_SCANCODE_RETURN: e->state.JOYP.start = down; break;
-          case SDL_SCANCODE_BACKSPACE: e->state.JOYP.select = down; break;
           case SDL_SCANCODE_TAB: e->config.no_sync = down; break;
           case SDL_SCANCODE_F11: if (!down) e->config.fullscreen ^= 1; break;
           default: break;
@@ -4342,6 +4337,19 @@ static Result write_ext_ram_to_file(Emulator* e, const char* filename) {
 static Emulator s_emulator;
 static SDL s_sdl;
 
+static void joypad_callback(Emulator* e, void* user_data) {
+  SDL* sdl = user_data;
+  const u8* state = SDL_GetKeyboardState(NULL);
+  e->state.JOYP.up = state[SDL_SCANCODE_UP];
+  e->state.JOYP.down = state[SDL_SCANCODE_DOWN];
+  e->state.JOYP.left = state[SDL_SCANCODE_LEFT];
+  e->state.JOYP.right = state[SDL_SCANCODE_RIGHT];
+  e->state.JOYP.B = state[SDL_SCANCODE_Z];
+  e->state.JOYP.A = state[SDL_SCANCODE_X];
+  e->state.JOYP.start = state[SDL_SCANCODE_RETURN];
+  e->state.JOYP.select = state[SDL_SCANCODE_BACKSPACE];
+}
+
 int main(int argc, char** argv) {
   init_time();
   --argc; ++argv;
@@ -4356,19 +4364,20 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(init_audio_buffer(&s_sdl, &e->audio_buffer)));
   CHECK(SUCCESS(init_emulator(e)));
 
+  e->joypad_callback.func = joypad_callback;
+  e->joypad_callback.user_data = &s_sdl;
+
   s_sdl.save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
   s_sdl.save_state_filename =
       replace_extension(rom_filename, SAVE_STATE_EXTENSION);
   read_ext_ram_from_file(e, s_sdl.save_filename);
 
-  f64 now_ms = get_time_ms();
-  f64 next_poll_event_ms = now_ms + POLL_EVENT_MS;
   EmulatorEvent event = 0;
   while (TRUE) {
+    if (!sdl_poll_events(e, &s_sdl)) {
+      break;
+    }
     if (e->config.paused) {
-      if (!sdl_poll_events(e, &s_sdl)) {
-        break;
-      }
       SDL_PauseAudioDevice(s_sdl.audio.dev,
                            e->config.paused || !s_sdl.audio.ready);
       SDL_Delay(VIDEO_FRAME_MS);
@@ -4378,19 +4387,9 @@ int main(int argc, char** argv) {
     size_t buffer_needed = s_sdl.audio.spec.size -
                            s_sdl.audio.buffer_available % s_sdl.audio.spec.size;
     u32 requested_samples = get_gb_channel_samples(&s_sdl, buffer_needed);
-    event = run_emulator_until_event(e, event, requested_samples,
-                                     next_poll_event_ms);
+    event = run_emulator_until_event(e, event, requested_samples);
     if (!e->config.no_sync) {
       sdl_synchronize(&s_sdl, e);
-    }
-    if (event & EMULATOR_EVENT_TIMEOUT) {
-      now_ms = get_time_ms();
-      if (!sdl_poll_events(e, &s_sdl)) {
-        break;
-      }
-      while (next_poll_event_ms < now_ms) {
-        next_poll_event_ms += POLL_EVENT_MS;
-      }
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       sdl_render_video(&s_sdl, e);
@@ -4399,8 +4398,10 @@ int main(int argc, char** argv) {
         e->config.step = FALSE;
       }
     }
-    sdl_render_audio(&s_sdl, e);
-    reset_audio_buffer(e);
+    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+      sdl_render_audio(&s_sdl, e);
+      reset_audio_buffer(e);
+    }
   }
 
   write_ext_ram_to_file(e, s_sdl.save_filename);

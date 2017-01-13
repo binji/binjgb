@@ -159,8 +159,8 @@ int main(int argc, char** argv) {
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
-    event = run_emulator_until_event(e, event, GB_CHANNEL_SAMPLES, timeout_ms);
-    if (event & EMULATOR_EVENT_TIMEOUT) {
+    event = run_emulator_until_event(e, event, GB_CHANNEL_SAMPLES);
+    if (get_time_ms() > timeout_ms) {
       PRINT_ERROR("test timed out.\n");
       goto error;
     }
