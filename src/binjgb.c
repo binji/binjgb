@@ -494,6 +494,7 @@ static u32 s_rom_bank_mask[] = {
     FOREACH_ROM_SIZE(V)
 #undef V
 };
+#define ROM_BANK_MASK(e) s_rom_bank_mask[(e)->rom_info.rom_size]
 
 static u32 s_ext_ram_byte_size[] = {
 #define V(name, code, byte_size, addr_mask) [code] = byte_size,
@@ -506,6 +507,7 @@ static u32 s_ext_ram_addr_mask[] = {
     FOREACH_EXT_RAM_SIZE(V)
 #undef V
 };
+#define EXT_RAM_BANK_MASK(e) s_ext_ram_addr_mask[(e)->rom_info.ext_ram_size]
 
 typedef enum {
   MBC_TYPE_NO_MBC,
@@ -544,8 +546,8 @@ static CartridgeInfo s_cartridge_info[] = {
 };
 
 typedef enum {
-  MEMORY_MAP_ROM,
-  MEMORY_MAP_ROM_BANK_SWITCH,
+  MEMORY_MAP_ROM0,
+  MEMORY_MAP_ROM1,
   MEMORY_MAP_VRAM,
   MEMORY_MAP_EXT_RAM,
   MEMORY_MAP_WORK_RAM,
@@ -718,10 +720,8 @@ typedef struct {
 } MemoryMap;
 
 typedef struct {
-  u8 rom_bank_mask;
-  u16 rom_bank;
-  u16 ext_ram_addr_mask;
-  u8 ext_ram_bank;
+  u32 rom_base[2];
+  u32 ext_ram_base;
   Bool ext_ram_enabled;
   union {
     MBC1 mbc1;
@@ -1123,6 +1123,52 @@ static u8 dummy_read(Emulator* e, MaskedAddress addr) {
   return INVALID_READ_BYTE;
 }
 
+static void set_rom_bank(Emulator* e, int rom_index, u16 bank) {
+  u32 new_base = (bank & ROM_BANK_MASK(e)) << ROM_BANK_SHIFT;
+  u32* base = &e->state.memory_map_state.rom_base[rom_index];
+  if (new_base != *base) {
+    DEBUG(memory, "%s(rom: %d, bank: %d) = 0x%06x\n", __func__, bank, rom_index,
+          new_base);
+  }
+  *base = new_base;
+}
+
+static void set_ext_ram_bank(Emulator* e, u8 bank) {
+  u32 new_base = (bank & EXT_RAM_BANK_MASK(e)) << EXT_RAM_BANK_SHIFT;
+  u32* base = &e->state.memory_map_state.ext_ram_base;
+  if (new_base != *base) {
+    DEBUG(memory, "%s(%d) = 0x%06x\n", __func__, bank, new_base);
+  }
+  *base = new_base;
+}
+
+#define INFO_READ_RAM_DISABLED \
+  INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr)
+#define INFO_WRITE_RAM_DISABLED                                               \
+  INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr, \
+       value);
+
+static u8 gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
+  MemoryMapState* memory_map = &e->state.memory_map_state;
+  if (memory_map->ext_ram_enabled) {
+    assert(addr <= ADDR_MASK_8K);
+    return e->state.ext_ram.data[memory_map->ext_ram_base | addr];
+  } else {
+    INFO_READ_RAM_DISABLED;
+    return INVALID_READ_BYTE;
+  }
+}
+
+static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
+  MemoryMapState* memory_map = &e->state.memory_map_state;
+  if (memory_map->ext_ram_enabled) {
+    assert(addr <= ADDR_MASK_8K);
+    e->state.ext_ram.data[memory_map->ext_ram_base | addr] = value;
+  } else {
+    INFO_WRITE_RAM_DISABLED;
+  }
+}
+
 static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
   MemoryMapState* memory_map = &e->state.memory_map_state;
   MBC1* mbc1 = &memory_map->mbc1;
@@ -1135,63 +1181,31 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       mbc1->byte_2000_3fff = value;
       break;
     case 2: /* 4000-5fff */
+      printf("%s(%#x, %u)\n", __func__, addr, value);
       mbc1->byte_4000_5fff = value;
       break;
     case 3: /* 6000-7fff */
+      printf("%s(%#x, %u)\n", __func__, addr, value);
       mbc1->bank_mode = (BankMode)(value & 1);
       break;
   }
 
-  memory_map->rom_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_SELECT_MASK;
-  if (memory_map->rom_bank == 0) {
-    memory_map->rom_bank++;
+  u16 rom1_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_SELECT_MASK;
+  if (rom1_bank == 0) {
+    rom1_bank++;
   }
 
+  u8 ext_ram_bank;
   if (mbc1->bank_mode == BANK_MODE_ROM) {
-    memory_map->rom_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK)
-                            << MBC1_BANK_HI_SHIFT;
-    memory_map->ext_ram_bank = 0;
+    rom1_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK)
+                 << MBC1_BANK_HI_SHIFT;
+    ext_ram_bank = 0;
   } else {
-    memory_map->ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
+    ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
   }
 
-  memory_map->rom_bank &= memory_map->rom_bank_mask;
-
-  VERBOSE(memory,
-          "mbc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
-          value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
-}
-
-static u32 get_ext_ram_address(Emulator* e, MaskedAddress addr) {
-  assert(addr <= ADDR_MASK_8K);
-  u8 ram_bank = e->state.memory_map_state.ext_ram_bank;
-  u32 ram_addr = ((ram_bank << EXT_RAM_BANK_SHIFT) &
-                  e->state.memory_map_state.ext_ram_addr_mask) |
-                 addr;
-  return ram_addr;
-}
-
-#define INFO_READ_RAM_DISABLED \
-  INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr)
-#define INFO_WRITE_RAM_DISABLED                                               \
-  INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr, \
-       value);
-
-static u8 gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
-  if (e->state.memory_map_state.ext_ram_enabled) {
-    return e->state.ext_ram.data[get_ext_ram_address(e, addr)];
-  } else {
-    INFO_READ_RAM_DISABLED;
-    return INVALID_READ_BYTE;
-  }
-}
-
-static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
-  if (e->state.memory_map_state.ext_ram_enabled) {
-    e->state.ext_ram.data[get_ext_ram_address(e, addr)] = value;
-  } else {
-    INFO_WRITE_RAM_DISABLED;
-  }
+  set_rom_bank(e, 1, rom1_bank);
+  set_ext_ram_bank(e, ext_ram_bank);
 }
 
 static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1202,23 +1216,18 @@ static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
         memory_map->ext_ram_enabled =
             (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       }
-      VERBOSE(memory, "%s(0x%04x, 0x%02x): enabled = %u\n", __func__, addr,
-              value, memory_map->ext_ram_enabled);
       break;
-    case 1: /* 2000-3fff */
+    case 1: { /* 2000-3fff */
+      u16 rom1_bank;
       if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
-        memory_map->rom_bank =
-            value & MBC2_ROM_BANK_SELECT_MASK & memory_map->rom_bank_mask;
-        VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
-                __func__, addr, value, memory_map->rom_bank,
-                memory_map->rom_bank << ROM_BANK_SHIFT);
-      }
-      if (memory_map->rom_bank == 0) {
-        memory_map->rom_bank++;
+        rom1_bank = value & MBC2_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+        if (rom1_bank == 0) {
+          rom1_bank++;
+        }
+        set_rom_bank(e, 1, rom1_bank);
       }
       break;
-    default:
-      break;
+    }
   }
 }
 
@@ -1247,15 +1256,13 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       memory_map->ext_ram_enabled =
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
-    case 1: /* 2000-3fff */
-      memory_map->rom_bank =
-          value & MBC3_ROM_BANK_SELECT_MASK & memory_map->rom_bank_mask;
-      VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n",
-              __func__, addr, value, memory_map->rom_bank,
-              memory_map->rom_bank << ROM_BANK_SHIFT);
+    case 1: { /* 2000-3fff */
+      u16 rom1_bank = value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+      set_rom_bank(e, 1, rom1_bank);
       break;
+    }
     case 2: /* 4000-5fff */
-      memory_map->ext_ram_bank = value & MBC3_RAM_BANK_SELECT_MASK;
+      set_ext_ram_bank(e, value & MBC3_RAM_BANK_SELECT_MASK);
       break;
     default:
       break;
@@ -1276,18 +1283,14 @@ static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       memory_map->mbc5.byte_3000_3fff = value;
       break;
     case 4: case 5: /* 4000-5fff */
-      memory_map->ext_ram_bank = value & MBC5_RAM_BANK_SELECT_MASK;
+      set_ext_ram_bank(e, value & MBC5_RAM_BANK_SELECT_MASK);
       break;
     default:
       break;
   }
 
-  memory_map->rom_bank = (((memory_map->mbc5.byte_3000_3fff & 1) << 8) |
-                          memory_map->mbc5.byte_2000_2fff) &
-                         memory_map->rom_bank_mask;
-  VERBOSE(memory, "%s(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", __func__,
-          addr, value, memory_map->rom_bank,
-          memory_map->rom_bank << ROM_BANK_SHIFT);
+  set_rom_bank(e, 1, ((memory_map->mbc5.byte_3000_3fff & 1) << 8) |
+                         memory_map->mbc5.byte_2000_2fff);
 }
 
 static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1309,24 +1312,21 @@ static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       break;
   }
 
-  memory_map->rom_bank = huc1->byte_2000_3fff & HUC1_ROM_BANK_LO_SELECT_MASK;
-  if (memory_map->rom_bank == 0) {
-    memory_map->rom_bank++;
+  u16 rom1_bank = huc1->byte_2000_3fff & HUC1_ROM_BANK_LO_SELECT_MASK;
+  if (rom1_bank == 0) {
+    rom1_bank++;
   }
 
+  u8 ext_ram_bank;
   if (huc1->bank_mode == BANK_MODE_ROM) {
-    memory_map->rom_bank |= (huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK)
-                            << HUC1_BANK_HI_SHIFT;
-    memory_map->ext_ram_bank = 0;
+    rom1_bank |= (huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK)
+                 << HUC1_BANK_HI_SHIFT;
+    ext_ram_bank = 0;
   } else {
-    memory_map->ext_ram_bank = huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK;
+    ext_ram_bank = huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK;
   }
-
-  memory_map->rom_bank &= memory_map->rom_bank_mask;
-
-  VERBOSE(memory,
-          "huc1_write_rom(0x%04x, 0x%02x): rom bank = 0x%02x (0x%06x)\n", addr,
-          value, memory_map->rom_bank, memory_map->rom_bank << ROM_BANK_SHIFT);
+  set_rom_bank(e, 1, rom1_bank);
+  set_ext_ram_bank(e, ext_ram_bank);
 }
 
 static Result init_memory_map(Emulator* e) {
@@ -1334,10 +1334,7 @@ static Result init_memory_map(Emulator* e) {
   MemoryMap* memory_map = &e->memory_map;
   MemoryMapState* memory_map_state = &e->state.memory_map_state;
   ZERO_MEMORY(*memory_map);
-  memory_map_state->rom_bank = 1;
-  memory_map_state->rom_bank_mask = s_rom_bank_mask[e->rom_info.rom_size];
-  memory_map_state->ext_ram_addr_mask =
-      s_ext_ram_addr_mask[e->rom_info.ext_ram_size];
+  memory_map_state->rom_base[1] = 1 << ROM_BANK_SHIFT;
 
   switch (cartridge_info->ext_ram_type) {
     case EXT_RAM_TYPE_WITH_RAM:
@@ -1445,11 +1442,11 @@ static MemoryTypeAddressPair map_address(Address addr) {
   MemoryTypeAddressPair result;
   switch (addr >> 12) {
     case 0x0: case 0x1: case 0x2: case 0x3:
-      result.type = MEMORY_MAP_ROM;
+      result.type = MEMORY_MAP_ROM0;
       result.addr = addr & ADDR_MASK_16K;
       break;
     case 0x4: case 0x5: case 0x6: case 0x7:
-      result.type = MEMORY_MAP_ROM_BANK_SWITCH;
+      result.type = MEMORY_MAP_ROM1;
       result.addr = addr & ADDR_MASK_16K;
       break;
     case 0x8: case 0x9:
@@ -1778,11 +1775,13 @@ static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
 
 static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   switch (pair.type) {
-    case MEMORY_MAP_ROM:
-      return e->rom_data.data[pair.addr];
-    case MEMORY_MAP_ROM_BANK_SWITCH: {
-      u8 rom_bank = e->state.memory_map_state.rom_bank;
-      u32 rom_addr = (rom_bank << ROM_BANK_SHIFT) | pair.addr;
+    case MEMORY_MAP_ROM0: {
+      u32 rom_addr = e->state.memory_map_state.rom_base[0] | pair.addr;
+      assert(rom_addr < e->rom_data.size);
+      return e->rom_data.data[rom_addr];
+    }
+    case MEMORY_MAP_ROM1: {
+      u32 rom_addr = e->state.memory_map_state.rom_base[1] | pair.addr;
       assert(rom_addr < e->rom_data.size);
       return e->rom_data.data[rom_addr];
     }
@@ -2479,10 +2478,10 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
   }
 
   switch (pair.type) {
-    case MEMORY_MAP_ROM:
+    case MEMORY_MAP_ROM0:
       e->memory_map.write_rom(e, pair.addr, value);
       break;
-    case MEMORY_MAP_ROM_BANK_SWITCH:
+    case MEMORY_MAP_ROM1:
       e->memory_map.write_rom(e, pair.addr + 0x4000, value);
       break;
     case MEMORY_MAP_VRAM:
@@ -3325,10 +3324,10 @@ static void print_instruction(Emulator* e, Address addr) {
 
   char bank[3] = "??";
   MemoryTypeAddressPair pair = map_address(addr);
-  if (pair.type == MEMORY_MAP_ROM_BANK_SWITCH || pair.type == MEMORY_MAP_ROM) {
-    sprint_hex(bank, pair.type == MEMORY_MAP_ROM_BANK_SWITCH
-                         ? e->state.memory_map_state.rom_bank
-                         : 0);
+  if (pair.type == MEMORY_MAP_ROM0 || pair.type == MEMORY_MAP_ROM1) {
+    int rom_index = pair.type - MEMORY_MAP_ROM0;
+    sprint_hex(bank,
+               e->state.memory_map_state.rom_base[rom_index] >> ROM_BANK_SHIFT);
   }
 
   printf("[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode, bytes[0], bytes[1],
