@@ -65,3 +65,18 @@ def MakePatternRE(patterns):
   else:
     pattern_re = '.*'
   return re.compile(pattern_re)
+
+
+def GetMatchedRoms(pattern_re):
+  roms = []
+  for root, dirs, files in os.walk(ROM_DIR):
+    for file_ in files:
+      path = os.path.join(root, file_)
+      if not os.path.splitext(path)[1].startswith('.gb'):
+        continue
+      if not pattern_re.match(path):
+        continue
+      if 'GBS' in path:
+        continue
+      roms.append(path)
+  return roms

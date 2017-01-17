@@ -73,18 +73,7 @@ def main(args):
                       help='test patterns.')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
-
-  roms = []
-  for root, dirs, files in os.walk(common.ROM_DIR):
-    for file_ in files:
-      path = os.path.join(root, file_)
-      if not os.path.splitext(path)[1].startswith('.gb'):
-        continue
-      if not pattern_re.match(path):
-        continue
-      if 'GBS' in path:
-        continue
-      roms.append(path)
+  roms = common.GetMatchedRoms(pattern_re)
 
   if options.list:
     for rom in roms:
