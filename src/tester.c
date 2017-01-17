@@ -8,8 +8,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#define AUDIO_FREQUENCY 44100
 /* This value is arbitrary. Why not 1/10th of a second? */
-#define GB_CHANNEL_SAMPLES ((APU_CYCLES_PER_SECOND / 10) * SOUND_OUTPUT_COUNT)
+#define GB_CHANNEL_SAMPLES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
 #define DEFAULT_TIMEOUT_SEC 30
 #define DEFAULT_FRAMES 60
 
@@ -30,12 +31,13 @@ static char* replace_extension(const char* filename, const char* extension) {
 
 static Result init_audio_buffer(AudioBuffer* audio_buffer) {
   u32 gb_channel_samples =
-      (GB_CHANNEL_SAMPLES + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES);
+      GB_CHANNEL_SAMPLES + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
   size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
   audio_buffer->data = malloc(buffer_size);
   CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
   audio_buffer->end = audio_buffer->data + gb_channel_samples;
   audio_buffer->position = audio_buffer->data;
+  audio_buffer->frequency = AUDIO_FREQUENCY;
   return OK;
 error:
   return ERROR;
@@ -148,9 +150,9 @@ int main(int argc, char** argv) {
   /* Run for N frames, measured by audio samples (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
    * we still produce audio samples at a fixed rate. */
-  u32 total_samples =
-      (u32)((f64)frames * APU_CYCLES_PER_SECOND * PPU_FRAME_CYCLES *
-            SOUND_OUTPUT_COUNT / CPU_CYCLES_PER_SECOND);
+  u32 total_samples = (u32)((f64)frames * PPU_FRAME_CYCLES * AUDIO_FREQUENCY *
+                                SOUND_OUTPUT_COUNT / CPU_CYCLES_PER_SECOND +
+                            1);
   LOG("frames = %u total_samples = %u\n", frames, total_samples);
   f64 timeout_ms = get_time_ms() + timeout_sec * MILLISECONDS_PER_SECOND;
   EmulatorEvent event = 0;
