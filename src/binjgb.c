@@ -202,8 +202,8 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
  * of the slowest instruction. */
 #define AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES 256
 
-/* TODO hack (?) to make dmg_sound-2 tests pass. */
-#define WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES 2
+#define WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES APU_CYCLES
+#define WAVE_TRIGGER_DELAY_CYCLES (3 * APU_CYCLES)
 
 #define FRAME_SEQUENCER_COUNT 8
 #define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
@@ -821,13 +821,6 @@ typedef struct {
   Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
 } Envelope;
 
-typedef struct {
-  u32 time;    /* Time (in cycles) the sample was read. */
-  u8 position; /* Position in Wave RAM when read. */
-  u8 byte;     /* Byte read from the Wave RAM. */
-  u8 data;     /* Just the 4-bits of the sample. */
-} WaveSample;
-
 /* Channel 1 and 2 */
 typedef struct {
   WaveDuty duty;
@@ -842,12 +835,13 @@ typedef struct {
   WaveVolume volume;
   u8 volume_shift;
   u8 ram[WAVE_RAM_SIZE];
-  WaveSample sample[2]; /* The two most recent samples read. */
-  u32 period;           /* Calculated from the frequency. */
-  u8 position;          /* 0..31 */
-  u32 cycles;           /* 0..period */
-  Bool playing; /* TRUE if the channel has been triggered but the DAC not
-                        disabled. */
+  u32 sample_time; /* Time (in cycles) the sample was read. */
+  u8 sample_data;  /* Last sample generated, 0..1 */
+  u32 period;      /* Calculated from the frequency. */
+  u8 position;     /* 0..31 */
+  u32 cycles;      /* 0..period */
+  Bool playing;    /* TRUE if the channel has been triggered but the DAC not
+                           disabled. */
 } Wave;
 
 /* Channel 4 */
@@ -986,6 +980,7 @@ typedef struct {
   DMA dma;
   u8 hram[HIGH_RAM_SIZE];
   u32 cycles;
+  Bool is_cgb;
 } EmulatorState;
 
 typedef struct JoypadCallback {
@@ -1737,33 +1732,20 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
   }
 }
 
-static WaveSample* is_concurrent_wave_ram_access(Emulator* e,
-                                                 u8 offset_cycles) {
-  Wave* wave = &e->state.apu.wave;
-  size_t i;
-  for (i = 0; i < ARRAY_SIZE(wave->sample); ++i) {
-    if (wave->sample[i].time == e->state.cycles + offset_cycles) {
-      return &wave->sample[i];
-    }
-  }
-  return NULL;
-}
-
 static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
   Wave* wave = &e->state.apu.wave;
   if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
      * position. On DMG, this is only allowed if the read occurs exactly when
-     * it is being accessed by the Wave channel.  */
+     * it is being accessed by the Wave channel. */
     u8 result;
-    WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
-    if (sample) {
-      result = sample->byte;
-      DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cycle: %u)\n", __func__,
+    if (e->state.is_cgb || e->state.cycles == wave->sample_time) {
+      result = wave->ram[wave->position >> 1];
+      DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cy: %u)\n", __func__,
             addr, result, e->state.cycles);
     } else {
       result = INVALID_READ_BYTE;
-      DEBUG(apu, "%s(0x%02x) while playing, invalid (0xff) (cycle: %u).\n",
+      DEBUG(apu, "%s(0x%02x) while playing, invalid (0xff) (cy: %u).\n",
             __func__, addr, e->state.cycles);
     }
     return result;
@@ -2250,29 +2232,34 @@ static void trigger_nr14_reg(Emulator* e, Channel* channel, Sweep* sweep) {
 }
 
 static void trigger_nr34_reg(Emulator* e, Channel* channel, Wave* wave) {
-  wave->position = 0;
-  wave->cycles = wave->period;
-  /* Triggering the wave channel while it is already playing will corrupt the
-   * wave RAM. */
   if (wave->playing) {
-    WaveSample* sample =
-        is_concurrent_wave_ram_access(e, WAVE_SAMPLE_TRIGGER_OFFSET_CYCLES);
-    if (sample) {
-      assert(sample->position < 32);
-      switch (sample->position >> 3) {
-        case 0: wave->ram[0] = sample->byte; break;
-        case 1:
-        case 2:
-        case 3:
-          memcpy(&wave->ram[0], &wave->ram[(sample->position >> 1) & 12], 4);
-          break;
+    if (!e->state.is_cgb) {
+      /* Triggering the wave channel while it is already playing will corrupt
+       * the wave RAM. */
+      if (wave->cycles == WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES) {
+        assert(wave->position < 32);
+        u8 position = (wave->position + 1) & 31;
+        u8 byte = wave->ram[position >> 1];
+        switch (position >> 3) {
+          case 0:
+            wave->ram[0] = byte;
+            break;
+          case 1:
+          case 2:
+          case 3:
+            memcpy(&wave->ram[0], &wave->ram[(position >> 1) & 12], 4);
+            break;
+        }
+        DEBUG(apu, "%s: corrupting wave ram. (cy: %u) (pos: %u)\n", __func__,
+              e->state.cycles, position);
+      } else {
+        DEBUG(apu, "%s: ignoring write (cy: %u)\n", __func__, e->state.cycles);
       }
-      DEBUG(apu, "%s: corrupting wave ram. (cy: %u)\n", __func__,
-            e->state.cycles);
-    } else {
-      DEBUG(apu, "%s: ignoring write (cy: %u)\n", __func__, e->state.cycles);
     }
   }
+
+  wave->position = 0;
+  wave->cycles = wave->period + WAVE_TRIGGER_DELAY_CYCLES;
   wave->playing = TRUE;
 }
 
@@ -2300,8 +2287,8 @@ static void write_noise_period(Channel* channel, Noise* noise) {
 
 static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
   if (!e->state.apu.enabled) {
-    if (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
-        addr == APU_NR31_ADDR || addr == APU_NR41_ADDR) {
+    if (!e->state.is_cgb && (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
+                             addr == APU_NR31_ADDR || addr == APU_NR41_ADDR)) {
       /* DMG allows writes to the length counters when power is disabled. */
     } else if (addr == APU_NR52_ADDR) {
       /* Always can write to NR52; it's necessary to re-enable power to APU. */
@@ -2353,6 +2340,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       if (trigger) {
         trigger_nrx4_envelope(e, &channel1->envelope);
         trigger_nr14_reg(e, channel1, sweep);
+        channel1->square_wave.cycles = channel1->square_wave.period;
       }
       break;
     }
@@ -2371,6 +2359,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       write_square_wave_period(channel2, &channel2->square_wave);
       if (trigger) {
         trigger_nrx4_envelope(e, &channel2->envelope);
+        channel2->square_wave.cycles = channel2->square_wave.period;
       }
       break;
     }
@@ -2420,6 +2409,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
         write_noise_period(channel4, noise);
         trigger_nrx4_envelope(e, &channel4->envelope);
         noise->lfsr = 0x7fff;
+        noise->cycles = noise->period;
       }
       break;
     }
@@ -2461,17 +2451,17 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
+  Wave* wave = &e->state.apu.wave;
   if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    WaveSample* sample = is_concurrent_wave_ram_access(e, 0);
-    if (sample) {
-      e->state.apu.wave.ram[sample->position >> 1] = value;
+    if (e->state.is_cgb || e->state.cycles == wave->sample_time) {
+      wave->ram[wave->position >> 1] = value;
       DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__, addr, value);
     }
   } else {
-    e->state.apu.wave.ram[addr] = value;
+    wave->ram[addr] = value;
     DEBUG(apu, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
   }
 }
@@ -2958,25 +2948,22 @@ static void update_envelope(Envelope* envelope) {
 
 static u8 update_wave(APU* apu, Wave* wave) {
   if (wave->cycles <= APU_CYCLES) {
-    wave->cycles += wave->period;
     wave->position++;
     VALUE_WRAPPED(wave->position, WAVE_SAMPLE_COUNT);
-    WaveSample sample;
-    sample.time = apu->cycles + wave->cycles;
-    sample.position = wave->position;
-    sample.byte = wave->ram[wave->position >> 1];
+
+    wave->sample_time = apu->cycles - APU_CYCLES + wave->cycles;
+    u8 byte = wave->ram[wave->position >> 1];
     if ((wave->position & 1) == 0) {
-      sample.data = sample.byte >> 4; /* High nybble. */
+      wave->sample_data = byte >> 4; /* High nybble. */
     } else {
-      sample.data = sample.byte & 0x0f; /* Low nybble. */
+      wave->sample_data = byte & 0x0f; /* Low nybble. */
     }
-    wave->sample[1] = wave->sample[0];
-    wave->sample[0] = sample;
     VERBOSE(apu, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
-            sample.data, sample.time);
+            wave->sample_data, wave->sample_time);
+    wave->cycles += wave->period;
   }
   wave->cycles -= APU_CYCLES;
-  return wave->sample[0].data;
+  return wave->sample_data;
 }
 
 static u8 update_noise(Noise* noise) {
