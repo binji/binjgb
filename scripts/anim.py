@@ -69,11 +69,12 @@ def main(args):
   parser.add_argument('-j', '--num-processes',
                       type=int, default=multiprocessing.cpu_count(),
                       help='num processes.')
+  parser.add_argument('-C', '--dir', help='search for ROMs in dir')
   parser.add_argument('patterns', metavar='pattern', nargs='*',
                       help='test patterns.')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
-  roms = common.GetMatchedRoms(pattern_re)
+  roms = common.GetMatchedRoms(pattern_re, options.dir)
 
   if options.list:
     for rom in roms:

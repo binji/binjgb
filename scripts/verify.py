@@ -64,12 +64,14 @@ def MoveFile(src, dst):
 
 def main(args):
   parser = argparse.ArgumentParser()
+  parser.add_argument('-C', '--dir', help='search for ROMs in dir')
+  parser.add_argument('--rename', action='store_true')
   parser.add_argument('dat', help='dat-o-matic file')
   parser.add_argument('patterns', metavar='pattern', nargs='*',
                       help='test patterns.')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
-  roms = common.GetMatchedRoms(pattern_re)
+  roms = common.GetMatchedRoms(pattern_re, options.dir)
   dat = ParseDat(options.dat)
 
   unverified_dir = os.path.join(common.ROM_DIR, 'unverified')
@@ -78,11 +80,15 @@ def main(args):
 
   for rom in sorted(roms):
     h = HashFile(rom)
-    if h in dat:
-      rom_data = dat[h]
-      MoveFile(rom, os.path.join(common.ROM_DIR, rom_data['name']))
+    if options.rename:
+      if h in dat:
+        rom_data = dat[h]
+        MoveFile(rom, os.path.join(common.ROM_DIR, rom_data['name']))
+      else:
+        MoveFile(rom, unverified_dir)
     else:
-      MoveFile(rom, unverified_dir)
+      if h not in dat:
+        print(rom)
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1:]))

@@ -13,6 +13,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 OUT_DIR = os.path.join(ROOT_DIR, 'out')
 ROM_DIR = os.path.join(ROOT_DIR, 'rom')
+TEST_DIR = os.path.join(ROOT_DIR, 'test')
 TESTER_DEBUG = os.path.join(OUT_DIR, 'tester')
 TESTER_RELEASE = os.path.join(OUT_DIR, 'tester-release')
 
@@ -67,9 +68,11 @@ def MakePatternRE(patterns):
   return re.compile(pattern_re)
 
 
-def GetMatchedRoms(pattern_re):
+def GetMatchedRoms(pattern_re, top_dir=None):
+  if top_dir is None:
+    top_dir = ROM_DIR
   roms = []
-  for root, dirs, files in os.walk(ROM_DIR):
+  for root, dirs, files in os.walk(top_dir):
     for file_ in files:
       path = os.path.join(root, file_)
       if not os.path.splitext(path)[1].startswith('.gb'):

@@ -94,9 +94,10 @@ def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('patterns', metavar='pattern', nargs='*',
                       help='test patterns.')
+  parser.add_argument('-C', '--dir', help='search for ROMs in dir')
   options = parser.parse_args(args)
   pattern_re = common.MakePatternRE(options.patterns)
-  roms = common.GetMatchedRoms(pattern_re)
+  roms = common.GetMatchedRoms(pattern_re, options.dir)
 
   cols = ('filename', 'title', 'cartridge_type', 'rom_size', 'ext_ram_size',
           'cgb', 'sgb')
