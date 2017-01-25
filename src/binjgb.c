@@ -1376,6 +1376,7 @@ static Result init_emulator(Emulator* e) {
   e->state.reg.SP = 0xfffe;
   e->state.reg.PC = 0x0100;
   e->state.interrupt.IME = FALSE;
+  e->state.timer.DIV_counter = 0xAC00;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
@@ -1727,8 +1728,8 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
       return INVALID_READ_BYTE;
     case MEMORY_MAP_IO: {
       u8 value = read_io(e, pair.addr);
-      VERBOSE(io, "read_io(0x%04x [%s]) = 0x%02x\n", pair.addr,
-              get_io_reg_string(pair.addr), value);
+      VERBOSE(io, "read_io(0x%04x [%s]) = 0x%02x [cy: %u]\n", pair.addr,
+              get_io_reg_string(pair.addr), value, e->state.cycles);
       return value;
     }
     case MEMORY_MAP_APU:
