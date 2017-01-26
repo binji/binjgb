@@ -6,7 +6,7 @@ A simple GB emulator.
 
 * One file, less than 5000 lines of C!
 * Cycle accurate, passes many timing tests (see below)
-* Supports MBC1, MBC2 and MBC3
+* Supports MBC1, MBC2, MBC3, MBC5 and HuC1
 * Save/load battery backup
 * Save/load emulator state to file
 * Fast-forward, pause and step one frame
@@ -89,19 +89,19 @@ $ scripts/tester.py gpu
 | Test | Result |
 | --- | --- |
 | acceptance/add\_sp\_e\_timing | :ok: |
-| acceptance/boot\_hwio-G | :ok: |
-| acceptance/boot\_regs-dmg.gb | :ok: |
+| acceptance/boot\_hwio-dmgABCXmgb | :ok: |
+| acceptance/boot\_regs-dmgABCX.gb | :ok: |
 | acceptance/call\_cc\_timing2 | :ok: |
 | acceptance/call\_cc\_timing | :ok: |
-| acceptance/call\_timing2 | :ok: |
 | acceptance/call\_timing | :ok: |
+| acceptance/call\_timing2 | :ok: |
 | acceptance/di\_timing-GS | :ok: |
 | acceptance/div\_timing | :ok: |
 | acceptance/ei\_timing | :ok: |
 | acceptance/halt\_ime0\_ei | :ok: |
 | acceptance/halt\_ime0\_nointr\_timing | :ok: |
-| acceptance/halt\_ime1\_timing2-GS | :ok: |
 | acceptance/halt\_ime1\_timing | :ok: |
+| acceptance/halt\_ime1\_timing2-GS | :ok: |
 | acceptance/if\_ie\_registers | :ok: |
 | acceptance/intr\_timing | :ok: |
 | acceptance/jp\_cc\_timing | :ok: |
