@@ -41,6 +41,9 @@
     goto error;                                 \
   }
 #define CHECK(x) do if (!(x)) { goto error; } while(0)
+#define ON_ERROR_RETURN \
+  error:                \
+  return ERROR
 #define ON_ERROR_CLOSE_FILE_AND_RETURN \
   error:                               \
   if (f) {                             \
@@ -69,19 +72,18 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define RGBA_BLACK 0xff000000u
 
 /* ROM header stuff */
-#define ROM_U16_BE(addr) \
-  ((u16)((rom_data->data[addr] << 8) | rom_data->data[addr + 1]))
-
+#define MAX_CART_INFOS 256 /* 8Mb / 32k */
+#define LOGO_START_ADDR 0x104
+#define LOGO_END_ADDR 0x133
 #define TITLE_START_ADDR 0x134
-#define TITLE_END_ADDR 0x143
+#define TITLE_MAX_LENGTH 0x10
 #define CGB_FLAG_ADDR 0x143
 #define SGB_FLAG_ADDR 0x146
-#define CARTRIDGE_TYPE_ADDR 0x147
+#define CART_TYPE_ADDR 0x147
 #define ROM_SIZE_ADDR 0x148
 #define EXT_RAM_SIZE_ADDR 0x149
 #define HEADER_CHECKSUM_ADDR 0x14d
 #define GLOBAL_CHECKSUM_START_ADDR 0x14e
-#define GLOBAL_CHECKSUM_END_ADDR 0x14f
 #define HEADER_CHECKSUM_RANGE_START 0x134
 #define HEADER_CHECKSUM_RANGE_END 0x14c
 
@@ -92,6 +94,7 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define EXT_RAM_MAX_SIZE 32768
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
+#define CART_INFO_SHIFT 15
 #define ROM_BANK_SHIFT 14
 #define EXT_RAM_BANK_SHIFT 13
 
@@ -358,37 +361,36 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
   V(SGB_FLAG_NONE, 0)       \
   V(SGB_FLAG_SUPPORTED, 3)
 
-#define FOREACH_CARTRIDGE_TYPE(V)                                              \
-  V(CARTRIDGE_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY)                  \
-  V(CARTRIDGE_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY)                        \
-  V(CARTRIDGE_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY)                  \
-  V(CARTRIDGE_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY)        \
-  V(CARTRIDGE_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY)                        \
-  V(CARTRIDGE_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY)              \
-  V(CARTRIDGE_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY)                 \
-  V(CARTRIDGE_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY)       \
-  V(CARTRIDGE_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY)                      \
-  V(CARTRIDGE_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY)                \
-  V(CARTRIDGE_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY)      \
-  V(CARTRIDGE_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY)        \
-  V(CARTRIDGE_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY) \
-  V(CARTRIDGE_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY)                       \
-  V(CARTRIDGE_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY)                 \
-  V(CARTRIDGE_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY)       \
-  V(CARTRIDGE_TYPE_MBC4, 0x15, MBC4, NO_RAM, NO_BATTERY)                       \
-  V(CARTRIDGE_TYPE_MBC4_RAM, 0x16, MBC4, WITH_RAM, NO_BATTERY)                 \
-  V(CARTRIDGE_TYPE_MBC4_RAM_BATTERY, 0x17, MBC4, WITH_RAM, WITH_BATTERY)       \
-  V(CARTRIDGE_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY)                       \
-  V(CARTRIDGE_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY)                 \
-  V(CARTRIDGE_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY)       \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY)                \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY)          \
-  V(CARTRIDGE_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM,              \
-    WITH_BATTERY)                                                              \
-  V(CARTRIDGE_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)            \
-  V(CARTRIDGE_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)              \
-  V(CARTRIDGE_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                       \
-  V(CARTRIDGE_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
+#define FOREACH_CART_TYPE(V)                                               \
+  V(CART_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY)                   \
+  V(CART_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY)                         \
+  V(CART_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY)                   \
+  V(CART_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY)         \
+  V(CART_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY)                         \
+  V(CART_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY)               \
+  V(CART_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY)                  \
+  V(CART_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY)        \
+  V(CART_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY)                       \
+  V(CART_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY)                 \
+  V(CART_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY)       \
+  V(CART_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY)         \
+  V(CART_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY)  \
+  V(CART_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY)                        \
+  V(CART_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY)                  \
+  V(CART_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY)        \
+  V(CART_TYPE_MBC4, 0x15, MBC4, NO_RAM, NO_BATTERY)                        \
+  V(CART_TYPE_MBC4_RAM, 0x16, MBC4, WITH_RAM, NO_BATTERY)                  \
+  V(CART_TYPE_MBC4_RAM_BATTERY, 0x17, MBC4, WITH_RAM, WITH_BATTERY)        \
+  V(CART_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY)                        \
+  V(CART_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY)                  \
+  V(CART_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY)        \
+  V(CART_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY)                 \
+  V(CART_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY)           \
+  V(CART_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM, WITH_BATTERY) \
+  V(CART_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)             \
+  V(CART_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)               \
+  V(CART_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                        \
+  V(CART_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
 
 #define FOREACH_ROM_SIZE(V) \
   V(ROM_SIZE_32K, 0, 2)     \
@@ -451,8 +453,8 @@ static const char* get_enum_string(const char** strings, size_t string_count,
 DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(CARTRIDGE_TYPE, CartridgeType, cartridge_type,
-                  FOREACH_CARTRIDGE_TYPE, DEFINE_ENUM)
+DEFINE_NAMED_ENUM(CART_TYPE, CartType, cart_type, FOREACH_CART_TYPE,
+                  DEFINE_ENUM)
 DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(EXT_RAM_SIZE, ExtRamSize, ext_ram_size, FOREACH_EXT_RAM_SIZE,
                   DEFINE_ENUM)
@@ -468,7 +470,7 @@ static u32 s_rom_bank_count[] = {
     FOREACH_ROM_SIZE(V)
 #undef V
 };
-#define ROM_BANK_COUNT(e) s_rom_bank_count[(e)->rom_info.rom_size]
+#define ROM_BANK_COUNT(e) s_rom_bank_count[(e)->cart_info->rom_size]
 #define ROM_BANK_MASK(e) (ROM_BANK_COUNT(e) - 1)
 
 static u32 s_ext_ram_byte_size[] = {
@@ -476,7 +478,7 @@ static u32 s_ext_ram_byte_size[] = {
     FOREACH_EXT_RAM_SIZE(V)
 #undef V
 };
-#define EXT_RAM_BYTE_SIZE(e) s_ext_ram_byte_size[(e)->rom_info.ext_ram_size]
+#define EXT_RAM_BYTE_SIZE(e) s_ext_ram_byte_size[(e)->cart_info->ext_ram_size]
 #define EXT_RAM_BANK_MASK(e) (EXT_RAM_BYTE_SIZE(e) - 1)
 
 typedef enum {
@@ -506,12 +508,12 @@ typedef struct {
   MBCType mbc_type;
   ExtRamType ext_ram_type;
   BatteryType battery_type;
-} CartridgeInfo;
+} CartTypeInfo;
 
-static CartridgeInfo s_cartridge_info[] = {
+static CartTypeInfo s_cart_type_info[] = {
 #define V(name, code, mbc, ram, battery) \
   [code] = {MBC_TYPE_##mbc, EXT_RAM_TYPE_##ram, BATTERY_TYPE_##battery},
-    FOREACH_CARTRIDGE_TYPE(V)
+    FOREACH_CART_TYPE(V)
 #undef V
 };
 
@@ -652,7 +654,7 @@ typedef enum {
 typedef struct {
   u8* data;
   size_t size;
-} RomData;
+} FileData;
 
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
@@ -661,14 +663,15 @@ typedef struct {
 } ExtRam;
 
 typedef struct {
-  const char* title_start;
-  size_t title_length;
+  size_t offset; /* Offset of cart in FileData. */
+  u8* data;      /* == FileData.data + offset */
+  size_t size;
   CgbFlag cgb_flag;
   SgbFlag sgb_flag;
-  CartridgeType cartridge_type;
+  CartType cart_type;
   RomSize rom_size;
   ExtRamSize ext_ram_size;
-} RomInfo;
+} CartInfo;
 
 struct Emulator;
 
@@ -676,8 +679,7 @@ typedef struct {
   u8 byte_2000_3fff;
   u8 byte_4000_5fff;
   BankMode bank_mode;
-} MBC1;
-typedef MBC1 HUC1;
+} MBC1, HUC1, MMM01;
 
 typedef struct {
   u8 byte_2000_2fff;
@@ -691,11 +693,12 @@ typedef struct {
 } MemoryMap;
 
 typedef struct {
-  u32 rom_base[2];
+  u32 rom1_base;
   u32 ext_ram_base;
   Bool ext_ram_enabled;
   union {
     MBC1 mbc1;
+    MMM01 mmm01;
     HUC1 huc1;
     MBC5 mbc5;
   };
@@ -935,6 +938,7 @@ typedef struct {
 } EmulatorConfig;
 
 typedef struct {
+  u8 cart_info_index;
   MemoryMapState memory_map_state;
   Registers reg;
   u8 vram[VIDEO_RAM_SIZE];
@@ -960,8 +964,10 @@ typedef struct JoypadCallback {
 
 typedef struct Emulator {
   EmulatorConfig config;
-  RomInfo rom_info;
-  RomData rom_data;
+  FileData file_data;
+  CartInfo cart_infos[MAX_CART_INFOS];
+  u32 cart_info_count;
+  CartInfo* cart_info; /* Cached for convenience. */
   MemoryMap memory_map;
   EmulatorState state;
   FrameBuffer frame_buffer;
@@ -973,13 +979,15 @@ static Bool s_never_trace = 0;
 static Bool s_trace = 0;
 static u32 s_trace_counter = 0;
 static int s_log_level_memory = 1;
-static int s_log_level_ppu = 1;
+static int s_log_level_ppu = 0;
 static int s_log_level_apu = 1;
 static int s_log_level_io = 1;
 static int s_log_level_interrupt = 1;
 
 static void write_apu(Emulator*, MaskedAddress, u8);
 static void write_io(Emulator*, MaskedAddress, u8);
+static Result init_memory_map(Emulator*);
+static void log_cart_info(CartInfo*);
 
 static Result get_file_size(FILE* f, long* out_size) {
   CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
@@ -988,12 +996,10 @@ static Result get_file_size(FILE* f, long* out_size) {
   CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
   *out_size = size;
   return OK;
-error:
-  return ERROR;
+  ON_ERROR_RETURN;
 }
 
-static Result read_rom_data_from_file(const char* filename,
-                                      RomData* out_rom_data) {
+static Result read_data_from_file(Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "rb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   long size;
@@ -1004,83 +1010,92 @@ static Result read_rom_data_from_file(const char* filename,
   CHECK_MSG(data, "allocation failed.\n");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
   fclose(f);
-  out_rom_data->data = data;
-  out_rom_data->size = size;
+  e->file_data.data = data;
+  e->file_data.size = size;
   return OK;
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
-static void get_rom_title(RomData* rom_data, const char** out_title_start,
-                          size_t* out_title_length) {
-  const char* start = (char*)rom_data->data + TITLE_START_ADDR;
-  const char* end = start + TITLE_END_ADDR;
-  const char* p = start;
-  size_t length = 0;
-  while (p <= end && *p != 0 && (*p & 0x80) == 0) {
-    length++;
-    p++;
+static void set_cart_info(Emulator* e, u8 index) {
+  e->state.cart_info_index = index;
+  e->cart_info = &e->cart_infos[index];
+  if (!(e->cart_info->data && SUCCESS(init_memory_map(e)))) {
+    UNREACHABLE("Unable to switch cart (%d).\n", index);
   }
-  *out_title_start = start;
-  *out_title_length = length;
 }
 
-static Result validate_header_checksum(RomData* rom_data) {
-  u8 expected_checksum = rom_data->data[HEADER_CHECKSUM_ADDR];
+static Result get_cart_info(FileData* file_data, size_t offset,
+                            CartInfo* cart_info) {
+  /* Simple checksum on logo data so we don't have to include it here. :) */
+  u8* data = file_data->data + offset;
+  size_t i;
+  u32 logo_checksum = 0;
+  for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
+    logo_checksum = (logo_checksum << 1) ^ data[i];
+  }
+  CHECK(logo_checksum == 0xe06c8834);
+  cart_info->offset = offset;
+  cart_info->data = data;
+  cart_info->rom_size = data[ROM_SIZE_ADDR];
+  CHECK_MSG(is_rom_size_valid(cart_info->rom_size),
+            "Invalid ROM size code: %u", cart_info->rom_size);
+  u32 rom_byte_size = s_rom_bank_count[cart_info->rom_size] << ROM_BANK_SHIFT;
+  cart_info->size = rom_byte_size;
+
+  cart_info->cgb_flag = data[CGB_FLAG_ADDR];
+  cart_info->sgb_flag = data[SGB_FLAG_ADDR];
+  cart_info->cart_type = data[CART_TYPE_ADDR];
+  CHECK_MSG(is_cart_type_valid(cart_info->cart_type), "Invalid cart type: %u\n",
+            cart_info->cart_type);
+  cart_info->ext_ram_size = data[EXT_RAM_SIZE_ADDR];
+  CHECK_MSG(is_ext_ram_size_valid(cart_info->ext_ram_size),
+            "Invalid ext ram size: %u\n", cart_info->ext_ram_size);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+static Result get_cart_infos(Emulator* e) {
+  u32 i;
+  for (i = 0; i < MAX_CART_INFOS; ++i) {
+    size_t offset = i << CART_INFO_SHIFT;
+    if (offset + MINIMUM_ROM_SIZE > e->file_data.size) break;
+    if (SUCCESS(get_cart_info(&e->file_data, offset, &e->cart_infos[i]))) {
+      if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
+          MBC_TYPE_MMM01) {
+        /* MMM01 has the cart header at the end. */
+        set_cart_info(e, i);
+        return OK;
+      }
+      e->cart_info_count++;
+    }
+  }
+  CHECK_MSG(e->cart_info_count != 0, "Invalid ROM.\n");
+  set_cart_info(e, 0);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+static Result validate_header_checksum(CartInfo* cart_info) {
   u8 checksum = 0;
   size_t i = 0;
   for (i = HEADER_CHECKSUM_RANGE_START; i <= HEADER_CHECKSUM_RANGE_END; ++i) {
-    checksum = checksum - rom_data->data[i] - 1;
+    checksum = checksum - cart_info->data[i] - 1;
   }
-  return checksum == expected_checksum ? OK : ERROR;
+  return checksum == cart_info->data[HEADER_CHECKSUM_ADDR] ? OK : ERROR;
 }
 
-static Result validate_global_checksum(RomData* rom_data) {
-  u16 expected_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
-  u16 checksum = 0;
-  size_t i = 0;
-  for (i = 0; i < rom_data->size; ++i) {
-    if (i == GLOBAL_CHECKSUM_START_ADDR || i == GLOBAL_CHECKSUM_END_ADDR)
-      continue;
-    checksum += rom_data->data[i];
-  }
-  return checksum == expected_checksum ? OK : ERROR;
-}
-
-static Result get_rom_info(RomData* rom_data, RomInfo* rom_info) {
-  rom_info->rom_size = rom_data->data[ROM_SIZE_ADDR];
-  CHECK_MSG(is_rom_size_valid(rom_info->rom_size), "Invalid ROM size code: %u",
-            rom_info->rom_size);
-  u32 rom_byte_size = s_rom_bank_count[rom_info->rom_size] << ROM_BANK_SHIFT;
-  CHECK_MSG(rom_data->size == rom_byte_size,
-            "Invalid ROM size: expected %u, got %zu.\n", rom_byte_size,
-            rom_data->size);
-
-  get_rom_title(rom_data, &rom_info->title_start, &rom_info->title_length);
-  rom_info->cgb_flag = rom_data->data[CGB_FLAG_ADDR];
-  rom_info->sgb_flag = rom_data->data[SGB_FLAG_ADDR];
-  rom_info->cartridge_type = rom_data->data[CARTRIDGE_TYPE_ADDR];
-  CHECK_MSG(is_cartridge_type_valid(rom_info->cartridge_type),
-            "Invalid cartridge type: %u\n", rom_info->cartridge_type);
-  rom_info->ext_ram_size = rom_data->data[EXT_RAM_SIZE_ADDR];
-  CHECK_MSG(is_ext_ram_size_valid(rom_info->ext_ram_size),
-            "Invalid ext ram size: %u\n", rom_info->ext_ram_size);
-  u8 header_checksum = rom_data->data[HEADER_CHECKSUM_ADDR];
-  u16 global_checksum = ROM_U16_BE(GLOBAL_CHECKSUM_START_ADDR);
-
-  LOG("title: \"%.*s\"\n", (int)rom_info->title_length, rom_info->title_start);
-  LOG("cgb flag: %s\n", get_cgb_flag_string(rom_info->cgb_flag));
-  LOG("sgb flag: %s\n", get_sgb_flag_string(rom_info->sgb_flag));
-  LOG("cartridge type: %s\n",
-      get_cartridge_type_string(rom_info->cartridge_type));
-  LOG("rom size: %s\n", get_rom_size_string(rom_info->rom_size));
-  LOG("ext ram size: %s\n", get_ext_ram_size_string(rom_info->ext_ram_size));
-  LOG("header checksum: 0x%02x [%s]\n", header_checksum,
-      get_result_string(validate_header_checksum(rom_data)));
-  LOG("global checksum: 0x%04x [%s]\n", global_checksum,
-      get_result_string(validate_global_checksum(rom_data)));
-  return OK;
-error:
-  return ERROR;
+static void log_cart_info(CartInfo* cart_info) {
+  char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
+  char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
+  int title_length = title_end ? title_end - title_start : TITLE_MAX_LENGTH;
+  LOG("title: \"%.*s\"\n", title_length, title_start);
+  LOG("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
+  LOG("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
+  LOG("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
+  LOG("rom size: %s\n", get_rom_size_string(cart_info->rom_size));
+  LOG("ext ram size: %s\n", get_ext_ram_size_string(cart_info->ext_ram_size));
+  LOG("header checksum: 0x%02x [%s]\n", cart_info->data[HEADER_CHECKSUM_ADDR],
+      get_result_string(validate_header_checksum(cart_info)));
 }
 
 static void dummy_write(Emulator* e, MaskedAddress addr, u8 value) {}
@@ -1089,12 +1104,11 @@ static u8 dummy_read(Emulator* e, MaskedAddress addr) {
   return INVALID_READ_BYTE;
 }
 
-static void set_rom_bank(Emulator* e, int rom_index, u16 bank) {
+static void set_rom1_bank(Emulator* e, u16 bank) {
   u32 new_base = (bank & ROM_BANK_MASK(e)) << ROM_BANK_SHIFT;
-  u32* base = &e->state.memory_map_state.rom_base[rom_index];
+  u32* base = &e->state.memory_map_state.rom1_base;
   if (new_base != *base) {
-    DEBUG(memory, "%s(rom: %d, bank: %d) = 0x%06x\n", __func__, bank, rom_index,
-          new_base);
+    DEBUG(memory, "%s(bank: %d) = 0x%06x\n", __func__, bank, new_base);
   }
   *base = new_base;
 }
@@ -1159,16 +1173,18 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
     rom1_bank++;
   }
 
-  u8 ext_ram_bank;
+  u8 ext_ram_bank = 0;
   if (mbc1->bank_mode == BANK_MODE_ROM) {
     rom1_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK)
                  << MBC1_BANK_HI_SHIFT;
-    ext_ram_bank = 0;
+  } else if (e->cart_info_count > 1 && mbc1->byte_4000_5fff > 0) {
+    /* All MBC1M roms seem to have carts at 0x40000 intervals. */
+    set_cart_info(e, mbc1->byte_4000_5fff << 3);
   } else {
     ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
   }
 
-  set_rom_bank(e, 1, rom1_bank);
+  set_rom1_bank(e, rom1_bank);
   set_ext_ram_bank(e, ext_ram_bank);
 }
 
@@ -1188,7 +1204,7 @@ static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
         if (rom1_bank == 0) {
           rom1_bank++;
         }
-        set_rom_bank(e, 1, rom1_bank);
+        set_rom1_bank(e, rom1_bank);
       }
       break;
     }
@@ -1221,8 +1237,7 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: { /* 2000-3fff */
-      u16 rom1_bank = value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
-      set_rom_bank(e, 1, rom1_bank);
+      set_rom1_bank(e, value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e));
       break;
     }
     case 2: /* 4000-5fff */
@@ -1253,8 +1268,8 @@ static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       break;
   }
 
-  set_rom_bank(e, 1, ((memory_map->mbc5.byte_3000_3fff & 1) << 8) |
-                         memory_map->mbc5.byte_2000_2fff);
+  set_rom1_bank(e, ((memory_map->mbc5.byte_3000_3fff & 1) << 8) |
+                       memory_map->mbc5.byte_2000_2fff);
 }
 
 static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1289,23 +1304,37 @@ static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
   } else {
     ext_ram_bank = huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK;
   }
-  set_rom_bank(e, 1, rom1_bank);
+  set_rom1_bank(e, rom1_bank);
   set_ext_ram_bank(e, ext_ram_bank);
 }
 
-static Result init_memory_map(Emulator* e) {
-  CartridgeInfo* cartridge_info = &s_cartridge_info[e->rom_info.cartridge_type];
-  MemoryMap* memory_map = &e->memory_map;
-  MemoryMapState* memory_map_state = &e->state.memory_map_state;
-  ZERO_MEMORY(*memory_map);
-  memory_map_state->rom_base[1] = 1 << ROM_BANK_SHIFT;
+static void mmm01_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
+  MMM01* mmm01 = &e->state.memory_map_state.mmm01;
+  switch (addr >> 13) {
+    case 0: { /* 0000-1fff */
+      /* ROM size should be power-of-two. */
+      assert((e->cart_info->size & (e->cart_info->size - 1)) == 0);
+      u32 rom_offset =
+          (mmm01->byte_2000_3fff << ROM_BANK_SHIFT) & (e->cart_info->size - 1);
+      set_cart_info(e, rom_offset >> CART_INFO_SHIFT);
+      break;
+    }
+    case 1: /* 2000-3fff */
+      mmm01->byte_2000_3fff = value;
+      break;
+  }
+}
 
-  switch (cartridge_info->ext_ram_type) {
+static Result init_memory_map(Emulator* e) {
+  CartTypeInfo* cart_type_info = &s_cart_type_info[e->cart_info->cart_type];
+  MemoryMap* memory_map = &e->memory_map;
+
+  switch (cart_type_info->ext_ram_type) {
     case EXT_RAM_TYPE_WITH_RAM:
-      assert(is_ext_ram_size_valid(e->rom_info.ext_ram_size));
+      assert(is_ext_ram_size_valid(e->cart_info->ext_ram_size));
       memory_map->read_ext_ram = gb_read_ext_ram;
       memory_map->write_ext_ram = gb_write_ext_ram;
-      e->state.ext_ram.size = s_ext_ram_byte_size[e->rom_info.ext_ram_size];
+      e->state.ext_ram.size = s_ext_ram_byte_size[e->cart_info->ext_ram_size];
       break;
     default:
     case EXT_RAM_TYPE_NO_RAM:
@@ -1315,7 +1344,7 @@ static Result init_memory_map(Emulator* e) {
       break;
   }
 
-  switch (cartridge_info->mbc_type) {
+  switch (cart_type_info->mbc_type) {
     case MBC_TYPE_NO_MBC:
       memory_map->write_rom = dummy_write;
       break;
@@ -1327,6 +1356,9 @@ static Result init_memory_map(Emulator* e) {
       memory_map->read_ext_ram = mbc2_read_ram;
       memory_map->write_ext_ram = mbc2_write_ram;
       e->state.ext_ram.size = MBC2_RAM_SIZE;
+      break;
+    case MBC_TYPE_MMM01:
+      memory_map->write_rom = mmm01_write_rom;
       break;
     case MBC_TYPE_MBC3:
       memory_map->write_rom = mbc3_write_rom;
@@ -1340,11 +1372,11 @@ static Result init_memory_map(Emulator* e) {
       break;
     default:
       PRINT_ERROR("memory map for %s not implemented.\n",
-                  get_cartridge_type_string(e->rom_info.cartridge_type));
+                  get_cart_type_string(e->cart_info->cart_type));
       return ERROR;
   }
 
-  e->state.ext_ram.battery_type = cartridge_info->battery_type;
+  e->state.ext_ram.battery_type = cart_type_info->battery_type;
   return OK;
 }
 
@@ -1367,8 +1399,9 @@ static Result init_emulator(Emulator* e) {
       0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
       0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
   };
-  CHECK(SUCCESS(get_rom_info(&e->rom_data, &e->rom_info)));
-  CHECK(SUCCESS(init_memory_map(e)));
+  CHECK(SUCCESS(get_cart_infos(e)));
+  log_cart_info(e->cart_info);
+  e->state.memory_map_state.rom1_base = 1 << ROM_BANK_SHIFT;
   set_af_reg(&e->state.reg, 0x01b0);
   e->state.reg.BC = 0x0013;
   e->state.reg.DE = 0x00d8;
@@ -1399,8 +1432,7 @@ static Result init_emulator(Emulator* e) {
   write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
   return OK;
-error:
-  return ERROR;
+  ON_ERROR_RETURN;
 }
 
 static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
@@ -1704,15 +1736,13 @@ static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
 
 static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   switch (pair.type) {
-    case MEMORY_MAP_ROM0: {
-      u32 rom_addr = e->state.memory_map_state.rom_base[0] | pair.addr;
-      assert(rom_addr < e->rom_data.size);
-      return e->rom_data.data[rom_addr];
-    }
+    case MEMORY_MAP_ROM0:
+      assert(pair.addr < e->cart_info->size);
+      return e->cart_info->data[pair.addr];
     case MEMORY_MAP_ROM1: {
-      u32 rom_addr = e->state.memory_map_state.rom_base[1] | pair.addr;
-      assert(rom_addr < e->rom_data.size);
-      return e->rom_data.data[rom_addr];
+      u32 rom_addr = e->state.memory_map_state.rom1_base| pair.addr;
+      assert(rom_addr < e->cart_info->size);
+      return e->cart_info->data[rom_addr];
     }
     case MEMORY_MAP_VRAM:
       return read_vram(e, pair.addr);
@@ -3230,10 +3260,8 @@ static void print_instruction(Emulator* e, Address addr) {
 
   char bank[3] = "??";
   MemoryTypeAddressPair pair = map_address(addr);
-  if (pair.type == MEMORY_MAP_ROM0 || pair.type == MEMORY_MAP_ROM1) {
-    int rom_index = pair.type - MEMORY_MAP_ROM0;
-    sprint_hex(bank,
-               e->state.memory_map_state.rom_base[rom_index] >> ROM_BANK_SHIFT);
+  if (pair.type == MEMORY_MAP_ROM1) {
+    sprint_hex(bank, e->state.memory_map_state.rom1_base >> ROM_BANK_SHIFT);
   }
 
   (void)mnemonic;
@@ -3978,8 +4006,7 @@ static Result sdl_init_audio(SDL* sdl) {
   sdl->audio.buffer_end = sdl->audio.buffer + buffer_capacity;
   sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
   return OK;
-error:
-  return ERROR;
+  ON_ERROR_RETURN;
 }
 
 static Result init_audio_buffer(SDL* sdl, AudioBuffer* audio_buffer) {
@@ -3992,8 +4019,7 @@ static Result init_audio_buffer(SDL* sdl, AudioBuffer* audio_buffer) {
   audio_buffer->position = audio_buffer->data;
   audio_buffer->frequency = sdl->audio.spec.freq;
   return OK;
-error:
-  return ERROR;
+  ON_ERROR_RETURN;
 }
 
 static Result read_state_from_file(Emulator* e, const char* filename) {
@@ -4010,6 +4036,7 @@ static Result read_state_from_file(Emulator* e, const char* filename) {
             header, SAVE_STATE_HEADER);
   CHECK_MSG(fread(&e->state, sizeof(e->state), 1, f) == 1, "fread failed.\n");
   fclose(f);
+  set_cart_info(e, e->state.cart_info_index);
   return OK;
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
@@ -4238,7 +4265,7 @@ int main(int argc, char** argv) {
   CHECK_MSG(argc == 1, "no rom file given.\n");
   const char* rom_filename = argv[0];
   Emulator* e = &s_emulator;
-  CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &e->rom_data)));
+  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
   CHECK(SUCCESS(sdl_init_video(&s_sdl)));
   CHECK(SUCCESS(sdl_init_audio(&s_sdl)));
   CHECK(SUCCESS(init_audio_buffer(&s_sdl, &e->audio_buffer)));

@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
 
   const char* rom_filename = argv[optind];
 
-  CHECK(SUCCESS(read_rom_data_from_file(rom_filename, &e->rom_data)));
+  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
   CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer)));
   CHECK(SUCCESS(init_emulator(e)));
 

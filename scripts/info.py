@@ -13,6 +13,10 @@ import sys
 
 import common
 
+MINIMUM_ROM_SIZE = 2**15
+
+LOGO_CHECKSUM = 0xe06c8834
+
 CGB_FLAG = {
     0: 'none',
     0x80: 'supported',
@@ -77,17 +81,29 @@ EXT_RAM_SIZE = {
   5: 2**16,
 }
 
+
+def SimpleChecksum(data):
+  result = 0
+  for x in data:
+    result = (result << 1) ^ x
+  return result & 0xffffffff
+
+
 def RomInfo(path):
   with open(path, 'rb') as f:
     data = f.read()
-    return {
-      'title': data[0x134:0x144],
-      'cgb': CGB_FLAG.get(data[0x143], 'unknown'),
-      'sgb': SGB_FLAG.get(data[0x146], 'unknown'),
-      'cartridge_type': CARTRIDGE_TYPE.get(data[0x147], 'unknown'),
-      'rom_size': ROM_SIZE.get(data[0x148], -1),
-      'ext_ram_size': EXT_RAM_SIZE.get(data[0x149], -1),
-    }
+    for offset in range(0, len(data), MINIMUM_ROM_SIZE):
+      if SimpleChecksum(data[offset+0x104:offset+0x134]) != LOGO_CHECKSUM:
+        continue
+      yield {
+        'title': data[offset+0x134:offset+0x144],
+        'cgb': CGB_FLAG.get(data[offset+0x143], 'unknown'),
+        'sgb': SGB_FLAG.get(data[offset+0x146], 'unknown'),
+        'cartridge_type': CARTRIDGE_TYPE.get(data[offset+0x147], 'unknown'),
+        'rom_size': ROM_SIZE.get(data[offset+0x148], -1),
+        'ext_ram_size': EXT_RAM_SIZE.get(data[offset+0x149], -1),
+        'start': hex(offset)
+      }
 
 
 def main(args):
@@ -100,21 +116,23 @@ def main(args):
   roms = common.GetMatchedRoms(pattern_re, options.dir)
 
   cols = ('filename', 'title', 'cartridge_type', 'rom_size', 'ext_ram_size',
-          'cgb', 'sgb')
+          'cgb', 'sgb', 'start')
   rows = [cols]
   for rom in sorted(roms):
-    info = RomInfo(rom)
-    title = info['title']
-    title = title[:title.find(b'\0')].decode('ascii', 'replace')
-    rows.append((
-      os.path.basename(rom),
-      '"%s"' % title,
-      info['cartridge_type'],
-      str(info['rom_size']),
-      str(info['ext_ram_size']),
-      info['cgb'],
-      info['sgb']
-    ))
+    for i, info in enumerate(RomInfo(rom)):
+      title = info['title']
+      title = title[:title.find(b'\0')].decode('ascii', 'replace')
+      filename = os.path.basename(rom) if i == 0 else ' *** '
+      rows.append((
+        filename,
+        '"%s"' % title,
+        info['cartridge_type'],
+        str(info['rom_size']),
+        str(info['ext_ram_size']),
+        info['cgb'],
+        info['sgb'],
+        info['start']
+      ))
 
   max_cols = [0] * len(rows[0])
   for row in rows:
