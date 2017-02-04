@@ -3,16 +3,24 @@
   <style>
     canvas {
       border: 1px solid gray;
-      transform: scale(3);
+      transform: scale(2);
       transform-origin: top left;
     }
   </style>
+  <button id="stop">stop</button>
   <canvas width="160" height="144"></canvas>
   <script src="binjgb.js"></script>
   <script>
     var canvasEl = document.querySelector('canvas');
-    var ctx = canvasEl.getContext('2d');
-    var imageData = ctx.createImageData(canvasEl.width, canvasEl.height);
+    var canvasCtx = canvasEl.getContext('2d');
+    var imageData = canvasCtx.createImageData(canvasEl.width, canvasEl.height);
+    var audioCtx = new AudioContext();
+
+    var buttonEl = document.querySelector('button');
+    buttonEl.addEventListener('click', function() {
+      stop = true;
+    });
+    var stop = false;
 
     function get(url, callback) {
       var xhr = new XMLHttpRequest();
@@ -33,72 +41,78 @@
 
     var romData = 0, romSize = 0;
 
-    get('sml.gb', function(src) {
+    get('dk.gb', function(src) {
       romData = _malloc(src.byteLength);
       romSize = src.byteLength;
       HEAPU8.set(new Uint8Array(src), romData, romSize);
       start();
     });
 
+    var audioBufferSize = 1024;
     var e = 0;
     var frameBuffer = null;
+    var audioBuffer = null;
     function start() {
       e = _new_emulator();
       _init_rom_data(e, romData, romSize);
-      _init_audio_buffer(e, 44100, 8000);
+      _init_audio_buffer(e, audioCtx.sampleRate, audioBufferSize * 2);
       var result = _init_emulator(e);
-      var frameBufferPtr = _get_frame_buffer_ptr(e);
-      var frameBufferSize = _get_frame_buffer_size(e);
-      frameBuffer =
-          new Uint8Array(Module.buffer, frameBufferPtr, frameBufferSize);
+      frameBuffer = new Uint8Array(Module.buffer, _get_frame_buffer_ptr(e),
+                                   _get_frame_buffer_size(e));
+      audioBuffer = new Uint8Array(Module.buffer, _get_audio_buffer_ptr(e),
+                                   _get_audio_buffer_capacity(e));
 
-      update();
-      requestAnimationFrame(render);
+      requestAnimationFrame(renderVideo);
     };
 
-    function get_time_ms() {
-      return +new Date();
-    }
-
+    var CPU_CYCLES_PER_SECOND = 4194304;
+    var CPU_CYCLES_PER_MS = CPU_CYCLES_PER_SECOND / 1000;
     var NEW_FRAME = 1;
     var AUDIO_BUFFER_FULL = 2;
-    var TIMEOUT = 4;
 
-    var last_sync_cycles = 0;
-    var last_sync_real_ms = get_time_ms();
-    var ev = 0;
-    function update() {
-      var samples = 4194304 / 2 / 10 * 2;
-      var untilMs = Infinity;
-      ev = _run_emulator_until_event(e, ev, samples, untilMs);
-      if (ev & TIMEOUT) {
-        console.log('timeout');
-      }
-      if (ev & NEW_FRAME) {
-        console.log('new frame');
-        var x, y;
-        imageData.data.set(frameBuffer);
-      }
-      if (ev & AUDIO_BUFFER_FULL) {
-        console.log('audio buffer full');
+    var lastMs = 0;
+    var syncAudioSec = 0;
+    var syncAudioCycles = 0;
+    function renderVideo(nowMs) {
+      if (!stop) requestAnimationFrame(renderVideo);
+      var deltaMs = nowMs - (lastMs || nowMs);
+      var deltaCycles = deltaMs * CPU_CYCLES_PER_MS;
+
+      if (!syncAudioSec) syncAudioSec = audioCtx.currentTime;
+
+      var runUntilCycles = _get_cycles(e) + deltaCycles;
+      while (_get_cycles(e) < runUntilCycles) {
+        var ev = _run_emulator_until_event(e, audioBufferSize << 1);
+        if (ev & NEW_FRAME) {
+          imageData.data.set(frameBuffer);
+          canvasCtx.putImageData(imageData, 0, 0);
+        }
+        if (ev & AUDIO_BUFFER_FULL) {
+          var inSamples = _get_audio_buffer_size(e) >> 1;
+          var buffer =
+              audioCtx.createBuffer(2, inSamples, audioCtx.sampleRate);
+          var channel0 = buffer.getChannelData(0);
+          var channel1 = buffer.getChannelData(1);
+          var outPos = 0;
+          var inPos = 0;
+          for (var i = 0; i < inSamples; i++) {
+            channel0[outPos] = (audioBuffer[inPos] - 128) / 128;
+            channel1[outPos] = (audioBuffer[inPos+1] - 128) / 128;
+            outPos++;
+            inPos += 2;
+          }
+          var bufferSource = audioCtx.createBufferSource();
+          bufferSource.buffer = buffer;
+          bufferSource.connect(audioCtx.destination);
+          bufferSource.start(syncAudioSec);
+          var deltaGbSec =
+              (_get_cycles(e) - syncAudioCycles) / CPU_CYCLES_PER_SECOND;
+          syncAudioSec += deltaGbSec;
+          syncAudioCycles = _get_cycles(e);
+        }
       }
 
-      var now_ms = get_time_ms();
-      var gb_ms = _get_cycles() - last_sync_cycles;
-      var real_ms = now_ms - last_sync_real_ms;
-      var delta_ms = gb_ms - real_ms;
-      var delay_until_ms = now_ms + delta_ms;
-      if (real_ms < gb_ms) {
-        setTimeout(update, delta_ms);
-      } else {
-        setTimeout(update, 0);
-      }
+      lastMs = nowMs;
     }
-
-    function render() {
-      ctx.putImageData(imageData, 0, 0);
-      requestAnimationFrame(render);
-    }
-
   </script>
 </body>

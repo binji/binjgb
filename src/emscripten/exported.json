@@ -15,4 +15,5 @@
 "_get_frame_buffer_ptr",
 "_get_frame_buffer_size",
 "_get_audio_buffer_ptr",
+"_get_audio_buffer_capacity",
 "_get_audio_buffer_size"]

@@ -141,7 +141,6 @@ int main(int argc, char** argv) {
                                  1);
   LOG("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
   f64 timeout_ms = get_time_ms() + timeout_sec * MILLISECONDS_PER_SECOND;
-  EmulatorEvent event = 0;
   Bool finish_at_next_frame = FALSE;
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
   u32 next_input_frame = 0;
