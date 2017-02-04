@@ -1,4 +1,5 @@
 ["_new_emulator",
+"_clear_emulator",
 "_init_rom_data",
 "_init_audio_buffer",
 "_init_emulator",
