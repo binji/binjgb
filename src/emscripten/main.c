@@ -22,17 +22,6 @@ void init_rom_data(Emulator* e, void* data, size_t size) {
   e->file_data.size = size;
 }
 
-Result init_audio_buffer(Emulator* e, u32 frequency, u32 sample_count) {
-  u32 gb_channel_samples = sample_count + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
-  size_t buffer_size = gb_channel_samples * sizeof(e->audio_buffer.data[0]);
-  e->audio_buffer.data = malloc(buffer_size);
-  if (!e->audio_buffer.data) return ERROR;
-  e->audio_buffer.end = e->audio_buffer.data + gb_channel_samples;
-  e->audio_buffer.position = e->audio_buffer.data;
-  e->audio_buffer.frequency = frequency;
-  return OK;
-}
-
 void set_joyp_up(Emulator* e, Bool set) { e->state.JOYP.up = set; }
 void set_joyp_down(Emulator* e, Bool set) { e->state.JOYP.down = set; }
 void set_joyp_left(Emulator* e, Bool set) { e->state.JOYP.left = set; }

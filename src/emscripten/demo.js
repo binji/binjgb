@@ -1,6 +1,6 @@
 "use strict";
 
-const AUDIO_BUFFER_SIZE = 1024;
+const AUDIO_FRAMES = 4096;
 const MAX_UPDATE_SEC = 0.1;
 const CPU_CYCLES_PER_SEC= 4194304;
 const EVENT_NEW_FRAME = 1;
@@ -63,7 +63,7 @@ function start(data) {
 
   _clear_emulator(e);
   _init_rom_data(e, romData, data.byteLength);
-  _init_audio_buffer(e, audio.sampleRate, AUDIO_BUFFER_SIZE << 1);
+  _init_audio_buffer(e, audio.sampleRate, AUDIO_FRAMES);
   _init_emulator(e);
 
   frameBuffer = new Uint8Array(
@@ -75,7 +75,7 @@ function start(data) {
   fps = 0;
   lastSec = performance.now() / 1000;
   startAudioSec = audio.currentTime + audioLatencySec;
-  audioLatencySec = AUDIO_BUFFER_SIZE / audio.sampleRate;
+  audioLatencySec = AUDIO_FRAMES / audio.sampleRate;
   leftoverCycles = 0;
   requestAnimationFrame(renderVideo);
 }
@@ -94,21 +94,21 @@ function renderVideo(startMs) {
   var deltaCycles = Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_CYCLES_PER_SEC;
   var runUntilCycles = startCycles + deltaCycles + leftoverCycles;
   while (_get_cycles(e) < runUntilCycles) {
-    var event = _run_emulator_until_event(e, AUDIO_BUFFER_SIZE << 1);
+    var event = _run_emulator(e, AUDIO_FRAMES);
     if (event & EVENT_NEW_FRAME) {
       imageData.data.set(frameBuffer);
     }
     if (event & EVENT_AUDIO_BUFFER_FULL) {
       var nowAudioSec = audio.currentTime;
-      var bufferSec = AUDIO_BUFFER_SIZE / audio.sampleRate;
+      var bufferSec = AUDIO_FRAMES / audio.sampleRate;
       var endAudioSec = startAudioSec + bufferSec;
       if (endAudioSec >= nowAudioSec) {
-        var buffer = audio.createBuffer(2, AUDIO_BUFFER_SIZE, audio.sampleRate);
+        var buffer = audio.createBuffer(2, AUDIO_FRAMES, audio.sampleRate);
         var channel0 = buffer.getChannelData(0);
         var channel1 = buffer.getChannelData(1);
         var outPos = 0;
         var inPos = 0;
-        for (var i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+        for (var i = 0; i < AUDIO_FRAMES; i++) {
           channel0[outPos] = (audioBuffer[inPos] - 128) / 128;
           channel1[outPos] = (audioBuffer[inPos + 1] - 128) / 128;
           outPos++;

@@ -3818,7 +3818,7 @@ static f64 get_time_ms(void) {
   return ms + (f64)(to.tv_usec - from.tv_usec) / MICROSECONDS_PER_MILLISECOND;
 }
 
-static EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
+EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
   }
@@ -3843,7 +3843,7 @@ static EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   return e->last_event = event;
 }
 
-static Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
+Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   AudioBuffer* audio_buffer = &e->audio_buffer;
   size_t buffer_size =
       (frames + AUDIO_BUFFER_EXTRA_FRAMES) * SOUND_OUTPUT_COUNT;
