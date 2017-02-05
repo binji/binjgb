@@ -10,7 +10,7 @@
 
 #define AUDIO_FREQUENCY 44100
 /* This value is arbitrary. Why not 1/10th of a second? */
-#define GB_CHANNEL_SAMPLES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
+#define AUDIO_FRAMES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
 #define DEFAULT_TIMEOUT_SEC 30
 #define DEFAULT_FRAMES 60
 
@@ -27,20 +27,6 @@ static char* replace_extension(const char* filename, const char* extension) {
              extension);
   }
   return result;
-}
-
-static Result init_audio_buffer(AudioBuffer* audio_buffer) {
-  u32 gb_channel_samples =
-      GB_CHANNEL_SAMPLES + AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
-  size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
-  audio_buffer->data = malloc(buffer_size);
-  CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
-  audio_buffer->end = audio_buffer->data + gb_channel_samples;
-  audio_buffer->position = audio_buffer->data;
-  audio_buffer->frequency = AUDIO_FREQUENCY;
-  return OK;
-error:
-  return ERROR;
 }
 
 Result write_frame_ppm(Emulator* e, const char* filename) {
@@ -144,16 +130,16 @@ int main(int argc, char** argv) {
   const char* rom_filename = argv[optind];
 
   CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
-  CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer)));
+  CHECK(SUCCESS(init_audio_buffer(e, AUDIO_FREQUENCY, AUDIO_FRAMES)));
   CHECK(SUCCESS(init_emulator(e)));
 
-  /* Run for N frames, measured by audio samples (measuring using video is
+  /* Run for N frames, measured by audio frames (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
-   * we still produce audio samples at a fixed rate. */
-  u32 total_samples = (u32)((f64)frames * PPU_FRAME_CYCLES * AUDIO_FREQUENCY *
-                                SOUND_OUTPUT_COUNT / CPU_CYCLES_PER_SECOND +
-                            1);
-  LOG("frames = %u total_samples = %u\n", frames, total_samples);
+   * we still produce audio frames at a fixed rate. */
+  u32 total_audio_frames = (u32)((f64)frames * PPU_FRAME_CYCLES *
+                                     AUDIO_FREQUENCY / CPU_CYCLES_PER_SECOND +
+                                 1);
+  LOG("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
   f64 timeout_ms = get_time_ms() + timeout_sec * MILLISECONDS_PER_SECOND;
   EmulatorEvent event = 0;
   Bool finish_at_next_frame = FALSE;
@@ -161,7 +147,7 @@ int main(int argc, char** argv) {
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
-    event = run_emulator_until_event(e, event, GB_CHANNEL_SAMPLES);
+    EmulatorEvent event = run_emulator(e, AUDIO_FRAMES);
     if (get_time_ms() > timeout_ms) {
       PRINT_ERROR("test timed out.\n");
       goto error;
@@ -218,10 +204,10 @@ int main(int argc, char** argv) {
       }
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      if (total_samples > GB_CHANNEL_SAMPLES) {
-        total_samples -= GB_CHANNEL_SAMPLES;
+      if (total_audio_frames > AUDIO_FRAMES) {
+        total_audio_frames -= AUDIO_FRAMES;
       } else {
-        total_samples = 0;
+        total_audio_frames = 0;
         finish_at_next_frame = TRUE;
       }
     }

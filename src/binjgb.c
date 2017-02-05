@@ -182,9 +182,9 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define SOUND_OUTPUT_MAX_VOLUME 7
 /* Additional samples so the AudioBuffer doesn't overflow. This could happen
  * because the audio buffer is updated at the granularity of an instruction, so
- * the most extra samples that could be added is equal to the APU cycle count
+ * the most extra frames that could be added is equal to the APU cycle count
  * of the slowest instruction. */
-#define AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES 256
+#define AUDIO_BUFFER_EXTRA_FRAMES 256
 
 #define WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES APU_CYCLES
 #define WAVE_TRIGGER_DELAY_CYCLES (3 * APU_CYCLES)
@@ -962,6 +962,12 @@ typedef struct JoypadCallback {
   void* user_data;
 } JoypadCallback;
 
+typedef u32 EmulatorEvent;
+enum {
+  EMULATOR_EVENT_NEW_FRAME = 0x1,
+  EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
+};
+
 typedef struct Emulator {
   EmulatorConfig config;
   FileData file_data;
@@ -973,6 +979,7 @@ typedef struct Emulator {
   FrameBuffer frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallback joypad_callback;
+  EmulatorEvent last_event;
 } Emulator;
 
 static Bool s_never_trace = 0;
@@ -2943,7 +2950,7 @@ static u8 update_noise(Noise* noise) {
 /* Convert from 4-bit sample to 8-bit sample. */
 #define CHANNEL3_SAMPLE(wave, sample) (((sample) >> (wave)->volume_shift) << 4)
 
-static void write_sample(AudioBuffer* buffer, u8 so1, u8 so2) {
+static void write_audio_frame(AudioBuffer* buffer, u8 so1, u8 so2) {
   assert(buffer->position + 2 <= buffer->end);
   buffer->accumulator[0] += so1;
   buffer->accumulator[1] += so2;
@@ -2959,15 +2966,15 @@ static void write_sample(AudioBuffer* buffer, u8 so1, u8 so2) {
 }
 
 static void apu_mix_sample(Emulator* e, int channel, u8 sample,
-                           u16* out_samples) {
+                           u16* out_frame) {
   if (!e->config.disable_sound[channel]) {
-    out_samples[0] += sample * e->state.apu.so_output[0][channel];
-    out_samples[1] += sample * e->state.apu.so_output[1][channel];
+    out_frame[0] += sample * e->state.apu.so_output[0][channel];
+    out_frame[1] += sample * e->state.apu.so_output[1][channel];
   }
 }
 
 static void apu_update_channel_1(Emulator* e, Bool length, Bool envelope,
-                                 Bool sweep, u16* out_samples) {
+                                 Bool sweep, u16* out_frame) {
   Channel* channel1 = &e->state.apu.channel[CHANNEL1];
   u8 sample = 0;
   if (channel1->status) {
@@ -2977,12 +2984,12 @@ static void apu_update_channel_1(Emulator* e, Bool length, Bool envelope,
   if (length) update_channel_length(channel1);
   if (channel1->status) {
     if (envelope) update_envelope(&channel1->envelope);
-    apu_mix_sample(e, CHANNEL1, CHANNELX_SAMPLE(channel1, sample), out_samples);
+    apu_mix_sample(e, CHANNEL1, CHANNELX_SAMPLE(channel1, sample), out_frame);
   }
 }
 
 static void apu_update_channel_2(Emulator* e, Bool length, Bool envelope,
-                                 u16* out_samples) {
+                                 u16* out_frame) {
   Channel* channel2 = &e->state.apu.channel[CHANNEL2];
   u8 sample = 0;
   if (channel2->status) {
@@ -2991,11 +2998,11 @@ static void apu_update_channel_2(Emulator* e, Bool length, Bool envelope,
   if (length) update_channel_length(channel2);
   if (channel2->status) {
     if (envelope) update_envelope(&channel2->envelope);
-    apu_mix_sample(e, CHANNEL2, CHANNELX_SAMPLE(channel2, sample), out_samples);
+    apu_mix_sample(e, CHANNEL2, CHANNELX_SAMPLE(channel2, sample), out_frame);
   }
 }
 
-static void apu_update_channel_3(Emulator* e, Bool length, u16* out_samples) {
+static void apu_update_channel_3(Emulator* e, Bool length, u16* out_frame) {
   Channel* channel3 = &e->state.apu.channel[CHANNEL3];
   u8 sample = 0;
   if (channel3->status) {
@@ -3004,12 +3011,12 @@ static void apu_update_channel_3(Emulator* e, Bool length, u16* out_samples) {
   if (length) update_channel_length(channel3);
   if (channel3->status) {
     apu_mix_sample(e, CHANNEL3, CHANNEL3_SAMPLE(&e->state.apu.wave, sample),
-                   out_samples);
+                   out_frame);
   }
 }
 
 static void apu_update_channel_4(Emulator* e, Bool length, Bool envelope,
-                                 u16* out_samples) {
+                                 u16* out_frame) {
   Channel* channel4 = &e->state.apu.channel[CHANNEL4];
   u8 sample = 0;
   if (channel4->status) {
@@ -3018,22 +3025,22 @@ static void apu_update_channel_4(Emulator* e, Bool length, Bool envelope,
   if (length) update_channel_length(channel4);
   if (channel4->status) {
     if (envelope) update_envelope(&channel4->envelope);
-    apu_mix_sample(e, CHANNEL4, CHANNELX_SAMPLE(channel4, sample), out_samples);
+    apu_mix_sample(e, CHANNEL4, CHANNELX_SAMPLE(channel4, sample), out_frame);
   }
 }
 
 static void apu_update_channels(Emulator* e, Bool length, Bool envelope,
                                 Bool sweep) {
-  u16 so_samples[2] = {0, 0};
-  apu_update_channel_1(e, length, envelope, sweep, so_samples);
-  apu_update_channel_2(e, length, envelope, so_samples);
-  apu_update_channel_3(e, length, so_samples);
-  apu_update_channel_4(e, length, envelope, so_samples);
-  so_samples[0] *= (e->state.apu.so_volume[0] + 1);
-  so_samples[0] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  so_samples[1] *= (e->state.apu.so_volume[1] + 1);
-  so_samples[1] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  write_sample(&e->audio_buffer, so_samples[0], so_samples[1]);
+  u16 frame[2] = {0, 0};
+  apu_update_channel_1(e, length, envelope, sweep, frame);
+  apu_update_channel_2(e, length, envelope, frame);
+  apu_update_channel_3(e, length, frame);
+  apu_update_channel_4(e, length, envelope, frame);
+  frame[0] *= (e->state.apu.so_volume[0] + 1);
+  frame[0] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  frame[1] *= (e->state.apu.so_volume[1] + 1);
+  frame[1] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
+  write_audio_frame(&e->audio_buffer, frame[0], frame[1]);
 }
 
 static void apu_update(Emulator* e) {
@@ -3057,8 +3064,8 @@ static void apu_mcycle(Emulator* e) {
     apu_update(e);
     apu_update(e);
   } else {
-    write_sample(&e->audio_buffer, 0, 0);
-    write_sample(&e->audio_buffer, 0, 0);
+    write_audio_frame(&e->audio_buffer, 0, 0);
+    write_audio_frame(&e->audio_buffer, 0, 0);
   }
 }
 
@@ -3791,16 +3798,6 @@ static void step_emulator(Emulator* e) {
   handle_interrupts(e);
 }
 
-typedef u32 EmulatorEvent;
-enum {
-  EMULATOR_EVENT_NEW_FRAME = 0x1,
-  EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
-};
-
-static void reset_audio_buffer(Emulator* e) {
-  e->audio_buffer.position = e->audio_buffer.data;
-}
-
 /* TODO: remove this global */
 static struct timeval s_start_time;
 static void init_time(void) {
@@ -3821,34 +3818,44 @@ static f64 get_time_ms(void) {
   return ms + (f64)(to.tv_usec - from.tv_usec) / MICROSECONDS_PER_MILLISECOND;
 }
 
-static EmulatorEvent run_emulator_until_event(Emulator* e,
-                                              EmulatorEvent last_event,
-                                              u32 requested_samples) {
-  if (last_event & EMULATOR_EVENT_NEW_FRAME) {
+static EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
+  if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
   }
-  if (last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-    reset_audio_buffer(e);
+  if (e->last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+    e->audio_buffer.position = e->audio_buffer.data;
   }
   check_joyp_intr(e);
 
-  assert(requested_samples <= e->audio_buffer.end - e->audio_buffer.data);
-  EmulatorEvent result = 0;
-  Bool running = TRUE;
-  while (running) {
+  u8* max_audio_position =
+      e->audio_buffer.data + max_audio_frames * SOUND_OUTPUT_COUNT;
+  assert(max_audio_position <= e->audio_buffer.end);
+  EmulatorEvent event = 0;
+  while (event == 0) {
     step_emulator(e);
     if (e->state.ppu.new_frame_edge) {
-      result |= EMULATOR_EVENT_NEW_FRAME;
-      running = FALSE;
+      event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    size_t samples = e->audio_buffer.position - e->audio_buffer.data;
-    if (samples >= requested_samples) {
-      result |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
-      running = FALSE;
+    if (e->audio_buffer.position >= max_audio_position) {
+      event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
   }
-  return result;
+  return e->last_event = event;
 }
+
+static Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
+  AudioBuffer* audio_buffer = &e->audio_buffer;
+  size_t buffer_size =
+      (frames + AUDIO_BUFFER_EXTRA_FRAMES) * SOUND_OUTPUT_COUNT;
+  audio_buffer->data = malloc(buffer_size); /* Leaks. */
+  CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
+  audio_buffer->end = audio_buffer->data + buffer_size;
+  audio_buffer->position = audio_buffer->data;
+  audio_buffer->frequency = frequency;
+  return OK;
+  ON_ERROR_RETURN;
+}
+
 
 /* SDL stuff */
 
@@ -3865,20 +3872,22 @@ static EmulatorEvent run_emulator_until_event(Emulator* e,
 #define RENDER_SCALE 4
 #define RENDER_WIDTH (SCREEN_WIDTH * RENDER_SCALE)
 #define RENDER_HEIGHT (SCREEN_HEIGHT * RENDER_SCALE)
-#define AUDIO_FREQUENCY 44100
-#define AUDIO_FORMAT AUDIO_U16SYS
-#define AUDIO_CONVERT_SAMPLE_U16SYS(X) (X)
-#define AUDIO_CHANNELS 2
-#define AUDIO_SAMPLES 4096
-#define AUDIO_SAMPLE_SIZE 2
-typedef u16 SDLAudioBufferSample;
-/* Try to keep the audio buffer filled to |number of samples| *
- * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER samples. */
+#define AUDIO_SPEC_FREQUENCY 44100
+#define AUDIO_SPEC_FORMAT AUDIO_U16
+#define AUDIO_SPEC_CHANNELS 2
+#define AUDIO_SPEC_SAMPLES 2048
+#define AUDIO_SPEC_SAMPLE_SIZE sizeof(HostAudioSample)
+#define AUDIO_FRAME_SIZE (AUDIO_SPEC_SAMPLE_SIZE * AUDIO_SPEC_CHANNELS)
+#define AUDIO_CONVERT_SAMPLE_FROM_U8(X) ((X) << 8)
+typedef u16 HostAudioSample;
+/* Try to keep the audio buffer filled to |number of frames| *
+ * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER frames. */
 #define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
 #define AUDIO_MAX_BUFFER_SIZE_MULTIPLIER 4
 /* One buffer will be requested every AUDIO_BUFFER_REFILL_MS milliseconds. */
-#define AUDIO_BUFFER_REFILL_MS \
-  ((AUDIO_SAMPLES / AUDIO_CHANNELS) * MILLISECONDS_PER_SECOND / AUDIO_FREQUENCY)
+#define AUDIO_BUFFER_REFILL_MS                                            \
+  ((AUDIO_SPEC_SAMPLES / AUDIO_SPEC_CHANNELS) * MILLISECONDS_PER_SECOND / \
+   AUDIO_SPEC_FREQUENCY)
 /* If the emulator is running behind by AUDIO_MAX_SLOW_DESYNC_MS milliseconds
  * (or ahead by AUDIO_MAX_FAST_DESYNC_MS), it won't try to catch up, and
  * instead just forcibly resync. */
@@ -3892,7 +3901,7 @@ typedef u16 SDLAudioBufferSample;
 #define SAVE_STATE_HEADER (u32)(0x6b57a7e0 + SAVE_STATE_VERSION)
 #define SAVE_STATE_FILE_SIZE (sizeof(u32) + sizeof(EmulatorState))
 
-static int s_log_level_sdl = 1;
+static int s_log_level_host = 1;
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -3905,62 +3914,57 @@ typedef struct {
   size_t buffer_available;        /* Number of bytes available for reading. */
   size_t buffer_target_available; /* Try to keep the buffer this size. */
   Bool ready; /* Set to TRUE when audio is first rendered. */
-} SDLAudio;
+} HostAudio;
 
 typedef struct {
-  const char* save_filename;
   const char* save_state_filename;
   SDL_Window* window;
   SDL_Renderer* renderer;
   SDL_Texture* texture;
-  SDLAudio audio;
+  HostAudio audio;
   u32 last_sync_cycles;  /* GB CPU cycle count of last synchronization. */
   f64 last_sync_real_ms; /* Wall clock time of last synchronization. */
-} SDL;
+} Host;
 
-static void sdl_destroy(SDL* sdl) {
-  SDL_Quit();
-}
-
-static Result sdl_init_renderer(SDL* sdl, Bool vsync) {
-  DESTROY_IF(sdl->renderer, SDL_DestroyRenderer);
-  sdl->renderer = SDL_CreateRenderer(sdl->window, -1,
-                                     vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
-  CHECK_MSG(sdl->renderer != NULL, "SDL_CreateRenderer failed.\n");
-  CHECK_MSG(
-      SDL_RenderSetLogicalSize(sdl->renderer, SCREEN_WIDTH, SCREEN_HEIGHT) == 0,
-      "SDL_SetRendererLogicalSize failed.\n");
-  DESTROY_IF(sdl->texture, SDL_DestroyTexture);
-  sdl->texture = SDL_CreateTexture(sdl->renderer, SDL_PIXELFORMAT_ARGB8888,
-                                   SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
-                                   SCREEN_HEIGHT);
-  CHECK_MSG(sdl->texture != NULL, "SDL_CreateTexture failed.\n");
+static Result host_init_renderer(Host* host, Bool vsync) {
+  DESTROY_IF(host->renderer, SDL_DestroyRenderer);
+  host->renderer = SDL_CreateRenderer(host->window, -1,
+                                      vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
+  CHECK_MSG(host->renderer != NULL, "SDL_CreateRenderer failed.\n");
+  CHECK_MSG(SDL_RenderSetLogicalSize(host->renderer, SCREEN_WIDTH,
+                                     SCREEN_HEIGHT) == 0,
+            "SDL_SetRendererLogicalSize failed.\n");
+  DESTROY_IF(host->texture, SDL_DestroyTexture);
+  host->texture = SDL_CreateTexture(host->renderer, SDL_PIXELFORMAT_ARGB8888,
+                                    SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
+                                    SCREEN_HEIGHT);
+  CHECK_MSG(host->texture != NULL, "SDL_CreateTexture failed.\n");
   return OK;
 error:
-  DESTROY_IF(sdl->texture, SDL_DestroyTexture);
-  DESTROY_IF(sdl->renderer, SDL_DestroyRenderer);
+  DESTROY_IF(host->texture, SDL_DestroyTexture);
+  DESTROY_IF(host->renderer, SDL_DestroyRenderer);
   return ERROR;
 }
 
-static Result sdl_init_video(SDL* sdl) {
+static Result host_init_video(Host* host) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
-  sdl->window =
+  host->window =
       SDL_CreateWindow("binjgb", SDL_WINDOWPOS_UNDEFINED,
                        SDL_WINDOWPOS_UNDEFINED, RENDER_WIDTH, RENDER_HEIGHT, 0);
-  CHECK_MSG(sdl->window != NULL, "SDL_CreateWindow failed.\n");
-  CHECK(SUCCESS(sdl_init_renderer(sdl, TRUE)));
+  CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
+  CHECK(SUCCESS(host_init_renderer(host, TRUE)));
   return OK;
 error:
-  sdl_destroy(sdl);
+  SDL_Quit();
   return ERROR;
 }
 
-static void sdl_audio_callback(void* userdata, u8* dst, int len) {
+static void host_audio_callback(void* userdata, u8* dst, int len) {
   memset(dst, 0, len);
-  SDL* sdl = userdata;
-  SDLAudio* audio = &sdl->audio;
+  Host* host = userdata;
+  HostAudio* audio = &host->audio;
   if (len > (int)audio->buffer_available) {
-    DEBUG(sdl, "!!! audio underflow. avail %zd < requested %u\n",
+    DEBUG(host, "!!! audio underflow. avail %zd < requested %u\n",
           audio->buffer_available, len);
     len = audio->buffer_available;
   }
@@ -3977,47 +3981,33 @@ static void sdl_audio_callback(void* userdata, u8* dst, int len) {
   audio->buffer_available -= len;
 }
 
-static Result sdl_init_audio(SDL* sdl) {
-  sdl->last_sync_cycles = 0;
-  sdl->last_sync_real_ms = get_time_ms();
+static Result host_init_audio(Host* host) {
+  host->last_sync_cycles = 0;
+  host->last_sync_real_ms = get_time_ms();
 
   SDL_AudioSpec want;
-  want.freq = AUDIO_FREQUENCY;
-  want.format = AUDIO_FORMAT;
-  want.channels = AUDIO_CHANNELS;
-  want.samples = AUDIO_SAMPLES;
-  want.callback = sdl_audio_callback;
-  want.userdata = sdl;
-  sdl->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &sdl->audio.spec, 0);
-  CHECK_MSG(sdl->audio.dev != 0, "SDL_OpenAudioDevice failed.\n");
+  want.freq = AUDIO_SPEC_FREQUENCY;
+  want.format = AUDIO_SPEC_FORMAT;
+  want.channels = AUDIO_SPEC_CHANNELS;
+  want.samples = AUDIO_SPEC_SAMPLES;
+  want.callback = host_audio_callback;
+  want.userdata = host;
+  host->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &host->audio.spec, 0);
+  CHECK_MSG(host->audio.dev != 0, "SDL_OpenAudioDevice failed.\n");
 
-  sdl->audio.buffer_target_available =
-      (size_t)(sdl->audio.spec.size * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER);
+  host->audio.buffer_target_available =
+      (size_t)(host->audio.spec.size * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER);
 
   size_t buffer_capacity =
-      (size_t)(sdl->audio.spec.size * AUDIO_MAX_BUFFER_SIZE_MULTIPLIER);
-  sdl->audio.buffer_capacity = buffer_capacity;
+      (size_t)(host->audio.spec.size * AUDIO_MAX_BUFFER_SIZE_MULTIPLIER);
+  host->audio.buffer_capacity = buffer_capacity;
 
-  sdl->audio.buffer = malloc(buffer_capacity); /* Leaks. */
-  CHECK_MSG(sdl->audio.buffer != NULL,
-            "SDL audio buffer allocation failed.\n");
-  memset(sdl->audio.buffer, 0, buffer_capacity);
+  host->audio.buffer = malloc(buffer_capacity); /* Leaks. */
+  CHECK_MSG(host->audio.buffer != NULL, "Audio buffer allocation failed.\n");
+  memset(host->audio.buffer, 0, buffer_capacity);
 
-  sdl->audio.buffer_end = sdl->audio.buffer + buffer_capacity;
-  sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
-  return OK;
-  ON_ERROR_RETURN;
-}
-
-static Result init_audio_buffer(SDL* sdl, AudioBuffer* audio_buffer) {
-  u32 gb_channel_samples = sdl->audio.spec.size / AUDIO_SAMPLE_SIZE +
-                           AUDIO_BUFFER_EXTRA_CHANNEL_SAMPLES;
-  size_t buffer_size = gb_channel_samples * sizeof(audio_buffer->data[0]);
-  audio_buffer->data = malloc(buffer_size); /* Leaks. */
-  CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
-  audio_buffer->end = audio_buffer->data + gb_channel_samples;
-  audio_buffer->position = audio_buffer->data;
-  audio_buffer->frequency = sdl->audio.spec.freq;
+  host->audio.buffer_end = host->audio.buffer + buffer_capacity;
+  host->audio.read_pos = host->audio.write_pos = host->audio.buffer;
   return OK;
   ON_ERROR_RETURN;
 }
@@ -4052,10 +4042,10 @@ static Result write_state_to_file(Emulator* e, const char* filename) {
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
-static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
+static Bool host_poll_events(Emulator* e, Host* host) {
   Bool running = TRUE;
   SDL_Event event;
-  const char* ss_filename = sdl->save_state_filename;
+  const char* ss_filename = host->save_state_filename;
   EmulatorConfig old_config = e->config;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
@@ -4090,55 +4080,55 @@ static Bool sdl_poll_events(Emulator* e, SDL* sdl) {
     }
   }
   if (old_config.no_sync != e->config.no_sync) {
-    sdl_init_renderer(sdl, !e->config.no_sync);
+    host_init_renderer(host, !e->config.no_sync);
   }
   if (old_config.fullscreen != e->config.fullscreen) {
     SDL_SetWindowFullscreen(
-        sdl->window, e->config.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        host->window, e->config.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
   }
   return running;
 }
 
-static void sdl_render_video(SDL* sdl, Emulator* e) {
-  SDL_RenderClear(sdl->renderer);
+static void host_render_video(Host* host, Emulator* e) {
+  SDL_RenderClear(host->renderer);
   void* pixels;
   int pitch;
-  if (SDL_LockTexture(sdl->texture, NULL, &pixels, &pitch) == 0) {
+  if (SDL_LockTexture(host->texture, NULL, &pixels, &pitch) == 0) {
     int y;
     for (y = 0; y < SCREEN_HEIGHT; y++) {
       memcpy((u8*)pixels + y * pitch, &e->frame_buffer[y * SCREEN_WIDTH],
              SCREEN_WIDTH * sizeof(RGBA));
     }
-    SDL_UnlockTexture(sdl->texture);
-    SDL_RenderCopy(sdl->renderer, sdl->texture, NULL, NULL);
+    SDL_UnlockTexture(host->texture);
+    SDL_RenderCopy(host->renderer, host->texture, NULL, NULL);
   }
-  DEBUG(sdl, "@@@ %.1f: render present\n", get_time_ms());
-  SDL_RenderPresent(sdl->renderer);
+  DEBUG(host, "@@@ %.1f: render present\n", get_time_ms());
+  SDL_RenderPresent(host->renderer);
 }
 
-static void sdl_synchronize(SDL* sdl, Emulator* e) {
+static void host_synchronize(Host* host, Emulator* e) {
   f64 now_ms = get_time_ms();
-  f64 gb_ms = (f64)(e->state.cycles - sdl->last_sync_cycles) *
+  f64 gb_ms = (f64)(e->state.cycles - host->last_sync_cycles) *
               MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
-  f64 real_ms = now_ms - sdl->last_sync_real_ms;
+  f64 real_ms = now_ms - host->last_sync_real_ms;
   f64 delta_ms = gb_ms - real_ms;
   f64 delay_until_ms = now_ms + delta_ms;
   if (delta_ms < -AUDIO_MAX_SLOW_DESYNC_MS ||
       delta_ms > AUDIO_MAX_FAST_DESYNC_MS) {
-    DEBUG(sdl, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
+    DEBUG(host, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
           real_ms);
     /* Major desync; don't try to catch up, just reset. But our audio buffer
      * is probably behind (or way ahead), so pause to refill. */
-    sdl->last_sync_real_ms = now_ms;
-    SDL_PauseAudioDevice(sdl->audio.dev, 1);
-    sdl->audio.ready = FALSE;
-    SDL_LockAudioDevice(sdl->audio.dev);
-    sdl->audio.read_pos = sdl->audio.write_pos = sdl->audio.buffer;
-    sdl->audio.buffer_available = 0;
-    SDL_UnlockAudioDevice(sdl->audio.dev);
+    host->last_sync_real_ms = now_ms;
+    SDL_PauseAudioDevice(host->audio.dev, 1);
+    host->audio.ready = FALSE;
+    SDL_LockAudioDevice(host->audio.dev);
+    host->audio.read_pos = host->audio.write_pos = host->audio.buffer;
+    host->audio.buffer_available = 0;
+    SDL_UnlockAudioDevice(host->audio.dev);
   } else {
     if (real_ms < gb_ms) {
-      DEBUG(sdl, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
+      DEBUG(host, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
             delta_ms, gb_ms, real_ms);
       do {
         SDL_Delay(delta_ms);
@@ -4146,55 +4136,46 @@ static void sdl_synchronize(SDL* sdl, Emulator* e) {
         delta_ms = delay_until_ms - now_ms;
       } while (delta_ms > 0);
     }
-    sdl->last_sync_real_ms = delay_until_ms;
+    host->last_sync_real_ms = delay_until_ms;
   }
-  sdl->last_sync_cycles = e->state.cycles;
+  host->last_sync_cycles = e->state.cycles;
 }
 
-/* Returns TRUE if there was an overflow. */
-static Bool sdl_write_audio_sample(SDLAudio* audio, u16 sample) {
-  if (audio->buffer_available < audio->buffer_capacity) {
-    SDLAudioBufferSample* dst = (SDLAudioBufferSample*)audio->write_pos;
-    *dst = AUDIO_CONVERT_SAMPLE_U16SYS(sample);
-    audio->buffer_available += AUDIO_SAMPLE_SIZE;
-    audio->write_pos += AUDIO_SAMPLE_SIZE;
-    assert(audio->write_pos <= audio->buffer_end);
-    if (audio->write_pos == audio->buffer_end) {
-      audio->write_pos = audio->buffer;
-    }
-    return FALSE;
-  } else {
-    return TRUE;
-  }
-}
-
-static void sdl_render_audio(SDL* sdl, Emulator* e) {
-  assert(AUDIO_CHANNELS == SOUND_OUTPUT_COUNT);
-  SDLAudio* audio = &sdl->audio;
+static void host_render_audio(Host* host, Emulator* e) {
+  assert(AUDIO_SPEC_CHANNELS == SOUND_OUTPUT_COUNT);
+  HostAudio* audio = &host->audio;
   u8* src = e->audio_buffer.data;
   u8* src_end = e->audio_buffer.position;
-  Bool overflow = FALSE;
 
   SDL_LockAudioDevice(audio->dev);
   size_t old_buffer_available = audio->buffer_available;
-  for (; src < src_end;) {
-    if (sdl_write_audio_sample(audio, *src++ << 8) ||
-        sdl_write_audio_sample(audio, *src++ << 8)) {
-      overflow = TRUE;
-      break;
+  size_t src_frames = (src_end - src) / SOUND_OUTPUT_COUNT;
+  size_t max_dst_frames =
+      (audio->buffer_capacity - audio->buffer_available) / AUDIO_FRAME_SIZE;
+  size_t frames = MIN(src_frames, max_dst_frames);
+  HostAudioSample* dst = (HostAudioSample*)audio->write_pos;
+  HostAudioSample* dst_end = (HostAudioSample*)audio->buffer_end;
+  for (size_t i = 0; i < frames; i++) {
+    assert(dst + 2 <= dst_end);
+    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
+    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
+    if (dst == dst_end) {
+      dst = (HostAudioSample*)audio->buffer;
     }
   }
+  audio->write_pos = (u8*)dst;
+  audio->buffer_available += frames * AUDIO_FRAME_SIZE;
   size_t new_buffer_available = audio->buffer_available;
   SDL_UnlockAudioDevice(audio->dev);
 
-  if (overflow) {
-    DEBUG(sdl, "!!! audio overflow (old size = %zu)\n", old_buffer_available);
+  if (frames < src_frames) {
+    DEBUG(host, "!!! audio overflow (old size = %zu)\n", old_buffer_available);
   } else {
-    DEBUG(sdl, "+++ %.1f: buf: %zu -> %zu\n", get_time_ms(),
+    DEBUG(host, "+++ %.1f: buf: %zu -> %zu\n", get_time_ms(),
           old_buffer_available, new_buffer_available);
   }
   if (!audio->ready && new_buffer_available >= audio->buffer_target_available) {
-    DEBUG(sdl, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
+    DEBUG(host, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
           new_buffer_available);
     audio->ready = TRUE;
     SDL_PauseAudioDevice(audio->dev, 0);
@@ -4215,37 +4196,29 @@ static const char* replace_extension(const char* filename,
   return result;
 }
 
-static Result read_ext_ram_from_file(Emulator* e, const char* filename) {
-  FILE* f = NULL;
-  if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
-    f = fopen(filename, "rb");
-    CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    CHECK_MSG(fread(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1,
-              "fread failed.\n");
-    fclose(f);
+#define DEFINE_SAVE_EXT_RAM(name, mode, fileop)                            \
+  static Result name(Emulator* e, const char* filename) {                  \
+    FILE* f = NULL;                                                        \
+    if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {      \
+      f = fopen(filename, mode);                                           \
+      CHECK_MSG(f, "unable to open file \"%s\".\n", filename);             \
+      CHECK_MSG(                                                           \
+          fileop(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1, \
+          #fileop " failed.\n");                                           \
+      fclose(f);                                                           \
+    }                                                                      \
+    return OK;                                                             \
+    ON_ERROR_CLOSE_FILE_AND_RETURN;                                        \
   }
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
-}
 
-static Result write_ext_ram_to_file(Emulator* e, const char* filename) {
-  FILE* f = NULL;
-  if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {
-    f = fopen(filename, "wb");
-    CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-    CHECK_MSG(fwrite(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1,
-              "fwrite failed.\n");
-    fclose(f);
-  }
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
-}
+DEFINE_SAVE_EXT_RAM(read_ext_ram_from_file, "rb", fread)
+DEFINE_SAVE_EXT_RAM(write_ext_ram_to_file, "wb", fwrite)
 
 static Emulator s_emulator;
-static SDL s_sdl;
+static Host s_host;
 
 static void joypad_callback(Emulator* e, void* user_data) {
-  SDL* sdl = user_data;
+  Host* sdl = user_data;
   const u8* state = SDL_GetKeyboardState(NULL);
   e->state.JOYP.up = state[SDL_SCANCODE_UP];
   e->state.JOYP.down = state[SDL_SCANCODE_DOWN];
@@ -4266,55 +4239,53 @@ int main(int argc, char** argv) {
   const char* rom_filename = argv[0];
   Emulator* e = &s_emulator;
   CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
-  CHECK(SUCCESS(sdl_init_video(&s_sdl)));
-  CHECK(SUCCESS(sdl_init_audio(&s_sdl)));
-  CHECK(SUCCESS(init_audio_buffer(&s_sdl, &e->audio_buffer)));
+  CHECK(SUCCESS(host_init_video(&s_host)));
+  CHECK(SUCCESS(host_init_audio(&s_host)));
+  CHECK(SUCCESS(init_audio_buffer(e, s_host.audio.spec.freq,
+                                  s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
   CHECK(SUCCESS(init_emulator(e)));
 
   e->joypad_callback.func = joypad_callback;
-  e->joypad_callback.user_data = &s_sdl;
+  e->joypad_callback.user_data = &s_host;
 
-  s_sdl.save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
-  s_sdl.save_state_filename =
+  const char* save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
+  s_host.save_state_filename =
       replace_extension(rom_filename, SAVE_STATE_EXTENSION);
-  read_ext_ram_from_file(e, s_sdl.save_filename);
+  read_ext_ram_from_file(e, save_filename);
 
-  EmulatorEvent event = 0;
   while (TRUE) {
-    if (!sdl_poll_events(e, &s_sdl)) {
+    if (!host_poll_events(e, &s_host)) {
       break;
     }
     if (e->config.paused) {
-      SDL_PauseAudioDevice(s_sdl.audio.dev,
-                           e->config.paused || !s_sdl.audio.ready);
+      SDL_PauseAudioDevice(s_host.audio.dev,
+                           e->config.paused || !s_host.audio.ready);
       SDL_Delay(VIDEO_FRAME_MS);
       continue;
     }
 
-    size_t buffer_needed = s_sdl.audio.spec.size -
-                           s_sdl.audio.buffer_available % s_sdl.audio.spec.size;
-    u32 requested_samples = buffer_needed / AUDIO_SAMPLE_SIZE;
-    event = run_emulator_until_event(e, event, requested_samples);
+    size_t size = s_host.audio.spec.size -
+                  s_host.audio.buffer_available % s_host.audio.spec.size;
+    EmulatorEvent event = run_emulator(e, size / AUDIO_FRAME_SIZE);
     if (!e->config.no_sync) {
-      sdl_synchronize(&s_sdl, e);
+      host_synchronize(&s_host, e);
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
-      sdl_render_video(&s_sdl, e);
+      host_render_video(&s_host, e);
       if (e->config.step) {
         e->config.paused = TRUE;
         e->config.step = FALSE;
       }
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      sdl_render_audio(&s_sdl, e);
-      reset_audio_buffer(e);
+      host_render_audio(&s_host, e);
     }
   }
 
-  write_ext_ram_to_file(e, s_sdl.save_filename);
+  write_ext_ram_to_file(e, save_filename);
   result = 0;
 error:
-  sdl_destroy(&s_sdl);
+  SDL_Quit();
   return result;
 }
 
