@@ -19,6 +19,8 @@
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define DIV_CEIL(numer, denom) (((numer) + (denom) - 1) / (denom))
+#define NEXT_MODULO(value, mod) ((mod) - (value) % (mod))
 
 #ifndef NDEBUG
 #define LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -59,6 +61,7 @@ typedef int32_t s32;
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
+typedef uint64_t u64;
 typedef double f64;
 typedef u16 Address;
 typedef u16 MaskedAddress;
@@ -180,6 +183,9 @@ typedef enum { FALSE = 0, TRUE = 1 } Bool;
 #define DUTY_CYCLE_COUNT 8
 #define SOUND_OUTPUT_COUNT 2
 #define SOUND_OUTPUT_MAX_VOLUME 7
+#define AUDIO_BUFFER_FRAMES(e) \
+  (((e)->audio_buffer.position - (e)->audio_buffer.data) / SOUND_OUTPUT_COUNT)
+
 /* Additional samples so the AudioBuffer doesn't overflow. This could happen
  * because the audio buffer is updated at the granularity of an instruction, so
  * the most extra frames that could be added is equal to the APU cycle count
@@ -835,13 +841,13 @@ typedef struct {
   u16 length;             /* All channels */
   Bool length_enabled;    /* All channels */
   Bool dac_enabled;
-  Bool status; /* Status bit for NR52 */
+  Bool status;     /* Status bit for NR52 */
+  u32 accumulator; /* Accumulates samples for resampling. */
 } Channel;
 
 typedef struct {
   u32 frequency;    /* Sample frequency, as N samples per second */
   u32 freq_counter; /* Used for resampling; [0..APU_CYCLES_PER_SECOND). */
-  u32 accumulator[SOUND_OUTPUT_COUNT];
   u32 divisor;
   u8* data; /* Unsigned 8-bit 2-channel samples @ |frequency| */
   u8* end;
@@ -850,15 +856,15 @@ typedef struct {
 
 typedef struct {
   u8 so_volume[SOUND_OUTPUT_COUNT];
-  Bool so_output[SOUND_OUTPUT_COUNT][SOUND_COUNT];
+  Bool so_output[SOUND_COUNT][SOUND_OUTPUT_COUNT];
   Bool enabled;
   Sweep sweep;
   Wave wave;
   Noise noise;
   Channel channel[CHANNEL_COUNT];
   u8 frame;         /* 0..FRAME_SEQUENCER_COUNT */
-  u32 frame_cycles; /* 0..FRAME_SEQUENCER_CYCLES */
   u32 cycles;       /* Raw cycle counter */
+  Bool initialized;
 } APU;
 
 typedef struct {
@@ -1424,6 +1430,7 @@ Result init_emulator(Emulator* e) {
   write_apu(e, APU_NR14_ADDR, 0x80);
   write_apu(e, APU_NR50_ADDR, 0x77);
   write_apu(e, APU_NR51_ADDR, 0xf3);
+  e->state.apu.initialized = TRUE;
   memcpy(&e->state.apu.wave.ram, s_initial_wave_ram, WAVE_RAM_SIZE);
   /* Turn down the volume on channel1, it is playing by default (because of the
    * GB startup sound), but we don't want to hear it when starting the
@@ -1655,7 +1662,10 @@ static u8 read_nrx4_reg(Channel* channel) {
   return PACK(channel->length_enabled, NRX4_LENGTH_ENABLED);
 }
 
+static void apu_synchronize(Emulator* e);
+
 static u8 read_apu(Emulator* e, MaskedAddress addr) {
+  apu_synchronize(e);
   APU* apu = &e->state.apu;
   switch (addr) {
     case APU_NR10_ADDR:
@@ -1690,19 +1700,19 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
     case APU_NR44_ADDR:
       return NRX4_UNUSED | read_nrx4_reg(&apu->channel[CHANNEL4]);
     case APU_NR50_ADDR:
-      return PACK(apu->so_output[1][VIN], NR50_VIN_SO2) |
+      return PACK(apu->so_output[VIN][1], NR50_VIN_SO2) |
              PACK(apu->so_volume[1], NR50_SO2_VOLUME) |
-             PACK(apu->so_output[0][VIN], NR50_VIN_SO1) |
+             PACK(apu->so_output[VIN][0], NR50_VIN_SO1) |
              PACK(apu->so_volume[0], NR50_SO1_VOLUME);
     case APU_NR51_ADDR:
-      return PACK(apu->so_output[1][SOUND4], NR51_SOUND4_SO2) |
-             PACK(apu->so_output[1][SOUND3], NR51_SOUND3_SO2) |
-             PACK(apu->so_output[1][SOUND2], NR51_SOUND2_SO2) |
-             PACK(apu->so_output[1][SOUND1], NR51_SOUND1_SO2) |
-             PACK(apu->so_output[0][SOUND4], NR51_SOUND4_SO1) |
-             PACK(apu->so_output[0][SOUND3], NR51_SOUND3_SO1) |
-             PACK(apu->so_output[0][SOUND2], NR51_SOUND2_SO1) |
-             PACK(apu->so_output[0][SOUND1], NR51_SOUND1_SO1);
+      return PACK(apu->so_output[SOUND4][1], NR51_SOUND4_SO2) |
+             PACK(apu->so_output[SOUND3][1], NR51_SOUND3_SO2) |
+             PACK(apu->so_output[SOUND2][1], NR51_SOUND2_SO2) |
+             PACK(apu->so_output[SOUND1][1], NR51_SOUND1_SO2) |
+             PACK(apu->so_output[SOUND4][0], NR51_SOUND4_SO1) |
+             PACK(apu->so_output[SOUND3][0], NR51_SOUND3_SO1) |
+             PACK(apu->so_output[SOUND2][0], NR51_SOUND2_SO1) |
+             PACK(apu->so_output[SOUND1][0], NR51_SOUND1_SO1);
     case APU_NR52_ADDR:
       return NR52_UNUSED | PACK(apu->enabled, NR52_ALL_SOUND_ENABLED) |
              PACK(apu->channel[CHANNEL4].status, NR52_SOUND4_ON) |
@@ -1715,6 +1725,7 @@ static u8 read_apu(Emulator* e, MaskedAddress addr) {
 }
 
 static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
+  apu_synchronize(e);
   Wave* wave = &e->state.apu.wave;
   if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is read from the sample
@@ -1723,12 +1734,12 @@ static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
     u8 result;
     if (e->state.is_cgb || e->state.cycles == wave->sample_time) {
       result = wave->ram[wave->position >> 1];
-      DEBUG(apu, "%s(0x%02x) while playing => 0x%02x (cy: %u)\n", __func__,
-            addr, result, e->state.cycles);
+      DEBUG(apu, "%u: %s(0x%02x) while playing => 0x%02x\n", e->state.cycles,
+            __func__, addr, result);
     } else {
       result = INVALID_READ_BYTE;
-      DEBUG(apu, "%s(0x%02x) while playing, invalid (0xff) (cy: %u).\n",
-            __func__, addr, e->state.cycles);
+      DEBUG(apu, "%u: %s(0x%02x) while playing, invalid (0xff).\n",
+            e->state.cycles, __func__, addr);
     }
     return result;
   } else {
@@ -2257,6 +2268,10 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
   Wave* wave = &apu->wave;
   Noise* noise = &apu->noise;
 
+  if (apu->initialized) {
+    apu_synchronize(e);
+  }
+
   DEBUG(apu, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
         get_apu_reg_string(addr), value);
   switch (addr) {
@@ -2386,20 +2401,20 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case APU_NR50_ADDR:
-      apu->so_output[1][VIN] = UNPACK(value, NR50_VIN_SO2);
+      apu->so_output[VIN][1] = UNPACK(value, NR50_VIN_SO2);
       apu->so_volume[1] = UNPACK(value, NR50_SO2_VOLUME);
-      apu->so_output[0][VIN] = UNPACK(value, NR50_VIN_SO1);
+      apu->so_output[VIN][0] = UNPACK(value, NR50_VIN_SO1);
       apu->so_volume[0] = UNPACK(value, NR50_SO1_VOLUME);
       break;
     case APU_NR51_ADDR:
-      apu->so_output[1][SOUND4] = UNPACK(value, NR51_SOUND4_SO2);
-      apu->so_output[1][SOUND3] = UNPACK(value, NR51_SOUND3_SO2);
-      apu->so_output[1][SOUND2] = UNPACK(value, NR51_SOUND2_SO2);
-      apu->so_output[1][SOUND1] = UNPACK(value, NR51_SOUND1_SO2);
-      apu->so_output[0][SOUND4] = UNPACK(value, NR51_SOUND4_SO1);
-      apu->so_output[0][SOUND3] = UNPACK(value, NR51_SOUND3_SO1);
-      apu->so_output[0][SOUND2] = UNPACK(value, NR51_SOUND2_SO1);
-      apu->so_output[0][SOUND1] = UNPACK(value, NR51_SOUND1_SO1);
+      apu->so_output[SOUND4][1] = UNPACK(value, NR51_SOUND4_SO2);
+      apu->so_output[SOUND3][1] = UNPACK(value, NR51_SOUND3_SO2);
+      apu->so_output[SOUND2][1] = UNPACK(value, NR51_SOUND2_SO2);
+      apu->so_output[SOUND1][1] = UNPACK(value, NR51_SOUND1_SO2);
+      apu->so_output[SOUND4][0] = UNPACK(value, NR51_SOUND4_SO1);
+      apu->so_output[SOUND3][0] = UNPACK(value, NR51_SOUND3_SO1);
+      apu->so_output[SOUND2][0] = UNPACK(value, NR51_SOUND2_SO1);
+      apu->so_output[SOUND1][0] = UNPACK(value, NR51_SOUND1_SO1);
       break;
     case APU_NR52_ADDR: {
       Bool was_enabled = apu->enabled;
@@ -2423,6 +2438,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
+  apu_synchronize(e);
   Wave* wave = &e->state.apu.wave;
   if (e->state.apu.channel[CHANNEL3].status) {
     /* If the wave channel is playing, the byte is written to the sample
@@ -2836,8 +2852,10 @@ static void timer_mcycle(Emulator* e) {
   write_div_counter(e, e->state.timer.DIV_counter + CPU_MCYCLE);
 }
 
-static void update_channel_sweep(Channel* channel, Sweep* sweep) {
-  if (!sweep->enabled) {
+static void update_sweep(Emulator* e) {
+  Channel* channel = &e->state.apu.channel[CHANNEL1];
+  Sweep* sweep = &e->state.apu.sweep;
+  if (!(channel->status && sweep->enabled)) {
     return;
   }
 
@@ -2868,204 +2886,204 @@ static void update_channel_sweep(Channel* channel, Sweep* sweep) {
   }
 }
 
-static u8 update_square_wave(SquareWave* wave) {
+static void update_lengths(Emulator* e) {
+  int i;
+  for (i = 0; i < CHANNEL_COUNT; ++i) {
+    Channel* channel = &e->state.apu.channel[i];
+    if (channel->length_enabled && channel->length > 0) {
+      if (--channel->length == 0) {
+        channel->status = FALSE;
+      }
+    }
+  }
+}
+
+static void update_envelopes(Emulator* e) {
+  int i;
+  for (i = 0; i < CHANNEL_COUNT; ++i) {
+    Envelope* envelope = &e->state.apu.channel[i].envelope;
+    if (envelope->period) {
+      if (envelope->automatic && --envelope->timer == 0) {
+        envelope->timer = envelope->period;
+        u8 delta = envelope->direction == ENVELOPE_ATTENUATE ? -1 : 1;
+        u8 volume = envelope->volume + delta;
+        if (volume < ENVELOPE_MAX_VOLUME) {
+          envelope->volume = volume;
+        } else {
+          envelope->automatic = FALSE;
+        }
+      }
+    } else {
+      envelope->timer = ENVELOPE_MAX_PERIOD;
+    }
+  }
+}
+
+/* Convert from 1-bit sample to 4-bit sample. */
+#define CHANNELX_SAMPLE(channel, sample) \
+  (-(sample) & (channel)->envelope.volume)
+
+static void update_square_wave(Channel* channel, u32 total_frames) {
   static u8 duty[WAVE_DUTY_COUNT][DUTY_CYCLE_COUNT] =
       {[WAVE_DUTY_12_5] = {0, 0, 0, 0, 0, 0, 0, 1},
        [WAVE_DUTY_25] = {1, 0, 0, 0, 0, 0, 0, 1},
        [WAVE_DUTY_50] = {1, 0, 0, 0, 0, 1, 1, 1},
        [WAVE_DUTY_75] = {0, 1, 1, 1, 1, 1, 1, 0}};
-
-  if (wave->cycles <= APU_CYCLES) {
-    wave->cycles += wave->period;
-    wave->position = (wave->position + 1) % DUTY_CYCLE_COUNT;
-    wave->sample = duty[wave->duty][wave->position];
-  }
-  wave->cycles -= APU_CYCLES;
-  return wave->sample;
-}
-
-static void update_channel_length(Channel* channel) {
-  if (channel->length_enabled && channel->length > 0) {
-    if (--channel->length == 0) {
-      channel->status = FALSE;
-    }
-  }
-}
-
-static void update_envelope(Envelope* envelope) {
-  if (envelope->period) {
-    if (envelope->automatic && --envelope->timer == 0) {
-      envelope->timer = envelope->period;
-      u8 delta = envelope->direction == ENVELOPE_ATTENUATE ? -1 : 1;
-      u8 volume = envelope->volume + delta;
-      if (volume < ENVELOPE_MAX_VOLUME) {
-        envelope->volume = volume;
+  SquareWave* wave = &channel->square_wave;
+  if (channel->status) {
+    while (total_frames) {
+      u32 frames = wave->cycles / APU_CYCLES;
+      u8 sample = CHANNELX_SAMPLE(channel, wave->sample);
+      if (frames <= total_frames) {
+        wave->cycles = wave->period;
+        wave->position = (wave->position + 1) % DUTY_CYCLE_COUNT;
+        wave->sample = duty[wave->duty][wave->position];
       } else {
-        envelope->automatic = FALSE;
+        frames = total_frames;
+        wave->cycles -= frames * APU_CYCLES;
       }
+      channel->accumulator += sample * frames;
+      total_frames -= frames;
     }
-  } else {
-    envelope->timer = ENVELOPE_MAX_PERIOD;
   }
 }
 
-static u8 update_wave(APU* apu, Wave* wave) {
-  if (wave->cycles <= APU_CYCLES) {
-    wave->position = (wave->position + 1) % WAVE_SAMPLE_COUNT;
-    wave->sample_time = apu->cycles - APU_CYCLES + wave->cycles;
-    u8 byte = wave->ram[wave->position >> 1];
-    if ((wave->position & 1) == 0) {
-      wave->sample_data = byte >> 4; /* High nybble. */
-    } else {
-      wave->sample_data = byte & 0x0f; /* Low nybble. */
-    }
-    VERBOSE(apu, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
-            wave->sample_data, wave->sample_time);
-    wave->cycles += wave->period;
-  }
-  wave->cycles -= APU_CYCLES;
-  return wave->sample_data;
-}
+/* Modulate 4-bit sample by wave volume. */
+#define CHANNEL3_SAMPLE(wave, sample) ((sample) >> (wave)->volume_shift)
 
-static u8 update_noise(Noise* noise) {
-  if (noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
-    if (noise->cycles <= APU_CYCLES) {
-      noise->cycles += noise->period;
-      u16 bit = (noise->lfsr ^ (noise->lfsr >> 1)) & 1;
-      if (noise->lfsr_width == LFSR_WIDTH_7) {
-        noise->lfsr = ((noise->lfsr >> 1) & ~0x40) | (bit << 6);
+static void update_wave(Channel* channel, Wave* wave, u32 apu_cycles,
+                        u32 total_frames) {
+  if (channel->status) {
+    while (total_frames) {
+      u32 frames = wave->cycles / APU_CYCLES;
+      u8 sample = CHANNEL3_SAMPLE(wave, wave->sample_data);
+      if (frames <= total_frames) {
+        wave->position = (wave->position + 1) % WAVE_SAMPLE_COUNT;
+        wave->sample_time = apu_cycles + wave->cycles;
+        u8 byte = wave->ram[wave->position >> 1];
+        if ((wave->position & 1) == 0) {
+          wave->sample_data = byte >> 4; /* High nybble. */
+        } else {
+          wave->sample_data = byte & 0x0f; /* Low nybble. */
+        }
+        wave->cycles = wave->period;
+        DEBUG(apu, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
+              wave->sample_data, wave->sample_time);
       } else {
-        noise->lfsr = ((noise->lfsr >> 1) & ~0x4000) | (bit << 14);
+        frames = total_frames;
+        wave->cycles -= frames * APU_CYCLES;
       }
-      noise->sample = ~noise->lfsr & 1;
+      apu_cycles += frames * APU_CYCLES;
+      channel->accumulator += sample * frames;
+      total_frames -= frames;
     }
-    noise->cycles -= APU_CYCLES;
   }
-  return noise->sample;
 }
 
-/* Convert from 1-bit sample to 8-bit sample. */
-#define CHANNELX_SAMPLE(channel, sample) \
-  ((-(sample) & (channel)->envelope.volume) << 4)
-/* Convert from 4-bit sample to 8-bit sample. */
-#define CHANNEL3_SAMPLE(wave, sample) (((sample) >> (wave)->volume_shift) << 4)
+static void update_noise(Channel* channel, Noise* noise, u32 total_frames) {
+  if (channel->status && noise->clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
+    while (total_frames) {
+      u32 frames = noise->cycles / APU_CYCLES;
+      u8 sample = CHANNELX_SAMPLE(channel, noise->sample);
+      if (frames <= total_frames) {
+        u16 bit = (noise->lfsr ^ (noise->lfsr >> 1)) & 1;
+        if (noise->lfsr_width == LFSR_WIDTH_7) {
+          noise->lfsr = ((noise->lfsr >> 1) & ~0x40) | (bit << 6);
+        } else {
+          noise->lfsr = ((noise->lfsr >> 1) & ~0x4000) | (bit << 14);
+        }
+        noise->sample = ~noise->lfsr & 1;
+        noise->cycles = noise->period;
+      } else {
+        frames = total_frames;
+        noise->cycles -= frames * APU_CYCLES;
+      }
+      channel->accumulator += sample * frames;
+      total_frames -= frames;
+    }
+  }
+}
 
-static void write_audio_frame(AudioBuffer* buffer, u8 so1, u8 so2) {
-  assert(buffer->position + 2 <= buffer->end);
-  buffer->accumulator[0] += so1;
-  buffer->accumulator[1] += so2;
-  buffer->divisor++;
-  buffer->freq_counter += buffer->frequency;
+static u32 get_gb_frames_until_next_resampled_frame(Emulator* e) {
+  u32 result = 0;
+  u32 counter = e->audio_buffer.freq_counter;
+  while (!VALUE_WRAPPED(counter, APU_CYCLES_PER_SECOND)) {
+    counter += e->audio_buffer.frequency;
+    result++;
+  }
+  return result;
+}
+
+static void write_audio_frame(Emulator* e, u32 gb_frames) {
+  int i, j;
+  APU* apu = &e->state.apu;
+  AudioBuffer* buffer = &e->audio_buffer;
+  buffer->divisor += gb_frames;
+  buffer->freq_counter += buffer->frequency * gb_frames;
   if (VALUE_WRAPPED(buffer->freq_counter, APU_CYCLES_PER_SECOND)) {
-    *buffer->position++ = buffer->accumulator[0] / buffer->divisor;
-    *buffer->position++ = buffer->accumulator[1] / buffer->divisor;
-    buffer->accumulator[0] = 0;
-    buffer->accumulator[1] = 0;
+    for (i = 0; i < SOUND_OUTPUT_COUNT; ++i) {
+      u32 accumulator = 0;
+      for (j = 0; j < CHANNEL_COUNT; ++j) {
+        if (!e->config.disable_sound[j]) {
+          accumulator += apu->channel[j].accumulator * apu->so_output[j][i];
+        }
+      }
+      accumulator *= (apu->so_volume[i] + 1) * 16; /* 4bit -> 8bit samples. */
+      accumulator /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
+      *buffer->position++ = accumulator / buffer->divisor;
+    }
+    for (j = 0; j < CHANNEL_COUNT; ++j) {
+      apu->channel[j].accumulator = 0;
+    }
     buffer->divisor = 0;
   }
 }
 
-static void apu_mix_sample(Emulator* e, int channel, u8 sample,
-                           u16* out_frame) {
-  if (!e->config.disable_sound[channel]) {
-    out_frame[0] += sample * e->state.apu.so_output[0][channel];
-    out_frame[1] += sample * e->state.apu.so_output[1][channel];
+static void apu_update_channels(Emulator* e, u32 total_frames) {
+  APU* apu = &e->state.apu;
+  while (total_frames) {
+    u32 frames = get_gb_frames_until_next_resampled_frame(e);
+    frames = MIN(frames, total_frames);
+    update_square_wave(&apu->channel[CHANNEL1], frames);
+    update_square_wave(&apu->channel[CHANNEL2], frames);
+    update_wave(&apu->channel[CHANNEL3], &apu->wave, apu->cycles, frames);
+    update_noise(&apu->channel[CHANNEL4], &apu->noise, frames);
+    write_audio_frame(e, frames);
+    apu->cycles += frames * APU_CYCLES;
+    total_frames -= frames;
   }
 }
 
-static void apu_update_channel_1(Emulator* e, Bool length, Bool envelope,
-                                 Bool sweep, u16* out_frame) {
-  Channel* channel1 = &e->state.apu.channel[CHANNEL1];
-  u8 sample = 0;
-  if (channel1->status) {
-    if (sweep) update_channel_sweep(channel1, &e->state.apu.sweep);
-    sample = update_square_wave(&channel1->square_wave);
-  }
-  if (length) update_channel_length(channel1);
-  if (channel1->status) {
-    if (envelope) update_envelope(&channel1->envelope);
-    apu_mix_sample(e, CHANNEL1, CHANNELX_SAMPLE(channel1, sample), out_frame);
-  }
-}
-
-static void apu_update_channel_2(Emulator* e, Bool length, Bool envelope,
-                                 u16* out_frame) {
-  Channel* channel2 = &e->state.apu.channel[CHANNEL2];
-  u8 sample = 0;
-  if (channel2->status) {
-    sample = update_square_wave(&channel2->square_wave);
-  }
-  if (length) update_channel_length(channel2);
-  if (channel2->status) {
-    if (envelope) update_envelope(&channel2->envelope);
-    apu_mix_sample(e, CHANNEL2, CHANNELX_SAMPLE(channel2, sample), out_frame);
-  }
-}
-
-static void apu_update_channel_3(Emulator* e, Bool length, u16* out_frame) {
-  Channel* channel3 = &e->state.apu.channel[CHANNEL3];
-  u8 sample = 0;
-  if (channel3->status) {
-    sample = update_wave(&e->state.apu, &e->state.apu.wave);
-  }
-  if (length) update_channel_length(channel3);
-  if (channel3->status) {
-    apu_mix_sample(e, CHANNEL3, CHANNEL3_SAMPLE(&e->state.apu.wave, sample),
-                   out_frame);
-  }
-}
-
-static void apu_update_channel_4(Emulator* e, Bool length, Bool envelope,
-                                 u16* out_frame) {
-  Channel* channel4 = &e->state.apu.channel[CHANNEL4];
-  u8 sample = 0;
-  if (channel4->status) {
-    sample = update_noise(&e->state.apu.noise);
-  }
-  if (length) update_channel_length(channel4);
-  if (channel4->status) {
-    if (envelope) update_envelope(&channel4->envelope);
-    apu_mix_sample(e, CHANNEL4, CHANNELX_SAMPLE(channel4, sample), out_frame);
-  }
-}
-
-static void apu_update_channels(Emulator* e, Bool length, Bool envelope,
-                                Bool sweep) {
-  u16 frame[2] = {0, 0};
-  apu_update_channel_1(e, length, envelope, sweep, frame);
-  apu_update_channel_2(e, length, envelope, frame);
-  apu_update_channel_3(e, length, frame);
-  apu_update_channel_4(e, length, envelope, frame);
-  frame[0] *= (e->state.apu.so_volume[0] + 1);
-  frame[0] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  frame[1] *= (e->state.apu.so_volume[1] + 1);
-  frame[1] /= ((SOUND_OUTPUT_MAX_VOLUME + 1) * CHANNEL_COUNT);
-  write_audio_frame(&e->audio_buffer, frame[0], frame[1]);
-}
-
-static void apu_update(Emulator* e) {
-  e->state.apu.cycles += APU_CYCLES;
-  e->state.apu.frame_cycles += APU_CYCLES;
-  if (VALUE_WRAPPED(e->state.apu.frame_cycles, FRAME_SEQUENCER_CYCLES)) {
-    e->state.apu.frame = (e->state.apu.frame + 1) % FRAME_SEQUENCER_COUNT;
-    switch (e->state.apu.frame) {
-      case 0: case 4: apu_update_channels(e, TRUE, FALSE, FALSE); return;
-      case 2: case 6: apu_update_channels(e, TRUE, FALSE, TRUE); return;
-      case 7: apu_update_channels(e, FALSE, TRUE, FALSE); return;
+static void apu_update(Emulator* e, u32 total_cycles) {
+  APU* apu = &e->state.apu;
+  while (total_cycles) {
+    u32 next_seq_cycles = NEXT_MODULO(apu->cycles, FRAME_SEQUENCER_CYCLES);
+    if (next_seq_cycles == FRAME_SEQUENCER_CYCLES) {
+      apu->frame = (apu->frame + 1) % FRAME_SEQUENCER_COUNT;
+      switch (apu->frame) {
+        case 2: case 6: update_sweep(e); /* Fallthrough. */
+        case 0: case 4: update_lengths(e); break;
+        case 7: update_envelopes(e); break;
+      }
     }
+    u32 cycles = MIN(next_seq_cycles, total_cycles);
+    apu_update_channels(e, cycles / APU_CYCLES);
+    total_cycles -= cycles;
   }
-  apu_update_channels(e, FALSE, FALSE, FALSE);
 }
 
-static void apu_mcycle(Emulator* e) {
-  if (e->state.apu.enabled) {
-    /* Synchronize with CPU cycle counter. */
-    e->state.apu.cycles = e->state.cycles;
-    apu_update(e);
-    apu_update(e);
-  } else {
-    write_audio_frame(&e->audio_buffer, 0, 0);
-    write_audio_frame(&e->audio_buffer, 0, 0);
+static void apu_synchronize(Emulator* e) {
+  if (e->state.apu.cycles < e->state.cycles) {
+    u32 cycles = e->state.cycles - e->state.apu.cycles;
+    if (e->state.apu.enabled) {
+      apu_update(e, cycles);
+      assert(e->state.apu.cycles == e->state.cycles);
+    } else {
+      for (; cycles; cycles -= APU_CYCLES) {
+        write_audio_frame(e, 1);
+      }
+      e->state.apu.cycles = e->state.cycles;
+    }
   }
 }
 
@@ -3092,7 +3110,6 @@ static void mcycle(Emulator* e) {
   dma_mcycle(e);
   ppu_mcycle(e);
   timer_mcycle(e);
-  apu_mcycle(e);
   serial_mcycle(e);
   e->state.cycles += CPU_MCYCLE;
 }
@@ -3827,19 +3844,23 @@ EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   }
   check_joyp_intr(e);
 
-  u8* max_audio_position =
-      e->audio_buffer.data + max_audio_frames * SOUND_OUTPUT_COUNT;
-  assert(max_audio_position <= e->audio_buffer.end);
+  u64 frames_left = max_audio_frames - AUDIO_BUFFER_FRAMES(e);
+  u32 max_cycles =
+      e->state.apu.cycles + (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND,
+                                          e->audio_buffer.frequency);
   EmulatorEvent event = 0;
   while (event == 0) {
     step_emulator(e);
     if (e->state.ppu.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    if (e->audio_buffer.position >= max_audio_position) {
+    if (e->state.cycles >= max_cycles) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
   }
+  apu_synchronize(e);
+  assert(!(event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) ||
+         AUDIO_BUFFER_FRAMES(e) >= max_audio_frames);
   return e->last_event = event;
 }
 
@@ -4145,11 +4166,10 @@ static void host_render_audio(Host* host, Emulator* e) {
   assert(AUDIO_SPEC_CHANNELS == SOUND_OUTPUT_COUNT);
   HostAudio* audio = &host->audio;
   u8* src = e->audio_buffer.data;
-  u8* src_end = e->audio_buffer.position;
 
   SDL_LockAudioDevice(audio->dev);
   size_t old_buffer_available = audio->buffer_available;
-  size_t src_frames = (src_end - src) / SOUND_OUTPUT_COUNT;
+  size_t src_frames = AUDIO_BUFFER_FRAMES(e);
   size_t max_dst_frames =
       (audio->buffer_capacity - audio->buffer_available) / AUDIO_FRAME_SIZE;
   size_t frames = MIN(src_frames, max_dst_frames);
@@ -4253,19 +4273,15 @@ int main(int argc, char** argv) {
       replace_extension(rom_filename, SAVE_STATE_EXTENSION);
   read_ext_ram_from_file(e, save_filename);
 
-  while (TRUE) {
-    if (!host_poll_events(e, &s_host)) {
-      break;
-    }
+  while (host_poll_events(e, &s_host)) {
     if (e->config.paused) {
-      SDL_PauseAudioDevice(s_host.audio.dev,
-                           e->config.paused || !s_host.audio.ready);
+      SDL_PauseAudioDevice(s_host.audio.dev, !s_host.audio.ready);
       SDL_Delay(VIDEO_FRAME_MS);
       continue;
     }
 
-    size_t size = s_host.audio.spec.size -
-                  s_host.audio.buffer_available % s_host.audio.spec.size;
+    size_t size =
+        NEXT_MODULO(s_host.audio.buffer_available, s_host.audio.spec.size);
     EmulatorEvent event = run_emulator(e, size / AUDIO_FRAME_SIZE);
     if (!e->config.no_sync) {
       host_synchronize(&s_host, e);
