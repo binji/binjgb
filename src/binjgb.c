@@ -22,18 +22,13 @@
 #define DIV_CEIL(numer, denom) (((numer) + (denom) - 1) / (denom))
 #define NEXT_MODULO(value, mod) ((mod) - (value) % (mod))
 
-#ifndef NDEBUG
-#define LOG(...) fprintf(stdout, __VA_ARGS__)
-#define LOG_IF(cond, ...) do if (cond) LOG(__VA_ARGS__); while(0)
-#else
-#define LOG(...)
-#define LOG_IF(cond, ...)
+#ifndef HOOK0
+#define HOOK0(name)
 #endif
 
-#define LOG_LEVEL_IS(system, value) (s_log_level_##system >= (value))
-#define INFO(system, ...) LOG_IF(LOG_LEVEL_IS(system, 1), __VA_ARGS__)
-#define DEBUG(system, ...) LOG_IF(LOG_LEVEL_IS(system, 2), __VA_ARGS__)
-#define VERBOSE(system, ...) LOG_IF(LOG_LEVEL_IS(system, 3), __VA_ARGS__)
+#ifndef HOOK
+#define HOOK(name, ...)
+#endif
 
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
 #define CHECK_MSG(x, ...)                       \
@@ -66,7 +61,7 @@ typedef double f64;
 typedef u16 Address;
 typedef u16 MaskedAddress;
 typedef u32 RGBA;
-typedef enum { FALSE = 0, TRUE = 1 } Bool;
+typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 
 /* Configurable constants */
 #define RGBA_WHITE 0xffffffffu
@@ -988,15 +983,6 @@ typedef struct Emulator {
   EmulatorEvent last_event;
 } Emulator;
 
-static Bool s_never_trace = 0;
-static Bool s_trace = 0;
-static u32 s_trace_counter = 0;
-static int s_log_level_memory = 1;
-static int s_log_level_ppu = 0;
-static int s_log_level_apu = 1;
-static int s_log_level_io = 1;
-static int s_log_level_interrupt = 1;
-
 static void write_apu(Emulator*, MaskedAddress, u8);
 static void write_io(Emulator*, MaskedAddress, u8);
 static Result init_memory_map(Emulator*);
@@ -1101,14 +1087,16 @@ static void log_cart_info(CartInfo* cart_info) {
   char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
   char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
   int title_length = title_end ? title_end - title_start : TITLE_MAX_LENGTH;
-  LOG("title: \"%.*s\"\n", title_length, title_start);
-  LOG("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
-  LOG("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
-  LOG("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
-  LOG("rom size: %s\n", get_rom_size_string(cart_info->rom_size));
-  LOG("ext ram size: %s\n", get_ext_ram_size_string(cart_info->ext_ram_size));
-  LOG("header checksum: 0x%02x [%s]\n", cart_info->data[HEADER_CHECKSUM_ADDR],
-      get_result_string(validate_header_checksum(cart_info)));
+  printf("title: \"%.*s\"\n", title_length, title_start);
+  printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
+  printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
+  printf("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
+  printf("rom size: %s\n", get_rom_size_string(cart_info->rom_size));
+  printf("ext ram size: %s\n",
+         get_ext_ram_size_string(cart_info->ext_ram_size));
+  printf("header checksum: 0x%02x [%s]\n",
+         cart_info->data[HEADER_CHECKSUM_ADDR],
+         get_result_string(validate_header_checksum(cart_info)));
 }
 
 static void dummy_write(Emulator* e, MaskedAddress addr, u8 value) {}
@@ -1121,7 +1109,7 @@ static void set_rom1_bank(Emulator* e, u16 bank) {
   u32 new_base = (bank & ROM_BANK_MASK(e)) << ROM_BANK_SHIFT;
   u32* base = &e->state.memory_map_state.rom1_base;
   if (new_base != *base) {
-    DEBUG(memory, "%s(bank: %d) = 0x%06x\n", __func__, bank, new_base);
+    HOOK(set_rom1_bank_hi, bank, new_base);
   }
   *base = new_base;
 }
@@ -1130,16 +1118,10 @@ static void set_ext_ram_bank(Emulator* e, u8 bank) {
   u32 new_base = (bank & EXT_RAM_BANK_MASK(e)) << EXT_RAM_BANK_SHIFT;
   u32* base = &e->state.memory_map_state.ext_ram_base;
   if (new_base != *base) {
-    DEBUG(memory, "%s(%d) = 0x%06x\n", __func__, bank, new_base);
+    HOOK(set_ext_ram_bank_bi, bank, new_base);
   }
   *base = new_base;
 }
-
-#define INFO_READ_RAM_DISABLED \
-  INFO(memory, "%s(0x%04x) ignored, ram disabled.\n", __func__, addr)
-#define INFO_WRITE_RAM_DISABLED                                               \
-  INFO(memory, "%s(0x%04x, 0x%02x) ignored, ram disabled.\n", __func__, addr, \
-       value);
 
 static u8 gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
   MemoryMapState* memory_map = &e->state.memory_map_state;
@@ -1147,7 +1129,7 @@ static u8 gb_read_ext_ram(Emulator* e, MaskedAddress addr) {
     assert(addr <= ADDR_MASK_8K);
     return e->state.ext_ram.data[memory_map->ext_ram_base | addr];
   } else {
-    INFO_READ_RAM_DISABLED;
+    HOOK(read_ram_disabled_a, addr);
     return INVALID_READ_BYTE;
   }
 }
@@ -1158,7 +1140,7 @@ static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
     assert(addr <= ADDR_MASK_8K);
     e->state.ext_ram.data[memory_map->ext_ram_base | addr] = value;
   } else {
-    INFO_WRITE_RAM_DISABLED;
+    HOOK(write_ram_disabled_ab, addr, value);
   }
 }
 
@@ -1228,7 +1210,7 @@ static u8 mbc2_read_ram(Emulator* e, MaskedAddress addr) {
   if (e->state.memory_map_state.ext_ram_enabled) {
     return e->state.ext_ram.data[addr & MBC2_RAM_ADDR_MASK];
   } else {
-    INFO_READ_RAM_DISABLED;
+    HOOK(read_ram_disabled_a, addr);
     return INVALID_READ_BYTE;
   }
 }
@@ -1238,7 +1220,7 @@ static void mbc2_write_ram(Emulator* e, MaskedAddress addr, u8 value) {
     e->state.ext_ram.data[addr & MBC2_RAM_ADDR_MASK] =
         value & MBC2_RAM_VALUE_MASK;
   } else {
-    INFO_WRITE_RAM_DISABLED;
+    HOOK(write_ram_disabled_ab, addr, value);
   }
 }
 
@@ -1504,7 +1486,7 @@ static MemoryTypeAddressPair map_address(Address addr) {
 
 static u8 read_vram(Emulator* e, MaskedAddress addr) {
   if (e->state.ppu.STAT.mode == PPU_MODE_MODE3) {
-    DEBUG(ppu, "read_vram(0x%04x): returning 0xff because in use.\n", addr);
+    HOOK(read_vram_in_use_a, addr);
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
@@ -1519,7 +1501,7 @@ static Bool is_using_oam(Emulator* e) {
 
 static u8 read_oam(Emulator* e, MaskedAddress addr) {
   if (is_using_oam(e)) {
-    DEBUG(ppu, "read_oam(0x%04x): returning 0xff because in use.\n", addr);
+    HOOK(read_oam_in_use_a, addr);
     return INVALID_READ_BYTE;
   }
 
@@ -1642,8 +1624,7 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_IE_ADDR:
       return e->state.interrupt.IE;
     default:
-      INFO(io, "%s(0x%04x [%s]) ignored.\n", __func__, addr,
-           get_io_reg_string(addr));
+      HOOK(read_io_ignored_as, addr, get_io_reg_string(addr));
       return INVALID_READ_BYTE;
   }
 }
@@ -1734,12 +1715,10 @@ static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
     u8 result;
     if (e->state.is_cgb || e->state.cycles == wave->sample_time) {
       result = wave->ram[wave->position >> 1];
-      DEBUG(apu, "%u: %s(0x%02x) while playing => 0x%02x\n", e->state.cycles,
-            __func__, addr, result);
+      HOOK(read_wave_ram_while_playing_ab, addr, result);
     } else {
       result = INVALID_READ_BYTE;
-      DEBUG(apu, "%u: %s(0x%02x) while playing, invalid (0xff).\n",
-            e->state.cycles, __func__, addr);
+      HOOK(read_wave_ram_while_playing_invalid_a, addr);
     }
     return result;
   } else {
@@ -1776,8 +1755,7 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
       return INVALID_READ_BYTE;
     case MEMORY_MAP_IO: {
       u8 value = read_io(e, pair.addr);
-      VERBOSE(io, "read_io(0x%04x [%s]) = 0x%02x [cy: %u]\n", pair.addr,
-              get_io_reg_string(pair.addr), value, e->state.cycles);
+      HOOK(read_io_asb, pair.addr, get_io_reg_string(pair.addr), value);
       return value;
     }
     case MEMORY_MAP_APU:
@@ -1794,7 +1772,7 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
 static u8 read_u8(Emulator* e, Address addr) {
   MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
-    INFO(memory, "%s(0x%04x) during DMA.\n", __func__, addr);
+    HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
 
@@ -1803,8 +1781,7 @@ static u8 read_u8(Emulator* e, Address addr) {
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   if (e->state.ppu.STAT.mode == PPU_MODE_MODE3) {
-    DEBUG(ppu, "%s(0x%04x, 0x%02x) ignored, using vram.\n", __func__, addr,
-          value);
+    HOOK(write_vram_in_use_ab, addr, value);
     return;
   }
 
@@ -1830,8 +1807,7 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
 
 static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
   if (is_using_oam(e)) {
-    INFO(ppu, "%s(0x%04x, 0x%02x): ignored because in use.\n", __func__, addr,
-         value);
+    HOOK(write_oam_in_use_ab, addr, value);
     return;
   }
 
@@ -1840,8 +1816,7 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
 
 static void increment_tima(Emulator* e) {
   if (++e->state.timer.TIMA == 0) {
-    DEBUG(interrupt, ">> trigger TIMER [cy: %u]\n",
-          e->state.cycles + CPU_MCYCLE);
+    HOOK(trigger_timer_i, e->state.cycles + CPU_MCYCLE);
     e->state.timer.TIMA_state = TIMA_STATE_OVERFLOW;
     e->state.interrupt.new_IF |= IF_TIMER;
   }
@@ -1877,8 +1852,7 @@ static void write_div_counter(Emulator* e, u16 DIV_counter) {
 static void check_stat(Emulator* e) {
   LCDStatus* STAT = &e->state.ppu.STAT;
   if (!STAT->IF && SHOULD_TRIGGER_STAT) {
-    VERBOSE(ppu, ">> trigger STAT [LY: %u] [cy: %u]\n", e->state.ppu.LY,
-            e->state.cycles + CPU_MCYCLE);
+    HOOK(trigger_stat_ii, e->state.ppu.LY, e->state.cycles + CPU_MCYCLE);
     e->state.interrupt.new_IF |= IF_STAT;
     if (!(TRIGGER_VBLANK || TRIGGER_Y_COMPARE)) {
       e->state.interrupt.IF |= IF_STAT;
@@ -1895,8 +1869,7 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
   if (e->state.ppu.LY == e->state.ppu.LYC ||
       (write && e->state.ppu.last_LY == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
        e->state.ppu.last_LY == e->state.ppu.LYC)) {
-    VERBOSE(ppu, ">> trigger Y compare [LY: %u] [cy: %u]\n", e->state.ppu.LY,
-            e->state.cycles + CPU_MCYCLE);
+    HOOK(trigger_y_compare_ii, e->state.ppu.LY, e->state.cycles + CPU_MCYCLE);
     STAT->y_compare.trigger = TRUE;
     STAT->new_LY_eq_LYC = TRUE;
   } else {
@@ -1926,8 +1899,7 @@ static void check_joyp_intr(Emulator* e) {
 }
 
 static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
-  DEBUG(io, "%s(0x%04x [%s], 0x%02x) [cy: %u]\n", __func__, addr,
-        get_io_reg_string(addr), value, e->state.cycles);
+  HOOK(write_io_asb, addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
       e->state.JOYP.joypad_select = UNPACK(value, JOYP_JOYPAD_SELECT);
@@ -2009,14 +1981,14 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         e->state.ppu.STAT.mode = PPU_MODE_HBLANK;
         e->state.ppu.LY = e->state.ppu.line_y = 0;
         if (LCDC->display) {
-          DEBUG(ppu, "Enabling display. [cy: %u]\n", e->state.cycles);
+          HOOK0(enable_display_v);
           e->state.ppu.state = PPU_STATE_LCD_ON_MODE2;
           e->state.ppu.state_cycles = PPU_MODE2_CYCLES;
           e->state.ppu.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
           e->state.ppu.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           e->state.ppu.STAT.trigger_mode = PPU_MODE_MODE2;
         } else {
-          DEBUG(ppu, "Disabling display. [cy: %u]\n", e->state.cycles);
+          HOOK0(disable_display_v);
           /* Clear the framebuffer. */
           size_t i;
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
@@ -2034,10 +2006,9 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         Bool vblank = TRIGGER_MODE_IS(VBLANK) && !STAT->vblank.irq;
         Bool y_compare = STAT->new_LY_eq_LYC && !STAT->y_compare.irq;
         if (!STAT->IF && (hblank || vblank || y_compare)) {
-          VERBOSE(ppu,
-                  ">> trigger STAT from write [%c%c%c] [LY: %u] [cy: %u]\n",
-                  y_compare ? 'Y' : '.', vblank ? 'V' : '.', hblank ? 'H' : '.',
-                  e->state.ppu.LY, e->state.cycles + CPU_MCYCLE);
+          HOOK(trigger_stat_from_write_cccii, y_compare ? 'Y' : '.',
+               vblank ? 'V' : '.', hblank ? 'H' : '.', e->state.ppu.LY,
+               e->state.cycles + CPU_MCYCLE);
           e->state.interrupt.new_IF |= IF_STAT;
           e->state.interrupt.IF |= IF_STAT;
           STAT->IF = TRUE;
@@ -2100,43 +2071,40 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       e->state.interrupt.IE = value;
       break;
     default:
-      INFO(memory, "%s(0x%04x, 0x%02x) ignored.\n", __func__, addr, value);
+      HOOK(write_io_ignored_as, addr, get_io_reg_string(addr), value);
       break;
   }
 }
 
-#define CHANNEL_INDEX(c) ((c) - e->state.apu.channel)
-
-static void write_nrx1_reg(Emulator* e, Channel* channel, u8 value) {
+static void write_nrx1_reg(Emulator* e, Channel* channel, Address addr,
+                           u8 value) {
   if (e->state.apu.enabled) {
     channel->square_wave.duty = UNPACK(value, NRX1_WAVE_DUTY);
   }
   channel->length = NRX1_MAX_LENGTH - UNPACK(value, NRX1_LENGTH);
-  VERBOSE(apu, "write_nrx1_reg(%zu, 0x%02x) length=%u\n",
-          CHANNEL_INDEX(channel), value, channel->length);
+  HOOK(write_nrx1_abi, addr, value, channel->length);
 }
 
-static void write_nrx2_reg(Emulator* e, Channel* channel, u8 value) {
+static void write_nrx2_reg(Emulator* e, Channel* channel, Address addr,
+                           u8 value) {
   channel->envelope.initial_volume = UNPACK(value, NRX2_INITIAL_VOLUME);
   channel->dac_enabled = UNPACK(value, NRX2_DAC_ENABLED) != 0;
   if (!channel->dac_enabled) {
     channel->status = FALSE;
-    VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) dac_enabled = false\n",
-            CHANNEL_INDEX(channel), value);
+    HOOK(write_nrx2_disable_dac_ab, addr, value);
   }
   if (channel->status) {
     if (channel->envelope.period == 0 && channel->envelope.automatic) {
       u8 new_volume = (channel->envelope.volume + 1) & ENVELOPE_MAX_VOLUME;
-      VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) zombie mode: volume %u -> %u\n",
-              CHANNEL_INDEX(channel), value, channel->envelope.volume,
-              new_volume);
+      HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
+           new_volume);
       channel->envelope.volume = new_volume;
     }
   }
   channel->envelope.direction = UNPACK(value, NRX2_ENVELOPE_DIRECTION);
   channel->envelope.period = UNPACK(value, NRX2_ENVELOPE_PERIOD);
-  VERBOSE(apu, "write_nrx2_reg(%zu, 0x%02x) initial_volume=%u\n",
-          CHANNEL_INDEX(channel), value, channel->envelope.initial_volume);
+  HOOK(write_nrx2_initial_volume_abi, addr, value,
+       channel->envelope.initial_volume);
 }
 
 static void write_nrx3_reg(Emulator* e, Channel* channel, u8 value) {
@@ -2144,8 +2112,8 @@ static void write_nrx3_reg(Emulator* e, Channel* channel, u8 value) {
 }
 
 /* Returns TRUE if this channel was triggered. */
-static Bool write_nrx4_reg(Emulator* e, Channel* channel, u8 value,
-                           u16 max_length) {
+static Bool write_nrx4_reg(Emulator* e, Channel* channel, Address addr,
+                           u8 value, u16 max_length) {
   Bool trigger = UNPACK(value, NRX4_INITIAL);
   Bool was_length_enabled = channel->length_enabled;
   channel->length_enabled = UNPACK(value, NRX4_LENGTH_ENABLED);
@@ -2159,11 +2127,9 @@ static Bool write_nrx4_reg(Emulator* e, Channel* channel, u8 value,
   if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
       channel->length > 0) {
     channel->length--;
-    DEBUG(apu, "%s(%zu, 0x%02x) extra length clock = %u\n", __func__,
-          CHANNEL_INDEX(channel), value, channel->length);
+    HOOK(write_nrx4_extra_length_clock_abi, addr, value, channel->length);
     if (!trigger && channel->length == 0) {
-      DEBUG(apu, "%s(%zu, 0x%02x) disabling channel.\n", __func__,
-            CHANNEL_INDEX(channel), value);
+      HOOK(write_nrx4_disable_channel_ab, addr, value);
       channel->status = FALSE;
     }
   }
@@ -2174,20 +2140,19 @@ static Bool write_nrx4_reg(Emulator* e, Channel* channel, u8 value,
       if (channel->length_enabled && !next_frame_is_length) {
         channel->length--;
       }
-      DEBUG(apu, "%s(%zu, 0x%02x) trigger, new length = %u\n", __func__,
-            CHANNEL_INDEX(channel), value, channel->length);
+      HOOK(write_nrx4_trigger_new_length_abi, addr, value, channel->length);
     }
     if (channel->dac_enabled) {
       channel->status = TRUE;
     }
   }
 
-  VERBOSE(apu, "write_nrx4_reg(%zu, 0x%02x) trigger=%u length_enabled=%u\n",
-          CHANNEL_INDEX(channel), value, trigger, channel->length_enabled);
+  HOOK(write_nrx4_info_abii, addr, value, trigger, channel->length_enabled);
   return trigger;
 }
 
-static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope) {
+static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope,
+                                  Address addr) {
   envelope->volume = envelope->initial_volume;
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = TRUE;
@@ -2195,8 +2160,8 @@ static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope) {
   if (e->state.apu.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
     envelope->timer++;
   }
-  DEBUG(apu, "%s: volume=%u, timer=%u\n", __func__, envelope->volume,
-        envelope->timer);
+  HOOK(trigger_nrx4_info_asii, addr, get_apu_reg_string(addr), envelope->volume,
+       envelope->timer);
 }
 
 static u16 calculate_sweep_frequency(Sweep* sweep) {
@@ -2216,22 +2181,22 @@ static void trigger_nr14_reg(Emulator* e, Channel* channel, Sweep* sweep) {
   sweep->calculated_subtract = FALSE;
   if (sweep->shift && calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
     channel->status = FALSE;
-    DEBUG(apu, "%s: disabling, sweep overflow.\n", __func__);
+    HOOK0(trigger_nr14_sweep_overflow_v);
   } else {
-    DEBUG(apu, "%s: sweep frequency=%u\n", __func__, sweep->frequency);
+    HOOK(trigger_nr14_info_i, sweep->frequency);
   }
 }
 
 static void write_wave_period(Channel* channel, Wave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
-  DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
-        channel->frequency, wave->cycles, wave->period);
+  HOOK(write_wave_period_info_iii, channel->frequency, wave->cycles,
+       wave->period);
 }
 
 static void write_square_wave_period(Channel* channel, SquareWave* wave) {
   wave->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
-  DEBUG(apu, "%s: freq: %u cycle: %u period: %u\n", __func__,
-        channel->frequency, wave->cycles, wave->period);
+  HOOK(write_square_wave_period_info_iii, channel->frequency, wave->cycles,
+       wave->period);
 }
 
 static void write_noise_period(Noise* noise) {
@@ -2240,8 +2205,7 @@ static void write_noise_period(Noise* noise) {
   u8 divisor = s_divisors[noise->divisor];
   assert(noise->divisor < NOISE_DIVISOR_COUNT);
   noise->period = divisor << noise->clock_shift;
-  DEBUG(apu, "%s: divisor: %u clock shift: %u period: %u\n", __func__,
-        divisor, noise->clock_shift, noise->period);
+  HOOK(write_noise_period_info_iii, divisor, noise->clock_shift, noise->period);
 }
 
 static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
@@ -2253,8 +2217,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       /* Always can write to NR52; it's necessary to re-enable power to APU. */
     } else {
       /* Ignore all other writes. */
-      DEBUG(apu, "%s(0x%04x [%s], 0x%02x) ignored.\n", __func__, addr,
-            get_apu_reg_string(addr), value);
+      HOOK(write_apu_disabled_asb, addr, get_apu_reg_string(addr), value);
       return;
     }
   }
@@ -2272,8 +2235,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
     apu_synchronize(e);
   }
 
-  DEBUG(apu, "%s(0x%04x [%s], 0x%02x)\n", __func__, addr,
-        get_apu_reg_string(addr), value);
+  HOOK(write_apu_asb, addr, get_apu_reg_string(addr), value);
   switch (addr) {
     case APU_NR10_ADDR: {
       SweepDirection old_direction = sweep->direction;
@@ -2288,40 +2250,40 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case APU_NR11_ADDR:
-      write_nrx1_reg(e, channel1, value);
+      write_nrx1_reg(e, channel1, addr, value);
       break;
     case APU_NR12_ADDR:
-      write_nrx2_reg(e, channel1, value);
+      write_nrx2_reg(e, channel1, addr, value);
       break;
     case APU_NR13_ADDR:
       write_nrx3_reg(e, channel1, value);
       write_square_wave_period(channel1, &channel1->square_wave);
       break;
     case APU_NR14_ADDR: {
-      Bool trigger = write_nrx4_reg(e, channel1, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel1, addr, value, NRX1_MAX_LENGTH);
       write_square_wave_period(channel1, &channel1->square_wave);
       if (trigger) {
-        trigger_nrx4_envelope(e, &channel1->envelope);
+        trigger_nrx4_envelope(e, &channel1->envelope, addr);
         trigger_nr14_reg(e, channel1, sweep);
         channel1->square_wave.cycles = channel1->square_wave.period;
       }
       break;
     }
     case APU_NR21_ADDR:
-      write_nrx1_reg(e, channel2, value);
+      write_nrx1_reg(e, channel2, addr, value);
       break;
     case APU_NR22_ADDR:
-      write_nrx2_reg(e, channel2, value);
+      write_nrx2_reg(e, channel2, addr, value);
       break;
     case APU_NR23_ADDR:
       write_nrx3_reg(e, channel2, value);
       write_square_wave_period(channel2, &channel2->square_wave);
       break;
     case APU_NR24_ADDR: {
-      Bool trigger = write_nrx4_reg(e, channel2, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel2, addr, value, NRX1_MAX_LENGTH);
       write_square_wave_period(channel2, &channel2->square_wave);
       if (trigger) {
-        trigger_nrx4_envelope(e, &channel2->envelope);
+        trigger_nrx4_envelope(e, &channel2->envelope, addr);
         channel2->square_wave.cycles = channel2->square_wave.period;
       }
       break;
@@ -2346,7 +2308,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       write_wave_period(channel3, wave);
       break;
     case APU_NR34_ADDR: {
-      Bool trigger = write_nrx4_reg(e, channel3, value, NR31_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel3, addr, value, NR31_MAX_LENGTH);
       write_wave_period(channel3, wave);
       if (trigger) {
         if (!e->state.is_cgb && wave->playing) {
@@ -2366,8 +2328,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
                 memcpy(&wave->ram[0], &wave->ram[(position >> 1) & 12], 4);
                 break;
             }
-            DEBUG(apu, "%s: corrupting wave ram. (cy: %u) (pos: %u)\n",
-                  __func__, e->state.cycles, position);
+            HOOK(corrupt_wave_ram_i, position);
           }
         }
 
@@ -2378,10 +2339,10 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case APU_NR41_ADDR:
-      write_nrx1_reg(e, channel4, value);
+      write_nrx1_reg(e, channel4, addr, value);
       break;
     case APU_NR42_ADDR:
-      write_nrx2_reg(e, channel4, value);
+      write_nrx2_reg(e, channel4, addr, value);
       break;
     case APU_NR43_ADDR: {
       noise->clock_shift = UNPACK(value, NR43_CLOCK_SHIFT);
@@ -2391,10 +2352,10 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case APU_NR44_ADDR: {
-      Bool trigger = write_nrx4_reg(e, channel4, value, NRX1_MAX_LENGTH);
+      Bool trigger = write_nrx4_reg(e, channel4, addr, value, NRX1_MAX_LENGTH);
       if (trigger) {
         write_noise_period(noise);
-        trigger_nrx4_envelope(e, &channel4->envelope);
+        trigger_nrx4_envelope(e, &channel4->envelope, addr);
         noise->lfsr = 0x7fff;
         noise->cycles = noise->period;
       }
@@ -2420,7 +2381,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       Bool was_enabled = apu->enabled;
       Bool is_enabled = UNPACK(value, NR52_ALL_SOUND_ENABLED);
       if (was_enabled && !is_enabled) {
-        DEBUG(apu, "Powered down APU. Clearing registers.\n");
+        HOOK0(apu_power_down_v);
         int i;
         for (i = 0; i < APU_REG_COUNT; ++i) {
           if (i != APU_NR52_ADDR) {
@@ -2428,7 +2389,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
           }
         }
       } else if (!was_enabled && is_enabled) {
-        DEBUG(apu, "Powered up APU. Resetting frame and sweep timers.\n");
+        HOOK0(apu_power_up_v);
         apu->frame = 7;
       }
       apu->enabled = is_enabled;
@@ -2446,18 +2407,18 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
      * it is being accessed by the Wave channel. */
     if (e->state.is_cgb || e->state.cycles == wave->sample_time) {
       wave->ram[wave->position >> 1] = value;
-      DEBUG(apu, "%s(0x%02x, 0x%02x) while playing.\n", __func__, addr, value);
+      HOOK(write_wave_ram_while_playing_ab, addr, value);
     }
   } else {
     wave->ram[addr] = value;
-    DEBUG(apu, "%s(0x%02x, 0x%02x)\n", __func__, addr, value);
+    HOOK(write_wave_ram_ab, addr, value);
   }
 }
 
 static void write_u8(Emulator* e, Address addr, u8 value) {
   MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
-    INFO(memory, "%s(0x%04x, 0x%02x) during DMA.\n", __func__, addr, value);
+    HOOK(write_during_dma_ab, addr, value);
     return;
   }
 
@@ -2865,18 +2826,18 @@ static void update_sweep(Emulator* e) {
       sweep->timer = period;
       u16 new_frequency = calculate_sweep_frequency(sweep);
       if (new_frequency > SOUND_MAX_FREQUENCY) {
-        DEBUG(apu, "%s: disabling from sweep overflow\n", __func__);
+        HOOK0(sweep_overflow_v);
         channel->status = FALSE;
       } else {
         if (sweep->shift) {
-          DEBUG(apu, "%s: updated frequency=%u\n", __func__, new_frequency);
+          HOOK(sweep_update_frequency_i, new_frequency);
           sweep->frequency = channel->frequency = new_frequency;
           write_square_wave_period(channel, &channel->square_wave);
         }
 
         /* Perform another overflow check. */
         if (calculate_sweep_frequency(sweep) > SOUND_MAX_FREQUENCY) {
-          DEBUG(apu, "%s: disabling from 2nd sweep overflow\n", __func__);
+          HOOK0(sweep_overflow_2nd_v);
           channel->status = FALSE;
         }
       }
@@ -2967,8 +2928,8 @@ static void update_wave(Channel* channel, Wave* wave, u32 apu_cycles,
           wave->sample_data = byte & 0x0f; /* Low nybble. */
         }
         wave->cycles = wave->period;
-        DEBUG(apu, "update_wave: position: %u => %u (cy: %u)\n", wave->position,
-              wave->sample_data, wave->sample_time);
+        HOOK(wave_update_position_iii, wave->position, wave->sample_data,
+             wave->sample_time);
       } else {
         frames = total_frames;
         wave->cycles -= frames * APU_CYCLES;
@@ -3154,170 +3115,6 @@ static u8 s_opcode_bytes[] = {
     /* e0 */ 2, 1, 1, 0, 0, 1, 2, 1, 2, 1, 3, 0, 0, 0, 2, 1,
     /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
 };
-
-static const char* s_opcode_mnemonic[256] = {
-    "NOP", "LD BC,%hu", "LD (BC),A", "INC BC", "INC B", "DEC B", "LD B,%hhu",
-    "RLCA", "LD (%04hXH),SP", "ADD HL,BC", "LD A,(BC)", "DEC BC", "INC C",
-    "DEC C", "LD C,%hhu", "RRCA", "STOP", "LD DE,%hu", "LD (DE),A", "INC DE",
-    "INC D", "DEC D", "LD D,%hhu", "RLA", "JR %+hhd", "ADD HL,DE", "LD A,(DE)",
-    "DEC DE", "INC E", "DEC E", "LD E,%hhu", "RRA", "JR NZ,%+hhd", "LD HL,%hu",
-    "LDI (HL),A", "INC HL", "INC H", "DEC H", "LD H,%hhu", "DAA", "JR Z,%+hhd",
-    "ADD HL,HL", "LDI A,(HL)", "DEC HL", "INC L", "DEC L", "LD L,%hhu", "CPL",
-    "JR NC,%+hhd", "LD SP,%hu", "LDD (HL),A", "INC SP", "INC (HL)", "DEC (HL)",
-    "LD (HL),%hhu", "SCF", "JR C,%+hhd", "ADD HL,SP", "LDD A,(HL)", "DEC SP",
-    "INC A", "DEC A", "LD A,%hhu", "CCF", "LD B,B", "LD B,C", "LD B,D",
-    "LD B,E", "LD B,H", "LD B,L", "LD B,(HL)", "LD B,A", "LD C,B", "LD C,C",
-    "LD C,D", "LD C,E", "LD C,H", "LD C,L", "LD C,(HL)", "LD C,A", "LD D,B",
-    "LD D,C", "LD D,D", "LD D,E", "LD D,H", "LD D,L", "LD D,(HL)", "LD D,A",
-    "LD E,B", "LD E,C", "LD E,D", "LD E,E", "LD E,H", "LD E,L", "LD E,(HL)",
-    "LD E,A", "LD H,B", "LD H,C", "LD H,D", "LD H,E", "LD H,H", "LD H,L",
-    "LD H,(HL)", "LD H,A", "LD L,B", "LD L,C", "LD L,D", "LD L,E", "LD L,H",
-    "LD L,L", "LD L,(HL)", "LD L,A", "LD (HL),B", "LD (HL),C", "LD (HL),D",
-    "LD (HL),E", "LD (HL),H", "LD (HL),L", "HALT", "LD (HL),A", "LD A,B",
-    "LD A,C", "LD A,D", "LD A,E", "LD A,H", "LD A,L", "LD A,(HL)", "LD A,A",
-    "ADD A,B", "ADD A,C", "ADD A,D", "ADD A,E", "ADD A,H", "ADD A,L",
-    "ADD A,(HL)", "ADD A,A", "ADC A,B", "ADC A,C", "ADC A,D", "ADC A,E",
-    "ADC A,H", "ADC A,L", "ADC A,(HL)", "ADC A,A", "SUB B", "SUB C", "SUB D",
-    "SUB E", "SUB H", "SUB L", "SUB (HL)", "SUB A", "SBC B", "SBC C", "SBC D",
-    "SBC E", "SBC H", "SBC L", "SBC (HL)", "SBC A", "AND B", "AND C", "AND D",
-    "AND E", "AND H", "AND L", "AND (HL)", "AND A", "XOR B", "XOR C", "XOR D",
-    "XOR E", "XOR H", "XOR L", "XOR (HL)", "XOR A", "OR B", "OR C", "OR D",
-    "OR E", "OR H", "OR L", "OR (HL)", "OR A", "CP B", "CP C", "CP D", "CP E",
-    "CP H", "CP L", "CP (HL)", "CP A", "RET NZ", "POP BC", "JP NZ,%04hXH",
-    "JP %04hXH", "CALL NZ,%04hXH", "PUSH BC", "ADD A,%hhu", "RST 0", "RET Z",
-    "RET", "JP Z,%04hXH", NULL, "CALL Z,%04hXH", "CALL %04hXH", "ADC A,%hhu",
-    "RST 8H", "RET NC", "POP DE", "JP NC,%04hXH", NULL, "CALL NC,%04hXH",
-    "PUSH DE", "SUB %hhu", "RST 10H", "RET C", "RETI", "JP C,%04hXH", NULL,
-    "CALL C,%04hXH", NULL, "SBC A,%hhu", "RST 18H", "LD (FF%02hhXH),A",
-    "POP HL", "LD (FF00H+C),A", NULL, NULL, "PUSH HL", "AND %hhu", "RST 20H",
-    "ADD SP,%hhd", "JP HL", "LD (%04hXH),A", NULL, NULL, NULL, "XOR %hhu",
-    "RST 28H", "LD A,(FF%02hhXH)", "POP AF", "LD A,(FF00H+C)", "DI", NULL,
-    "PUSH AF", "OR %hhu", "RST 30H", "LD HL,SP%+hhd", "LD SP,HL",
-    "LD A,(%04hXH)", "EI", NULL, NULL, "CP %hhu", "RST 38H",
-};
-
-static const char* s_cb_opcode_mnemonic[256] = {
-    "RLC B",      "RLC C",   "RLC D",      "RLC E",   "RLC H",      "RLC L",
-    "RLC (HL)",   "RLC A",   "RRC B",      "RRC C",   "RRC D",      "RRC E",
-    "RRC H",      "RRC L",   "RRC (HL)",   "RRC A",   "RL B",       "RL C",
-    "RL D",       "RL E",    "RL H",       "RL L",    "RL (HL)",    "RL A",
-    "RR B",       "RR C",    "RR D",       "RR E",    "RR H",       "RR L",
-    "RR (HL)",    "RR A",    "SLA B",      "SLA C",   "SLA D",      "SLA E",
-    "SLA H",      "SLA L",   "SLA (HL)",   "SLA A",   "SRA B",      "SRA C",
-    "SRA D",      "SRA E",   "SRA H",      "SRA L",   "SRA (HL)",   "SRA A",
-    "SWAP B",     "SWAP C",  "SWAP D",     "SWAP E",  "SWAP H",     "SWAP L",
-    "SWAP (HL)",  "SWAP A",  "SRL B",      "SRL C",   "SRL D",      "SRL E",
-    "SRL H",      "SRL L",   "SRL (HL)",   "SRL A",   "BIT 0,B",    "BIT 0,C",
-    "BIT 0,D",    "BIT 0,E", "BIT 0,H",    "BIT 0,L", "BIT 0,(HL)", "BIT 0,A",
-    "BIT 1,B",    "BIT 1,C", "BIT 1,D",    "BIT 1,E", "BIT 1,H",    "BIT 1,L",
-    "BIT 1,(HL)", "BIT 1,A", "BIT 2,B",    "BIT 2,C", "BIT 2,D",    "BIT 2,E",
-    "BIT 2,H",    "BIT 2,L", "BIT 2,(HL)", "BIT 2,A", "BIT 3,B",    "BIT 3,C",
-    "BIT 3,D",    "BIT 3,E", "BIT 3,H",    "BIT 3,L", "BIT 3,(HL)", "BIT 3,A",
-    "BIT 4,B",    "BIT 4,C", "BIT 4,D",    "BIT 4,E", "BIT 4,H",    "BIT 4,L",
-    "BIT 4,(HL)", "BIT 4,A", "BIT 5,B",    "BIT 5,C", "BIT 5,D",    "BIT 5,E",
-    "BIT 5,H",    "BIT 5,L", "BIT 5,(HL)", "BIT 5,A", "BIT 6,B",    "BIT 6,C",
-    "BIT 6,D",    "BIT 6,E", "BIT 6,H",    "BIT 6,L", "BIT 6,(HL)", "BIT 6,A",
-    "BIT 7,B",    "BIT 7,C", "BIT 7,D",    "BIT 7,E", "BIT 7,H",    "BIT 7,L",
-    "BIT 7,(HL)", "BIT 7,A", "RES 0,B",    "RES 0,C", "RES 0,D",    "RES 0,E",
-    "RES 0,H",    "RES 0,L", "RES 0,(HL)", "RES 0,A", "RES 1,B",    "RES 1,C",
-    "RES 1,D",    "RES 1,E", "RES 1,H",    "RES 1,L", "RES 1,(HL)", "RES 1,A",
-    "RES 2,B",    "RES 2,C", "RES 2,D",    "RES 2,E", "RES 2,H",    "RES 2,L",
-    "RES 2,(HL)", "RES 2,A", "RES 3,B",    "RES 3,C", "RES 3,D",    "RES 3,E",
-    "RES 3,H",    "RES 3,L", "RES 3,(HL)", "RES 3,A", "RES 4,B",    "RES 4,C",
-    "RES 4,D",    "RES 4,E", "RES 4,H",    "RES 4,L", "RES 4,(HL)", "RES 4,A",
-    "RES 5,B",    "RES 5,C", "RES 5,D",    "RES 5,E", "RES 5,H",    "RES 5,L",
-    "RES 5,(HL)", "RES 5,A", "RES 6,B",    "RES 6,C", "RES 6,D",    "RES 6,E",
-    "RES 6,H",    "RES 6,L", "RES 6,(HL)", "RES 6,A", "RES 7,B",    "RES 7,C",
-    "RES 7,D",    "RES 7,E", "RES 7,H",    "RES 7,L", "RES 7,(HL)", "RES 7,A",
-    "SET 0,B",    "SET 0,C", "SET 0,D",    "SET 0,E", "SET 0,H",    "SET 0,L",
-    "SET 0,(HL)", "SET 0,A", "SET 1,B",    "SET 1,C", "SET 1,D",    "SET 1,E",
-    "SET 1,H",    "SET 1,L", "SET 1,(HL)", "SET 1,A", "SET 2,B",    "SET 2,C",
-    "SET 2,D",    "SET 2,E", "SET 2,H",    "SET 2,L", "SET 2,(HL)", "SET 2,A",
-    "SET 3,B",    "SET 3,C", "SET 3,D",    "SET 3,E", "SET 3,H",    "SET 3,L",
-    "SET 3,(HL)", "SET 3,A", "SET 4,B",    "SET 4,C", "SET 4,D",    "SET 4,E",
-    "SET 4,H",    "SET 4,L", "SET 4,(HL)", "SET 4,A", "SET 5,B",    "SET 5,C",
-    "SET 5,D",    "SET 5,E", "SET 5,H",    "SET 5,L", "SET 5,(HL)", "SET 5,A",
-    "SET 6,B",    "SET 6,C", "SET 6,D",    "SET 6,E", "SET 6,H",    "SET 6,L",
-    "SET 6,(HL)", "SET 6,A", "SET 7,B",    "SET 7,C", "SET 7,D",    "SET 7,E",
-    "SET 7,H",    "SET 7,L", "SET 7,(HL)", "SET 7,A",
-};
-
-static void sprint_hex(char* buffer, u8 val) {
-  const char hex_digits[] = "0123456789abcdef";
-  buffer[0] = hex_digits[(val >> 4) & 0xf];
-  buffer[1] = hex_digits[val & 0xf];
-}
-
-static void print_instruction(Emulator* e, Address addr) {
-  char buffer[64];
-  char bytes[][3] = {"  ", "  "};
-  const char* mnemonic = "*INVALID*";
-
-  u8 opcode = read_u8(e, addr);
-  u8 num_bytes = s_opcode_bytes[opcode];
-  switch (num_bytes) {
-    case 0: break;
-    case 1: mnemonic = s_opcode_mnemonic[opcode]; break;
-    case 2: {
-      u8 byte = read_u8(e, addr + 1);
-      sprint_hex(bytes[0], byte);
-      if (opcode == 0xcb) {
-        mnemonic = s_cb_opcode_mnemonic[byte];
-      } else {
-        snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode], byte);
-        mnemonic = buffer;
-      }
-      break;
-    }
-    case 3: {
-      u8 byte1 = read_u8(e, addr + 1);
-      u8 byte2 = read_u8(e, addr + 2);
-      sprint_hex(bytes[0], byte1);
-      sprint_hex(bytes[1], byte2);
-      snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode],
-               (byte2 << 8) | byte1);
-      mnemonic = buffer;
-      break;
-    }
-    default: assert(!"invalid opcode byte length.\n"); break;
-  }
-
-  char bank[3] = "??";
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (pair.type == MEMORY_MAP_ROM1) {
-    sprint_hex(bank, e->state.memory_map_state.rom1_base >> ROM_BANK_SHIFT);
-  }
-
-  (void)mnemonic;
-  LOG("[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode, bytes[0], bytes[1],
-      mnemonic);
-}
-
-static void print_emulator_info(Emulator* e) {
-  if (!s_never_trace && s_trace && !e->state.interrupt.halt) {
-    LOG("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
-        e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
-        e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
-        e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
-        e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
-    LOG(" (cy: %u)", e->state.cycles);
-    if (s_log_level_ppu >= 1) {
-      LOG(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
-             e->state.ppu.STAT.mode);
-    }
-    if (s_log_level_ppu >= 2) {
-      LOG(" LY:%u", e->state.ppu.LY);
-    }
-    LOG(" |");
-    print_instruction(e, e->state.reg.PC);
-    LOG("\n");
-    if (s_trace_counter > 0) {
-      if (--s_trace_counter == 0) {
-        s_trace = FALSE;
-      }
-    }
-  }
-}
 
 #define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
@@ -3757,16 +3554,14 @@ static void handle_interrupts(Emulator* e) {
   u8 mask = 0;
   Address vector = 0;
   if (interrupt & IF_VBLANK) {
-    DEBUG(interrupt, ">> VBLANK interrupt [frame = %u] [cy: %u]\n",
-          e->state.ppu.frame, e->state.cycles);
+    HOOK(vblank_interrupt_i, e->state.ppu.frame);
     vector = 0x40;
     mask = IF_VBLANK;
   } else if (interrupt & IF_STAT) {
-    DEBUG(interrupt, ">> LCD_STAT interrupt [%c%c%c%c] [cy: %u]\n",
-          e->state.ppu.STAT.y_compare.irq ? 'Y' : '.',
-          e->state.ppu.STAT.mode2.irq ? 'O' : '.',
-          e->state.ppu.STAT.vblank.irq ? 'V' : '.',
-          e->state.ppu.STAT.hblank.irq ? 'H' : '.', e->state.cycles);
+    HOOK(stat_interrupt_cccc, e->state.ppu.STAT.y_compare.irq ? 'Y' : '.',
+         e->state.ppu.STAT.mode2.irq ? 'O' : '.',
+         e->state.ppu.STAT.vblank.irq ? 'V' : '.',
+         e->state.ppu.STAT.hblank.irq ? 'H' : '.');
     vector = 0x48;
     mask = IF_STAT;
 #if 0
@@ -3776,16 +3571,16 @@ static void handle_interrupts(Emulator* e) {
     delay = e->state.interrupt.halt && e->state.ppu.STAT.mode2.irq;
 #endif
   } else if (interrupt & IF_TIMER) {
-    DEBUG(interrupt, ">> TIMER interrupt\n");
+    HOOK0(timer_interrupt_v);
     vector = 0x50;
     mask = IF_TIMER;
     delay = e->state.interrupt.halt;
   } else if (interrupt & IF_SERIAL) {
-    DEBUG(interrupt, ">> SERIAL interrupt\n");
+    HOOK0(serial_interrupt_v);
     vector = 0x58;
     mask = IF_SERIAL;
   } else if (interrupt & IF_JOYPAD) {
-    DEBUG(interrupt, ">> JOYPAD interrupt\n");
+    HOOK0(joypad_interrupt_v);
     vector = 0x60;
     mask = IF_JOYPAD;
   }
@@ -3795,7 +3590,7 @@ static void handle_interrupts(Emulator* e) {
   }
 
   if (e->state.interrupt.halt_DI) {
-    DEBUG(interrupt, "Interrupt fired during HALT w/ disabled interrupt.\n");
+    HOOK0(interrupt_during_halt_di_v);
     INTR(halt_DI) = FALSE;
   } else {
     e->state.interrupt.new_IF &= ~mask;
@@ -3810,7 +3605,7 @@ static void handle_interrupts(Emulator* e) {
 }
 
 static void step_emulator(Emulator* e) {
-  print_emulator_info(e);
+  HOOK0(print_emulator_info);
   execute_instruction(e);
   handle_interrupts(e);
 }
@@ -3922,8 +3717,6 @@ typedef u16 HostAudioSample;
 #define SAVE_STATE_HEADER (u32)(0x6b57a7e0 + SAVE_STATE_VERSION)
 #define SAVE_STATE_FILE_SIZE (sizeof(u32) + sizeof(EmulatorState))
 
-static int s_log_level_host = 1;
-
 typedef struct {
   SDL_AudioDeviceID dev;
   SDL_AudioSpec spec;
@@ -3985,8 +3778,7 @@ static void host_audio_callback(void* userdata, u8* dst, int len) {
   Host* host = userdata;
   HostAudio* audio = &host->audio;
   if (len > (int)audio->buffer_available) {
-    DEBUG(host, "!!! audio underflow. avail %zd < requested %u\n",
-          audio->buffer_available, len);
+    HOOK(audio_underflow_zi, audio->buffer_available, len);
     len = audio->buffer_available;
   }
   if (audio->read_pos + len > audio->buffer_end) {
@@ -4123,7 +3915,7 @@ static void host_render_video(Host* host, Emulator* e) {
     SDL_UnlockTexture(host->texture);
     SDL_RenderCopy(host->renderer, host->texture, NULL, NULL);
   }
-  DEBUG(host, "@@@ %.1f: render present\n", get_time_ms());
+  HOOK(render_present_f, get_time_ms());
   SDL_RenderPresent(host->renderer);
 }
 
@@ -4136,8 +3928,7 @@ static void host_synchronize(Host* host, Emulator* e) {
   f64 delay_until_ms = now_ms + delta_ms;
   if (delta_ms < -AUDIO_MAX_SLOW_DESYNC_MS ||
       delta_ms > AUDIO_MAX_FAST_DESYNC_MS) {
-    DEBUG(host, "!!! %.1f: desync [gb=%.1fms real=%.1fms]\n", now_ms, gb_ms,
-          real_ms);
+    HOOK(desync_fff, now_ms, gb_ms, real_ms);
     /* Major desync; don't try to catch up, just reset. But our audio buffer
      * is probably behind (or way ahead), so pause to refill. */
     host->last_sync_real_ms = now_ms;
@@ -4149,8 +3940,7 @@ static void host_synchronize(Host* host, Emulator* e) {
     SDL_UnlockAudioDevice(host->audio.dev);
   } else {
     if (real_ms < gb_ms) {
-      DEBUG(host, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]\n", now_ms,
-            delta_ms, gb_ms, real_ms);
+      HOOK(sync_wait_ffff, now_ms, delta_ms, gb_ms, real_ms);
       do {
         SDL_Delay(delta_ms);
         now_ms = get_time_ms();
@@ -4189,14 +3979,13 @@ static void host_render_audio(Host* host, Emulator* e) {
   SDL_UnlockAudioDevice(audio->dev);
 
   if (frames < src_frames) {
-    DEBUG(host, "!!! audio overflow (old size = %zu)\n", old_buffer_available);
+    HOOK(audio_overflow_z, old_buffer_available);
   } else {
-    DEBUG(host, "+++ %.1f: buf: %zu -> %zu\n", get_time_ms(),
-          old_buffer_available, new_buffer_available);
+    HOOK(audio_add_buffer_fzz, get_time_ms(),
+             old_buffer_available, new_buffer_available);
   }
   if (!audio->ready && new_buffer_available >= audio->buffer_target_available) {
-    DEBUG(host, "*** %.1f: audio buffer ready, size = %zu.\n", get_time_ms(),
-          new_buffer_available);
+    HOOK(audio_buffer_ready_fz, get_time_ms(), new_buffer_available);
     audio->ready = TRUE;
     SDL_PauseAudioDevice(audio->dev, 0);
   }

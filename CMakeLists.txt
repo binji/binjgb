@@ -13,9 +13,15 @@ add_definitions(
 
 if (NOT EMSCRIPTEN)
   find_package(SDL2)
+
   add_executable(binjgb src/binjgb.c)
   target_include_directories(binjgb PUBLIC ${SDL2_INCLUDE_DIR})
   target_link_libraries(binjgb ${SDL2_LIBRARY})
+
+  add_executable(debugger src/debugger.c)
+  target_include_directories(debugger PUBLIC ${SDL2_INCLUDE_DIR})
+  target_link_libraries(debugger ${SDL2_LIBRARY})
+
   add_executable(tester src/tester.c)
   target_compile_definitions(tester PRIVATE NO_SDL)
 else (EMSCRIPTEN)

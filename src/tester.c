@@ -70,23 +70,6 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(emulator);
   Emulator* e = &emulator;
 
-#if 1
-  s_never_trace = 1;
-  s_log_level_memory = 0;
-  s_log_level_ppu = 0;
-  s_log_level_apu = 0;
-  s_log_level_io = 0;
-  s_log_level_interrupt = 0;
-#else
-  s_trace = 0;
-  s_never_trace = 0;
-  s_log_level_memory = 0;
-  s_log_level_ppu = 3;
-  s_log_level_apu = 0;
-  s_log_level_io = 0;
-  s_log_level_interrupt = 2;
-#endif
-
   int frames = DEFAULT_FRAMES;
   const char* output_ppm = NULL;
   Bool animate = FALSE;
@@ -139,7 +122,7 @@ int main(int argc, char** argv) {
   u32 total_audio_frames = (u32)((f64)frames * PPU_FRAME_CYCLES *
                                      AUDIO_FREQUENCY / CPU_CYCLES_PER_SECOND +
                                  1);
-  LOG("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
+  printf("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
   f64 timeout_ms = get_time_ms() + timeout_sec * MILLISECONDS_PER_SECOND;
   Bool finish_at_next_frame = FALSE;
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
