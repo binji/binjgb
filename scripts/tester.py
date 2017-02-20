@@ -18,6 +18,10 @@ import common
 TEST_JSON = os.path.join(common.SCRIPT_DIR, 'test.json')
 TEST_RESULT_DIR = os.path.join(common.OUT_DIR, 'test_results')
 
+OK      = '[OK] '
+FAIL    = '[X]  '
+UNKNOWN = '[?]  '
+
 def RunTest(rom, frames, expected, options):
   start_time = time.time()
   ppm = os.path.join(TEST_RESULT_DIR,
@@ -34,20 +38,23 @@ def RunTest(rom, frames, expected, options):
 
     message = ''
     if actual == expected:
-      if options.verbose and not expect_fail:
-        message = '[OK] %s' % rom
+      if options.verbose:
+        if expect_fail:
+          message = FAIL + rom
+        else:
+          message = OK + rom
     else:
       if expected == '' or expect_fail:
-        message = '[?]  %s => %s' % (rom, actual)
+        message = UNKNOWN + '%s => %s' % (rom, actual)
       else:
-        message = '[X]  %s => %s' % (rom, actual)
+        message = FAIL + '%s => %s' % (rom, actual)
 
     ok = actual == expected and not expect_fail
     duration = time.time() - start_time
     return rom, ok, message, duration
   except (common.Error, KeyboardInterrupt) as e:
     duration = time.time() - start_time
-    return rom, False, '[X]  %s => %s' % (rom, str(e)), duration
+    return rom, False, FAIL + '%s => %s' % (rom, str(e)), duration
 
 
 last_message_len = 0
