@@ -3664,8 +3664,7 @@ EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   return e->last_event = event;
 }
 
-Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
-  AudioBuffer* audio_buffer = &e->audio_buffer;
+Result init_audio_buffer(AudioBuffer* audio_buffer, u32 frequency, u32 frames) {
   size_t buffer_size =
       (frames + AUDIO_BUFFER_EXTRA_FRAMES) * SOUND_OUTPUT_COUNT;
   audio_buffer->data = malloc(buffer_size); /* Leaks. */
@@ -4044,6 +4043,7 @@ static void joypad_callback(Emulator* e, void* user_data) {
   e->state.JOYP.select = state[SDL_SCANCODE_BACKSPACE];
 }
 
+#ifndef NO_MAIN
 int main(int argc, char** argv) {
   init_time();
   --argc; ++argv;
@@ -4055,9 +4055,9 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
   CHECK(SUCCESS(host_init_video(&s_host)));
   CHECK(SUCCESS(host_init_audio(&s_host)));
-  CHECK(SUCCESS(init_audio_buffer(e, s_host.audio.spec.freq,
-                                  s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
   CHECK(SUCCESS(init_emulator(e)));
+  CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer, s_host.audio.spec.freq,
+                                  s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
   s_host.last_sync_cycles = e->state.cycles;
 
   e->joypad_callback.func = joypad_callback;
@@ -4099,5 +4099,6 @@ error:
   SDL_Quit();
   return result;
 }
+#endif /* NO_MAIN */
 
 #endif /* NO_SDL */

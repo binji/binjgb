@@ -113,8 +113,9 @@ int main(int argc, char** argv) {
   const char* rom_filename = argv[optind];
 
   CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
-  CHECK(SUCCESS(init_audio_buffer(e, AUDIO_FREQUENCY, AUDIO_FRAMES)));
   CHECK(SUCCESS(init_emulator(e)));
+  CHECK(SUCCESS(
+      init_audio_buffer(&e->audio_buffer, AUDIO_FREQUENCY, AUDIO_FRAMES)));
 
   /* Run for N frames, measured by audio frames (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,

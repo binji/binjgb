@@ -7,15 +7,35 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <unistd.h>
+
+#define NO_MAIN
+
+#define FOREACH_LOG_SYSTEM(V) \
+  V(apu, APU, A)              \
+  V(host, HOST, H)            \
+  V(io, IO, I)                \
+  V(interrupt, INTERRUPT, N)  \
+  V(memory, MEMORY, M)        \
+  V(ppu, PPU, P)
+
+#define V(name, NAME, SHORT_NAME) \
+  LOG_SYSTEM_##NAME, LOG_SYSTEM_##SHORT_NAME = LOG_SYSTEM_##NAME,
+
+typedef enum {
+  FOREACH_LOG_SYSTEM(V)
+  NUM_LOG_SYSTEMS,
+} LogSystem;
+
+#undef V
+
+#define V(name, NAME, SHORT_NAME) [LOG_SYSTEM_##NAME] = #name,
+const char* s_log_system_names[] = {FOREACH_LOG_SYSTEM(V)};
+#undef V
 
 static int s_trace = 0;
 static unsigned s_trace_counter = 0;
-static int s_log_level_memory = 1;
-static int s_log_level_ppu = 1;
-static int s_log_level_apu = 2;
-static int s_log_level_io = 1;
-static int s_log_level_interrupt = 1;
-static int s_log_level_host = 1;
+static int s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
 
 #define HOOK0(name) HOOK_##name(__func__)
 #define HOOK(name, ...) HOOK_##name(__func__, __VA_ARGS__)
@@ -28,7 +48,7 @@ static int s_log_level_host = 1;
     struct Emulator* e = &s_emulator;                              \
     va_list args;                                                  \
     va_start(args, func_name);                                     \
-    if (LOG_SYSTEM_##system >= LOG_LEVEL_##level) {                \
+    if (s_log_level[LOG_SYSTEM_##system] >= LOG_LEVEL_##level) {   \
       fprintf(stdout, "%10u: %-30s:", e->state.cycles, func_name); \
       vfprintf(stdout, format "\n", args);                         \
     }                                                              \
@@ -38,13 +58,6 @@ static int s_log_level_host = 1;
 #define LOG_LEVEL_I 1
 #define LOG_LEVEL_D 2
 #define LOG_LEVEL_V 3
-
-#define LOG_SYSTEM_A s_log_level_apu
-#define LOG_SYSTEM_H s_log_level_host
-#define LOG_SYSTEM_P s_log_level_ppu
-#define LOG_SYSTEM_I s_log_level_io
-#define LOG_SYSTEM_N s_log_level_interrupt
-#define LOG_SYSTEM_M s_log_level_memory
 
 #define FOREACH_LOG_HOOKS(X)                                                   \
   X(A, D, apu_power_down_v, "Powered down APU. Clearing registers")            \
@@ -269,11 +282,11 @@ void HOOK_print_emulator_info(const char* func_name) {
            e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
            e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
     printf(" (cy: %u)", e->state.cycles);
-    if (s_log_level_ppu >= 1) {
+    if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
       printf(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
              e->state.ppu.STAT.mode);
     }
-    if (s_log_level_ppu >= 2) {
+    if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
       printf(" LY:%u", e->state.ppu.LY);
     }
     printf(" |");
@@ -287,3 +300,129 @@ void HOOK_print_emulator_info(const char* func_name) {
   }
 }
 
+static void print_log_systems(void) {
+  PRINT_ERROR("valid log systems:\n");
+  size_t i;
+  for (i = 0; i < ARRAY_SIZE(s_log_system_names); ++i) {
+    PRINT_ERROR("  %s\n", s_log_system_names[i]);
+  }
+}
+
+static void usage(int argc, char** argv) {
+  PRINT_ERROR(
+      "usage: %s [options] <in.gb>\n"
+      "  -h       help\n"
+      "  -t       trace each instruction\n"
+      "  -l S=N   set log level for system S to N\n\n",
+      argv[0]);
+
+  print_log_systems();
+}
+
+const char* parse_arguments(int argc, char** argv) {
+  int opt;
+  while ((opt = getopt(argc, argv, "htl:")) != -1) {
+    switch (opt) {
+      case 'h':
+        usage(argc, argv);
+        exit(1);
+
+      case 't':
+        s_trace = 1;
+        break;
+
+      case 'l': {
+        const char* log_system_name = optarg;
+        const char* equals = strchr(optarg, '=');
+        if (!equals) {
+          PRINT_ERROR("invalid log level format, should be S=N\n");
+          continue;
+        }
+
+        size_t i;
+        LogSystem system = NUM_LOG_SYSTEMS;
+        for (i = 0; i < ARRAY_SIZE(s_log_system_names); ++i) {
+          if (strncmp(log_system_name, s_log_system_names[i],
+                      strlen(s_log_system_names[i])) == 0) {
+            system = i;
+            break;
+          }
+        }
+
+        if (system == NUM_LOG_SYSTEMS) {
+          PRINT_ERROR("unknown log system: %.*s\n", (int)(equals - optarg),
+                      optarg);
+          print_log_systems();
+          continue;
+        }
+        s_log_level[system] = atoi(equals + 1);
+        break;
+      }
+      default:
+        PRINT_ERROR("unknown option: -%c\n", opt);
+        continue;
+    }
+  }
+
+  if (optind >= argc) {
+    PRINT_ERROR("expected input .gb\n");
+    usage(argc, argv);
+    exit(1);
+  }
+
+  return argv[optind];
+}
+
+/* Copied from binjgb.c; probably will diverge. */
+int main(int argc, char** argv) {
+  init_time();
+  int result = 1;
+  const char* rom_filename = parse_arguments(argc, argv);
+  Emulator* e = &s_emulator;
+  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
+  CHECK(SUCCESS(host_init_video(&s_host)));
+  CHECK(SUCCESS(host_init_audio(&s_host)));
+  CHECK(SUCCESS(init_emulator(e)));
+  CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer, s_host.audio.spec.freq,
+                                  s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
+  s_host.last_sync_cycles = e->state.cycles;
+
+  e->joypad_callback.func = joypad_callback;
+  e->joypad_callback.user_data = &s_host;
+
+  const char* save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
+  s_host.save_state_filename =
+      replace_extension(rom_filename, SAVE_STATE_EXTENSION);
+  read_ext_ram_from_file(e, save_filename);
+
+  while (host_poll_events(e, &s_host)) {
+    if (e->config.paused) {
+      SDL_PauseAudioDevice(s_host.audio.dev, !s_host.audio.ready);
+      SDL_Delay(VIDEO_FRAME_MS);
+      continue;
+    }
+
+    size_t size =
+        NEXT_MODULO(s_host.audio.buffer_available, s_host.audio.spec.size);
+    EmulatorEvent event = run_emulator(e, size / AUDIO_FRAME_SIZE);
+    if (!e->config.no_sync) {
+      host_synchronize(&s_host, e);
+    }
+    if (event & EMULATOR_EVENT_NEW_FRAME) {
+      host_render_video(&s_host, e);
+      if (e->config.step) {
+        e->config.paused = TRUE;
+        e->config.step = FALSE;
+      }
+    }
+    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+      host_render_audio(&s_host, e);
+    }
+  }
+
+  write_ext_ram_to_file(e, save_filename);
+  result = 0;
+error:
+  SDL_Quit();
+  return result;
+}
