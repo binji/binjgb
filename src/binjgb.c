@@ -2666,10 +2666,6 @@ static void ppu_mcycle(Emulator* e) {
     return;
   }
 
-  PPUMode last_trigger_mode = STAT->trigger_mode;
-  Bool last_mode2_trigger = STAT->mode2.trigger;
-  Bool last_y_compare_trigger = STAT->y_compare.trigger;
-
   STAT->mode2.trigger = FALSE;
   STAT->y_compare.trigger = FALSE;
   STAT->LY_eq_LYC = STAT->new_LY_eq_LYC;
@@ -2720,6 +2716,7 @@ static void ppu_mcycle(Emulator* e) {
             ppu->state_cycles = PPU_LINE_CYCLES;
           }
         }
+        check_stat(e);
         break;
 
       case PPU_STATE_HBLANK_PLUS_4:
@@ -2734,6 +2731,7 @@ static void ppu_mcycle(Emulator* e) {
         ppu->state = PPU_STATE_VBLANK_PLUS_4;
         ppu->state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
         STAT->mode = PPU_MODE_VBLANK;
+        check_stat(e);
         break;
 
       case PPU_STATE_VBLANK_LY_0:
@@ -2746,6 +2744,7 @@ static void ppu_mcycle(Emulator* e) {
         ppu->state = PPU_STATE_VBLANK_LINE_Y_0;
         ppu->state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE - CPU_MCYCLE;
         check_ly_eq_lyc(e, FALSE);
+        check_stat(e);
         break;
 
       case PPU_STATE_VBLANK_LINE_Y_0:
@@ -2758,6 +2757,7 @@ static void ppu_mcycle(Emulator* e) {
         STAT->mode2.trigger = TRUE;
         STAT->mode = PPU_MODE_HBLANK;
         STAT->trigger_mode = PPU_MODE_MODE2;
+        check_stat(e);
         break;
 
       case PPU_STATE_LCD_ON_MODE2:
@@ -2774,12 +2774,14 @@ static void ppu_mcycle(Emulator* e) {
         STAT->mode = STAT->trigger_mode = PPU_MODE_MODE3;
         ppu->render_x = 0;
         ppu->rendering_window = FALSE;
+        check_stat(e);
         break;
 
       case PPU_STATE_MODE3_EARLY_TRIGGER:
         ppu->state = PPU_STATE_MODE3_COMMON;
         ppu->state_cycles = CPU_MCYCLE;
         STAT->trigger_mode = PPU_MODE_HBLANK;
+        check_stat(e);
         break;
 
       case PPU_STATE_MODE3:
@@ -2790,17 +2792,13 @@ static void ppu_mcycle(Emulator* e) {
         ppu->state = PPU_STATE_HBLANK;
         ppu->state_cycles = ppu->line_cycles;
         STAT->mode = PPU_MODE_HBLANK;
+        check_stat(e);
         break;
 
       case PPU_STATE_COUNT:
         assert(0);
         break;
     }
-  }
-  if (STAT->trigger_mode != last_trigger_mode ||
-      STAT->mode2.trigger != last_mode2_trigger ||
-      STAT->y_compare.trigger != last_y_compare_trigger) {
-    check_stat(e);
   }
 }
 

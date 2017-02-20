@@ -107,11 +107,11 @@ static int s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
     "STAT from write [%c%c%c] [LY: %u] [cy: %u]")                              \
   X(P, D, trigger_timer_i, ">> trigger TIMER [cy: %u]")                        \
   X(P, V, trigger_y_compare_ii, ">> trigger Y compare [LY: %u] [cy: %u]")      \
-  X(P, V, write_io_asb, "(%#04x [%s], %#02x)")                                 \
   X(P, I, write_oam_in_use_ab, "(%#04x, %#02x): ignored because in use")       \
   X(P, D, write_vram_in_use_ab, "(%#04x, %#02x) ignored, using vram")          \
   X(I, D, enable_display_v, "Enabling display")                                \
   X(I, V, read_io_asb, "(%#04x [%s]) = %#02x")                                 \
+  X(I, V, write_io_asb, "(%#04x [%s], %#02x)")                                 \
   X(N, D, interrupt_during_halt_di_v,                                          \
     "Interrupt fired during HALT w/ disabled interrupt.")                      \
   X(N, D, joypad_interrupt_v, ">> JOYPAD interrupt")                           \
