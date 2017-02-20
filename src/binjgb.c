@@ -1427,6 +1427,9 @@ Result init_emulator(Emulator* e) {
   write_io(e, IO_OBP1_ADDR, 0xff);
   write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
+
+  /* Start the cycle counter near 2**32 to catch overflow bugs. */
+  e->state.apu.cycles = e->state.cycles = (u32)-CPU_CYCLES_PER_SECOND;
   return OK;
   ON_ERROR_RETURN;
 }
@@ -3034,7 +3037,7 @@ static void apu_update(Emulator* e, u32 total_cycles) {
 }
 
 static void apu_synchronize(Emulator* e) {
-  if (e->state.apu.cycles < e->state.cycles) {
+  if (e->state.apu.cycles != e->state.cycles) {
     u32 cycles = e->state.cycles - e->state.apu.cycles;
     if (e->state.apu.enabled) {
       apu_update(e, cycles);
@@ -3649,7 +3652,9 @@ EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
     if (e->state.ppu.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    if (e->state.cycles >= max_cycles) {
+    /* Check whether e->state.cycles >= max_cycles, even if e->state.cycles has
+     * overflowed. */
+    if ((s32)(e->state.cycles - max_cycles) >= 0) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
   }
@@ -4053,6 +4058,7 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(init_audio_buffer(e, s_host.audio.spec.freq,
                                   s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
   CHECK(SUCCESS(init_emulator(e)));
+  s_host.last_sync_cycles = e->state.cycles;
 
   e->joypad_callback.func = joypad_callback;
   e->joypad_callback.user_data = &s_host;
