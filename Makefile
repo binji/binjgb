@@ -1,9 +1,6 @@
-all: binjgb
-.PHONY: binjgb
-binjgb: debug
-	ln -sf Debug/binjgb out/binjgb
-	ln -sf Debug/tester out/tester
-	ln -sf Debug/debugger out/debugger
+.SUFFIXES:
+
+all: debug
 
 define BUILD
 out/$1:
@@ -12,10 +9,7 @@ out/$1/Makefile: | out/$1
 	cd out/$1 && cmake ../.. -DCMAKE_BUILD_TYPE=$1
 .PHONY: $2
 $2: out/$1/Makefile
-	$(MAKE) --no-print-directory -C out/$1
-	ln -sf $1/binjgb out/binjgb-$2
-	ln -sf $1/tester out/tester-$2
-	ln -sf $1/debugger out/debugger-$2
+	$(MAKE) --no-print-directory -C out/$1 install
 endef
 
 $(eval $(call BUILD,Debug,debug))

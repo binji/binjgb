@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <sys/time.h>
 
 #define SUCCESS(x) ((x) == OK)
 
@@ -1086,7 +1085,8 @@ static Result validate_header_checksum(CartInfo* cart_info) {
 static void log_cart_info(CartInfo* cart_info) {
   char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
   char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
-  int title_length = title_end ? title_end - title_start : TITLE_MAX_LENGTH;
+  int title_length =
+      (int)(title_end ? title_end - title_start : TITLE_MAX_LENGTH);
   printf("title: \"%.*s\"\n", title_length, title_start);
   printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
   printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
@@ -2427,13 +2427,17 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
 
   switch (pair.type) {
     case MEMORY_MAP_ROM0:
-      return e->memory_map.write_rom(e, pair.addr, value);
+      e->memory_map.write_rom(e, pair.addr, value);
+      break;
     case MEMORY_MAP_ROM1:
-      return e->memory_map.write_rom(e, pair.addr + 0x4000, value);
+      e->memory_map.write_rom(e, pair.addr + 0x4000, value);
+      break;
     case MEMORY_MAP_VRAM:
-      return write_vram(e, pair.addr, value);
+      write_vram(e, pair.addr, value);
+      break;
     case MEMORY_MAP_EXT_RAM:
-      return e->memory_map.write_ext_ram(e, pair.addr, value);
+      e->memory_map.write_ext_ram(e, pair.addr, value);
+      break;
     case MEMORY_MAP_WORK_RAM0:
       e->state.wram[pair.addr] = value;
       break;
@@ -2441,15 +2445,19 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
       e->state.wram[0x1000 + pair.addr] = value;
       break;
     case MEMORY_MAP_OAM:
-      return write_oam(e, pair.addr, value);
+      write_oam(e, pair.addr, value);
+      break;
     case MEMORY_MAP_UNUSED:
       break;
     case MEMORY_MAP_IO:
-      return write_io(e, pair.addr, value);
+      write_io(e, pair.addr, value);
+      break;
     case MEMORY_MAP_APU:
-      return write_apu(e, pair.addr, value);
+      write_apu(e, pair.addr, value);
+      break;
     case MEMORY_MAP_WAVE_RAM:
-      return write_wave_ram(e, pair.addr, value);
+      write_wave_ram(e, pair.addr, value);
+      break;
     case MEMORY_MAP_HIGH_RAM:
       e->state.hram[pair.addr] = value;
       break;
@@ -3094,7 +3102,7 @@ static void write_u8_cy(Emulator* e, Address addr, u8 value) {
 
 static void write_u16_cy(Emulator* e, Address addr, u16 value) {
   write_u8_cy(e, addr + 1, value >> 8);
-  write_u8_cy(e, addr, value);
+  write_u8_cy(e, addr, (u8)value);
 }
 
 static u8 s_opcode_bytes[] = {
@@ -3611,26 +3619,6 @@ static void step_emulator(Emulator* e) {
   handle_interrupts(e);
 }
 
-/* TODO: remove this global */
-static struct timeval s_start_time;
-static void init_time(void) {
-  int result = gettimeofday(&s_start_time, NULL);
-  assert(result == 0);
-}
-
-static f64 get_time_ms(void) {
-  struct timeval from = s_start_time;
-  struct timeval to;
-  int result = gettimeofday(&to, NULL);
-  assert(result == 0);
-  f64 ms = (f64)(to.tv_sec - from.tv_sec) * MILLISECONDS_PER_SECOND;
-  if (to.tv_usec < from.tv_usec) {
-    ms -= MILLISECONDS_PER_SECOND;
-    to.tv_usec += MICROSECONDS_PER_SECOND;
-  }
-  return ms + (f64)(to.tv_usec - from.tv_usec) / MICROSECONDS_PER_MILLISECOND;
-}
-
 EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
@@ -3658,7 +3646,7 @@ EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   }
   apu_synchronize(e);
   assert(!(event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) ||
-         AUDIO_BUFFER_FRAMES(e) >= max_audio_frames);
+         (u32)AUDIO_BUFFER_FRAMES(e) >= max_audio_frames);
   return e->last_event = event;
 }
 
@@ -3781,7 +3769,7 @@ static void host_audio_callback(void* userdata, u8* dst, int len) {
   HostAudio* audio = &host->audio;
   if (len > (int)audio->buffer_available) {
     HOOK(audio_underflow_zi, audio->buffer_available, len);
-    len = audio->buffer_available;
+    len = (int)audio->buffer_available;
   }
   if (audio->read_pos + len > audio->buffer_end) {
     size_t len1 = audio->buffer_end - audio->read_pos;
@@ -3796,9 +3784,21 @@ static void host_audio_callback(void* userdata, u8* dst, int len) {
   audio->buffer_available -= len;
 }
 
+static u64 s_start_counter;
+static u64 s_performance_frequency;
+static void host_init_time(void) {
+  s_performance_frequency = SDL_GetPerformanceFrequency();
+  s_start_counter = SDL_GetPerformanceCounter();
+}
+
+static f64 host_get_time_ms(void) {
+  u64 now = SDL_GetPerformanceCounter();
+  return (f64)(now - s_start_counter) * 1000 / s_performance_frequency;
+}
+
 static Result host_init_audio(Host* host) {
   host->last_sync_cycles = 0;
-  host->last_sync_real_ms = get_time_ms();
+  host->last_sync_real_ms = host_get_time_ms();
 
   SDL_AudioSpec want;
   want.freq = AUDIO_SPEC_FREQUENCY;
@@ -3834,7 +3834,7 @@ static Result read_state_from_file(Emulator* e, const char* filename) {
   CHECK(SUCCESS(get_file_size(f, &size)));
   CHECK_MSG(size == SAVE_STATE_FILE_SIZE,
             "save state file is wrong size: %ld, expected %ld.\n", size,
-            SAVE_STATE_FILE_SIZE);
+            (long)SAVE_STATE_FILE_SIZE);
   u32 header;
   CHECK_MSG(fread(&header, sizeof(header), 1, f) == 1, "fread failed.\n");
   CHECK_MSG(header == SAVE_STATE_HEADER, "header mismatch: %u, expected %u.\n",
@@ -3917,12 +3917,12 @@ static void host_render_video(Host* host, Emulator* e) {
     SDL_UnlockTexture(host->texture);
     SDL_RenderCopy(host->renderer, host->texture, NULL, NULL);
   }
-  HOOK(render_present_f, get_time_ms());
+  HOOK(render_present_f, host_get_time_ms());
   SDL_RenderPresent(host->renderer);
 }
 
 static void host_synchronize(Host* host, Emulator* e) {
-  f64 now_ms = get_time_ms();
+  f64 now_ms = host_get_time_ms();
   f64 gb_ms = (f64)(e->state.cycles - host->last_sync_cycles) *
               MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
   f64 real_ms = now_ms - host->last_sync_real_ms;
@@ -3944,8 +3944,8 @@ static void host_synchronize(Host* host, Emulator* e) {
     if (real_ms < gb_ms) {
       HOOK(sync_wait_ffff, now_ms, delta_ms, gb_ms, real_ms);
       do {
-        SDL_Delay(delta_ms);
-        now_ms = get_time_ms();
+        SDL_Delay((u32)delta_ms);
+        now_ms = host_get_time_ms();
         delta_ms = delay_until_ms - now_ms;
       } while (delta_ms > 0);
     }
@@ -3983,11 +3983,11 @@ static void host_render_audio(Host* host, Emulator* e) {
   if (frames < src_frames) {
     HOOK(audio_overflow_z, old_buffer_available);
   } else {
-    HOOK(audio_add_buffer_fzz, get_time_ms(),
+    HOOK(audio_add_buffer_fzz, host_get_time_ms(),
              old_buffer_available, new_buffer_available);
   }
   if (!audio->ready && new_buffer_available >= audio->buffer_target_available) {
-    HOOK(audio_buffer_ready_fz, get_time_ms(), new_buffer_available);
+    HOOK(audio_buffer_ready_fz, host_get_time_ms(), new_buffer_available);
     audio->ready = TRUE;
     SDL_PauseAudioDevice(audio->dev, 0);
   }
@@ -4043,7 +4043,7 @@ static void joypad_callback(Emulator* e, void* user_data) {
 
 #ifndef NO_MAIN
 int main(int argc, char** argv) {
-  init_time();
+  host_init_time();
   --argc; ++argv;
   int result = 1;
 
@@ -4069,13 +4069,13 @@ int main(int argc, char** argv) {
   while (host_poll_events(e, &s_host)) {
     if (e->config.paused) {
       SDL_PauseAudioDevice(s_host.audio.dev, !s_host.audio.ready);
-      SDL_Delay(VIDEO_FRAME_MS);
+      SDL_Delay((u32)VIDEO_FRAME_MS);
       continue;
     }
 
     size_t size =
         NEXT_MODULO(s_host.audio.buffer_available, s_host.audio.spec.size);
-    EmulatorEvent event = run_emulator(e, size / AUDIO_FRAME_SIZE);
+    EmulatorEvent event = run_emulator(e, (u32)(size / AUDIO_FRAME_SIZE));
     if (!e->config.no_sync) {
       host_synchronize(&s_host, e);
     }

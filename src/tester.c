@@ -6,6 +6,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 
 #define AUDIO_FREQUENCY 44100
@@ -64,6 +65,16 @@ void usage(int argc, char** argv) {
       DEFAULT_TIMEOUT_SEC);
 }
 
+static time_t s_start_time;
+static void init_time(void) {
+  s_start_time = time(NULL);
+}
+
+static f64 get_time_sec(void) {
+  time_t now = time(NULL);
+  return now - s_start_time;
+}
+
 int main(int argc, char** argv) {
   init_time();
   Emulator emulator;
@@ -73,7 +84,7 @@ int main(int argc, char** argv) {
   int frames = DEFAULT_FRAMES;
   const char* output_ppm = NULL;
   Bool animate = FALSE;
-  int timeout_sec = DEFAULT_TIMEOUT_SEC;
+  int delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
   FILE* controller_input_file = NULL;
 
   int opt;
@@ -96,7 +107,7 @@ int main(int argc, char** argv) {
         animate = TRUE;
         break;
       case 't':
-        timeout_sec = atoi(optarg);
+        delta_timeout_sec = atoi(optarg);
         break;
       default:
         PRINT_ERROR("unknown option: -%c\n", opt);
@@ -124,14 +135,14 @@ int main(int argc, char** argv) {
                                      AUDIO_FREQUENCY / CPU_CYCLES_PER_SECOND +
                                  1);
   printf("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
-  f64 timeout_ms = get_time_ms() + timeout_sec * MILLISECONDS_PER_SECOND;
+  f64 timeout_sec = get_time_sec() + delta_timeout_sec;
   Bool finish_at_next_frame = FALSE;
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
     EmulatorEvent event = run_emulator(e, AUDIO_FRAMES);
-    if (get_time_ms() > timeout_ms) {
+    if (get_time_sec() > timeout_sec) {
       PRINT_ERROR("test timed out.\n");
       goto error;
     }

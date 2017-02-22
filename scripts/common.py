@@ -11,11 +11,11 @@ import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+BIN_DIR = os.path.join(ROOT_DIR, 'bin')
 OUT_DIR = os.path.join(ROOT_DIR, 'out')
 ROM_DIR = os.path.join(ROOT_DIR, 'rom')
 TEST_DIR = os.path.join(ROOT_DIR, 'test')
-TESTER_DEBUG = os.path.join(OUT_DIR, 'tester')
-TESTER_RELEASE = os.path.join(OUT_DIR, 'tester-release')
+TESTER = os.path.join(BIN_DIR, 'binjgb-tester')
 
 
 class Error(Exception):
@@ -37,8 +37,8 @@ def Run(exe, *args):
 
 
 def RunTester(rom, frames=None, out_ppm=None, animate=False,
-              controller_input=None, debug_exe=False, timeout_sec=None):
-  exe = TESTER_DEBUG if debug_exe else TESTER_RELEASE
+              controller_input=None, exe=None, timeout_sec=None):
+  exe = exe or TESTER
   cmd = []
   if frames:
     cmd.extend(['-f', str(frames)])

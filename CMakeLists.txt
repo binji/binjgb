@@ -3,27 +3,49 @@
 # This software may be modified and distributed under the terms
 # of the MIT license.  See the LICENSE file for details.
 cmake_minimum_required(VERSION 2.8)
+project(binjgb)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
-add_definitions(
-  -Wall -Wextra -Werror -Wpointer-arith -Wno-unused-parameter -g
-  -Wno-unused-function
-  -Wno-unused-variable
-)
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install directory" FORCE)
+endif ()
+
+if (MSVC)
+  add_definitions(-W3 -D_CRT_SECURE_NO_WARNINGS)
+else ()
+  add_definitions(
+    -Wall -Wextra -Werror -Wpointer-arith -Wno-unused-parameter -g
+    -Wno-unused-function
+    -Wno-unused-variable
+  )
+endif ()
 
 if (NOT EMSCRIPTEN)
   find_package(SDL2)
 
-  add_executable(binjgb src/binjgb.c)
-  target_include_directories(binjgb PUBLIC ${SDL2_INCLUDE_DIR})
-  target_link_libraries(binjgb ${SDL2_LIBRARY})
+  if (SDL2_FOUND)
+    add_executable(binjgb src/binjgb.c)
+    target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main)
 
-  add_executable(debugger src/debugger.c)
-  target_include_directories(debugger PUBLIC ${SDL2_INCLUDE_DIR})
-  target_link_libraries(debugger ${SDL2_LIBRARY})
+    if (NOT MSVC)
+      # Can't build because of getopt for now
+      add_executable(binjgb-debugger src/debugger.c)
+      target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main)
+      install(TARGETS binjgb-debugger DESTINATION bin)
+    endif ()
 
-  add_executable(tester src/tester.c)
-  target_compile_definitions(tester PRIVATE NO_SDL)
+    install(TARGETS binjgb DESTINATION bin)
+    if (SDL2_DYNAMIC)
+      install(FILES ${SDL2_RUNTIME_LIBRARY} DESTINATION bin)
+    endif ()
+  endif ()
+
+  if (NOT MSVC)
+    # Can't build because of getopt for now
+    add_executable(binjgb-tester src/tester.c)
+    target_compile_definitions(binjgb-tester PRIVATE NO_SDL)
+    install(TARGETS binjgb-tester DESTINATION bin)
+  endif ()
 else (EMSCRIPTEN)
   add_executable(binjgb src/emscripten/main.c)
   set(PRE_JS ${PROJECT_SOURCE_DIR}/src/emscripten/pre.js)

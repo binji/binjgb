@@ -27,7 +27,7 @@ def RunTest(rom, frames, expected, options):
   ppm = os.path.join(TEST_RESULT_DIR,
                      os.path.basename(os.path.splitext(rom)[0]) + '.ppm')
   try:
-    common.RunTester(rom, frames, ppm, debug_exe=options.debug_exe)
+    common.RunTester(rom, frames, ppm, exe=options.exe)
     actual = common.HashFile(ppm)
 
     if expected.startswith('!'):
@@ -81,8 +81,7 @@ def main(args):
   parser.add_argument('-j', '--num-processes',
                       type=int, default=multiprocessing.cpu_count(),
                       help='num processes.')
-  parser.add_argument('-d', '--debug-exe', action='store_true',
-                      help='run debug tester')
+  parser.add_argument('-e', '--exe', help='path to tester')
   parser.add_argument('-v', '--verbose', action='store_true',
                       help='show more info')
   options = parser.parse_args(args)

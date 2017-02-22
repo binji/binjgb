@@ -375,7 +375,6 @@ const char* parse_arguments(int argc, char** argv) {
 
 /* Copied from binjgb.c; probably will diverge. */
 int main(int argc, char** argv) {
-  init_time();
   int result = 1;
   const char* rom_filename = parse_arguments(argc, argv);
   Emulator* e = &s_emulator;
