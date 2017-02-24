@@ -1,0 +1,119 @@
+# Test status
+
+[Blargg's tests](http://gbdev.gg8.se/wiki/articles/Test_ROMs):
+
+| Test | Result |
+| --- | --- |
+| cpu\_instrs/cpu\_instrs | :ok: |
+| dmg\_sound-2/dmg\_sound | :ok: |
+| halt\_bug | :ok: |
+| instr\_timing/instr\_timing | :ok: |
+| mem\_timing-2/mem\_timing | :ok: |
+| oam\_bug-2/oam\_bug | :x: |
+
+[Gekkio's mooneye-gb tests](https://github.com/Gekkio/mooneye-gb):
+
+| Test | Result |
+| --- | --- |
+| acceptance/add\_sp\_e\_timing | :ok: |
+| acceptance/bits/mem\_oam | :ok: |
+| acceptance/bits/reg\_f | :ok: |
+| acceptance/bits/unused\_hwio-GS | :ok: |
+| acceptance/boot\_hwio-dmgABCXmgb | :ok: |
+| acceptance/boot\_regs-dmgABCX | :ok: |
+| acceptance/call\_cc\_timing | :ok: |
+| acceptance/call\_cc\_timing2 | :ok: |
+| acceptance/call\_timing | :ok: |
+| acceptance/call\_timing2 | :ok: |
+| acceptance/di\_timing-GS | :ok: |
+| acceptance/div\_timing | :ok: |
+| acceptance/ei\_timing | :ok: |
+| acceptance/gpu/hblank\_ly\_scx\_timing-GS | :ok: |
+| acceptance/gpu/intr\_1\_2\_timing-GS | :ok: |
+| acceptance/gpu/intr\_2\_0\_timing | :ok: |
+| acceptance/gpu/intr\_2\_mode0\_timing | :ok: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites | :ok: |
+| acceptance/gpu/intr\_2\_mode3\_timing | :ok: |
+| acceptance/gpu/intr\_2\_oam\_ok\_timing | :ok: |
+| acceptance/gpu/stat\_irq\_blocking | :ok: |
+| acceptance/gpu/vblank\_stat\_intr-GS | :ok: |
+| acceptance/halt\_ime0\_ei | :ok: |
+| acceptance/halt\_ime0\_nointr\_timing | :ok: |
+| acceptance/halt\_ime1\_timing | :ok: |
+| acceptance/halt\_ime1\_timing2-GS | :ok: |
+| acceptance/if\_ie\_registers | :ok: |
+| acceptance/intr\_timing | :ok: |
+| acceptance/jp\_cc\_timing | :ok: |
+| acceptance/jp\_timing | :ok: |
+| acceptance/ld\_hl\_sp\_e\_timing | :ok: |
+| acceptance/oam\_dma\_restart | :ok: |
+| acceptance/oam\_dma\_start | :ok: |
+| acceptance/oam\_dma\_timing | :ok: |
+| acceptance/pop\_timing | :ok: |
+| acceptance/push\_timing | :ok: |
+| acceptance/rapid\_di\_ei | :ok: |
+| acceptance/ret\_cc\_timing | :ok: |
+| acceptance/ret\_timing | :ok: |
+| acceptance/reti\_intr\_timing | :ok: |
+| acceptance/reti\_timing | :ok: |
+| acceptance/rst\_timing | :ok: |
+| acceptance/timer/div\_write | :ok: |
+| acceptance/timer/rapid\_toggle | :ok: |
+| acceptance/timer/tim00 | :ok: |
+| acceptance/timer/tim00\_div\_trigger | :ok: |
+| acceptance/timer/tim01 | :ok: |
+| acceptance/timer/tim01\_div\_trigger | :ok: |
+| acceptance/timer/tim10 | :ok: |
+| acceptance/timer/tim10\_div\_trigger | :ok: |
+| acceptance/timer/tim11 | :ok: |
+| acceptance/timer/tim11\_div\_trigger | :ok: |
+| acceptance/timer/tima\_reload | :ok: |
+| acceptance/timer/tima\_write\_reloading | :ok: |
+| acceptance/timer/tma\_write\_reloading | :ok: |
+| emulator-only/mbc1\_rom\_4banks | :ok: |
+| manual-only/sprite\_priority | :ok: |
+
+[Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):
+
+| Test | Result |
+| --- | --- |
+| acceptance/gpu/hblank\_ly\_scx\_timing\_nops | :x: |
+| acceptance/gpu/hblank\_ly\_scx\_timing\_variant\_nops | :x: |
+| acceptance/gpu/intr\_0\_timing | :ok: |
+| acceptance/gpu/intr\_1\_timing | :ok: |
+| acceptance/gpu/intr\_2\_mode0\_scx1\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx2\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx3\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx4\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx5\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx6\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx7\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_scx8\_timing\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx1\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx2\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx3\_nops | :x: |
+| acceptance/gpu/intr\_2\_mode0\_timing\_sprites\_scx4\_nops | :x: |
+| acceptance/gpu/intr\_2\_timing | :ok: |
+| acceptance/gpu/lcdon\_mode\_timing | :ok: |
+| acceptance/gpu/ly00\_01\_mode0\_2 | :ok: |
+| acceptance/gpu/ly00\_mode0\_2-GS | :ok: |
+| acceptance/gpu/ly00\_mode1\_0-GS | :ok: |
+| acceptance/gpu/ly00\_mode2\_3 | :ok: |
+| acceptance/gpu/ly00\_mode3\_0 | :ok: |
+| acceptance/gpu/ly143\_144\_145 | :ok: |
+| acceptance/gpu/ly143\_144\_152\_153 | :ok: |
+| acceptance/gpu/ly143\_144\_mode0\_1 | :ok: |
+| acceptance/gpu/ly143\_144\_mode3\_0 | :ok: |
+| acceptance/gpu/ly\_lyc-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_0-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_0\_write-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_144-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_153-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_153\_write-GS | :ok: |
+| acceptance/gpu/ly\_lyc\_write-GS | :ok: |
+| acceptance/gpu/ly\_new\_frame-GS | :ok: |
+| acceptance/gpu/stat\_write\_if-GS | :ok: |
+| acceptance/gpu/vblank\_if\_timing | :ok: |
+| acceptance/timer/timer\_if | :ok: |
+
