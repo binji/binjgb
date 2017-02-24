@@ -17,8 +17,39 @@ A simple GB emulator.
 ## Building
 
 Requires [CMake](https://cmake.org) and
-[SDL2](http://libsdl.org/download-2.0.php). If you run `make`, it will run
-CMake for you and put the output in the `bin/` directory.
+[SDL2](http://libsdl.org/download-2.0.php).
+
+### Building (Linux/Mac)
+
+If you run `make`, it will run CMake for you and put the output in the `bin/`
+directory.
+
+```
+$ make
+$ bin/binjgb foo.gb
+```
+
+You can also just use cmake directly:
+
+```
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make
+```
+
+### Building (Windows)
+
+When building on Windows, you'll probably have to set the SDL2 directory:
+
+```
+> mkdir build
+> cd build
+> cmake .. -G "Visual Studio 14 2015" -DSDL2_ROOT_DIR="C:\path\to\SDL\"
+```
+
+Then load this solution into Visual Studio and build it. Make sure to build the
+`INSTALL` target, so the exectuables are built to the `bin` directory.
 
 ## Running
 
@@ -73,4 +104,4 @@ $ scripts/tester.py gpu
 
 ## Test status
 
-[Test Results](test_results.md)
+[See test results](test_results.md)
