@@ -63,8 +63,8 @@ function start(data) {
 
   _clear_emulator(e);
   _init_rom_data(e, romData, data.byteLength);
-  _init_audio_buffer(e, audio.sampleRate, AUDIO_FRAMES);
   _init_emulator(e);
+  _init_audio_buffer(e, audio.sampleRate, AUDIO_FRAMES);
 
   frameBuffer = new Uint8Array(
       Module.buffer, _get_frame_buffer_ptr(e), _get_frame_buffer_size(e));
@@ -92,8 +92,8 @@ function renderVideo(startMs) {
   var deltaSec = Math.max(startSec - lastSec, 0);
   var startCycles = _get_cycles(e);
   var deltaCycles = Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_CYCLES_PER_SEC;
-  var runUntilCycles = startCycles + deltaCycles + leftoverCycles;
-  while (_get_cycles(e) < runUntilCycles) {
+  var runUntilCycles = (startCycles + deltaCycles + leftoverCycles) >>> 0;
+  while (((runUntilCycles - _get_cycles(e)) | 0) >= 0) {
     var event = _run_emulator(e, AUDIO_FRAMES);
     if (event & EVENT_NEW_FRAME) {
       imageData.data.set(frameBuffer);

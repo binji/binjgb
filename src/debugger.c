@@ -382,7 +382,7 @@ int main(int argc, char** argv) {
   CHECK(SUCCESS(host_init_video(&s_host)));
   CHECK(SUCCESS(host_init_audio(&s_host)));
   CHECK(SUCCESS(init_emulator(e)));
-  CHECK(SUCCESS(init_audio_buffer(&e->audio_buffer, s_host.audio.spec.freq,
+  CHECK(SUCCESS(init_audio_buffer(e, s_host.audio.spec.freq,
                                   s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
   s_host.last_sync_cycles = e->state.cycles;
 
