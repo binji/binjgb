@@ -17,8 +17,9 @@ import time
 import common
 
 OUT_ANIM_DIR = os.path.join(common.OUT_DIR, 'anim')
-
-DEFAULT_FRAMES = 2400
+OUT_SCREENSHOT_DIR = os.path.join(common.OUT_DIR, 'screenshot')
+DEFAULT_ANIM_FRAMES = 2400
+DEFAULT_SCREENSHOT_FRAMES = 300
 CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'input_move_right.txt')
 
 
@@ -28,6 +29,13 @@ def ChangeExt(path, new_ext):
 
 def ChangeDir(new_dir, path):
   return os.path.join(new_dir, os.path.basename(path))
+
+
+def MakeDir(dir_name):
+  try:
+    os.makedirs(dir_name)
+  except OSError as e:
+    print(e)
 
 
 def ConvertPPMstoMP4(tempdir, src):
@@ -43,16 +51,21 @@ def ConvertPPMstoMP4(tempdir, src):
              dst)
 
 
-def Run(rom):
+def Run(rom, options):
   start_time = time.time()
   tempdir = None
   try:
     tempdir = tempfile.mkdtemp(prefix='rom_anims')
-    default_img = ChangeDir(tempdir, ChangeExt(rom, '.ppm'))
     try:
-      common.RunTester(rom, DEFAULT_FRAMES, default_img,
-                       controller_input=CONTROLLER_INPUT_FILE, animate=True)
-      ConvertPPMstoMP4(tempdir, default_img)
+      if options.screenshot:
+        default_img = ChangeDir(OUT_SCREENSHOT_DIR, ChangeExt(rom, '.ppm'))
+        common.RunTester(rom, DEFAULT_SCREENSHOT_FRAMES, default_img,
+                         controller_input=CONTROLLER_INPUT_FILE)
+      else:
+        default_img = ChangeDir(tempdir, ChangeExt(rom, '.ppm'))
+        common.RunTester(rom, DEFAULT_ANIM_FRAMES, default_img,
+                         controller_input=CONTROLLER_INPUT_FILE, animate=True)
+        ConvertPPMstoMP4(tempdir, default_img)
     except common.Error as e:
       print(str(e))
   finally:
@@ -70,6 +83,8 @@ def main(args):
                       type=int, default=multiprocessing.cpu_count(),
                       help='num processes.')
   parser.add_argument('-C', '--dir', help='search for ROMs in dir')
+  parser.add_argument('--screenshot', action='store_true',
+                      help='Just grab screenshots')
   parser.add_argument('patterns', metavar='pattern', nargs='*',
                       help='test patterns.')
   options = parser.parse_args(args)
@@ -81,15 +96,13 @@ def main(args):
       print(rom)
     return 0
 
-  try:
-    os.makedirs(OUT_ANIM_DIR)
-  except OSError as e:
-    print(e)
+  MakeDir(OUT_ANIM_DIR)
+  MakeDir(OUT_SCREENSHOT_DIR)
 
   start_time = time.time()
   pool = multiprocessing.Pool(options.num_processes)
   try:
-    results = [pool.apply_async(Run, (rom,)) for rom in roms]
+    results = [pool.apply_async(Run, (rom, options)) for rom in roms]
     started = 0
     completed = 0
     while results:

@@ -14,6 +14,18 @@ A simple GB emulator.
 * Disable/enable BG, Window and Sprite layers
 * Convenient Python test harness using hashes to validate
 
+## Screenshots
+
+![Bionic Commando](/images/bionic.png)
+![Donkey Kong](/images/dk.png)
+![Kirby's Dreamland 2](/images/kirby2.png)
+![Mole Mania](/images/mole.png)
+![Mario's Picross](/images/picross.png)
+![Trip World](/images/trip.png)
+![Wario Land](/images/wario.png)
+![Game Boy Wars](/images/wars.png)
+![Is That a Demo in Your Pocket?](/images/pocket.png)
+
 ## Building
 
 Requires [CMake](https://cmake.org) and
