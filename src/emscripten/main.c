@@ -10,7 +10,7 @@
 
 #include "binjgb.c"
 
-Emulator* new_emulator(void) { return malloc(sizeof(Emulator)); }
+Emulator* new_emulator(void) { return calloc(1, sizeof(Emulator)); }
 
 void clear_emulator(Emulator* e) {
   free(e->audio_buffer.data);
