@@ -7,7 +7,8 @@
 
 #include <stdarg.h>
 #include <stdio.h>
-#include <unistd.h>
+
+#include "options.h"
 
 #define NO_MAIN
 
@@ -36,6 +37,7 @@ const char* s_log_system_names[] = {FOREACH_LOG_SYSTEM(V)};
 static int s_trace = 0;
 static unsigned s_trace_counter = 0;
 static int s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
+static const char* s_rom_filename;
 
 #define HOOK0(name) HOOK_##name(__func__)
 #define HOOK(name, ...) HOOK_##name(__func__, __VA_ARGS__)
@@ -311,74 +313,117 @@ static void print_log_systems(void) {
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
-      "  -h       help\n"
-      "  -t       trace each instruction\n"
-      "  -l S=N   set log level for system S to N\n\n",
+      "  -h,--help      help\n"
+      "  -t,--trace     trace each instruction\n"
+      "  -l,--log S=N   set log level for system S to N\n\n",
       argv[0]);
 
   print_log_systems();
 }
 
-const char* parse_arguments(int argc, char** argv) {
-  int opt;
-  while ((opt = getopt(argc, argv, "htl:")) != -1) {
-    switch (opt) {
-      case 'h':
-        usage(argc, argv);
-        exit(1);
+void parse_arguments(int argc, char** argv) {
+  static const Option options[] = {
+    {'h', "help", 0},
+    {'t', "trace", 0},
+    {'l', "log", 1},
+  };
 
-      case 't':
-        s_trace = 1;
-        break;
+  struct OptionParser* parser = new_option_parser(
+      options, sizeof(options) / sizeof(options[0]), argc, argv);
 
-      case 'l': {
-        const char* log_system_name = optarg;
-        const char* equals = strchr(optarg, '=');
-        if (!equals) {
-          PRINT_ERROR("invalid log level format, should be S=N\n");
-          continue;
-        }
+  int errors = 0;
+  int done = 0;
+  while (!done) {
+    OptionResult result = parse_next_option(parser);
+    switch (result.kind) {
+      case OPTION_RESULT_KIND_UNKNOWN:
+        PRINT_ERROR("ERROR: Unknown option: %s.\n\n", result.arg);
+        goto error;
 
-        size_t i;
-        LogSystem system = NUM_LOG_SYSTEMS;
-        for (i = 0; i < ARRAY_SIZE(s_log_system_names); ++i) {
-          if (strncmp(log_system_name, s_log_system_names[i],
-                      strlen(s_log_system_names[i])) == 0) {
-            system = i;
+      case OPTION_RESULT_KIND_EXPECTED_VALUE:
+        PRINT_ERROR("ERROR: Option --%s requires a value.\n\n",
+                    result.option->long_name);
+        goto error;
+
+      case OPTION_RESULT_KIND_BAD_SHORT_OPTION:
+        PRINT_ERROR("ERROR: Short option -%c is too long: %s.\n\n",
+                    result.option->short_name, result.arg);
+        goto error;
+
+      case OPTION_RESULT_KIND_OPTION:
+        switch (result.option->short_name) {
+          case 'h':
+            goto error;
+
+          case 't':
+            s_trace = 1;
+            break;
+
+          case 'l': {
+            const char* log_system_name = result.value;
+            const char* equals = strchr(result.value, '=');
+            if (!equals) {
+              PRINT_ERROR("invalid log level format, should be S=N\n");
+              continue;
+            }
+
+            size_t i;
+            LogSystem system = NUM_LOG_SYSTEMS;
+            for (i = 0; i < ARRAY_SIZE(s_log_system_names); ++i) {
+              if (strncmp(log_system_name, s_log_system_names[i],
+                          strlen(s_log_system_names[i])) == 0) {
+                system = i;
+                break;
+              }
+            }
+
+            if (system == NUM_LOG_SYSTEMS) {
+              PRINT_ERROR("unknown log system: %.*s\n",
+                          (int)(equals - result.value), result.value);
+              print_log_systems();
+              continue;
+            }
+            s_log_level[system] = atoi(equals + 1);
             break;
           }
-        }
 
-        if (system == NUM_LOG_SYSTEMS) {
-          PRINT_ERROR("unknown log system: %.*s\n", (int)(equals - optarg),
-                      optarg);
-          print_log_systems();
-          continue;
+          default:
+            assert(0);
+            break;
         }
-        s_log_level[system] = atoi(equals + 1);
         break;
-      }
-      default:
-        PRINT_ERROR("unknown option: -%c\n", opt);
-        continue;
+
+      case OPTION_RESULT_KIND_ARG:
+        s_rom_filename = result.value;
+        break;
+
+      case OPTION_RESULT_KIND_DONE:
+        done = 1;
+        break;
     }
   }
 
-  if (optind >= argc) {
-    PRINT_ERROR("expected input .gb\n");
+  if (!s_rom_filename) {
+    PRINT_ERROR("ERROR: expected input .gb\n\n");
     usage(argc, argv);
-    exit(1);
+    goto error;
   }
 
-  return argv[optind];
+  destroy_option_parser(parser);
+  return;
+
+error:
+  usage(argc, argv);
+  destroy_option_parser(parser);
+  exit(1);
 }
 
 /* Copied from binjgb.c; probably will diverge. */
 int main(int argc, char** argv) {
   int result = 1;
-  const char* rom_filename = parse_arguments(argc, argv);
+  parse_arguments(argc, argv);
   Emulator* e = &s_emulator;
-  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
+  CHECK(SUCCESS(read_data_from_file(e, s_rom_filename)));
   CHECK(SUCCESS(host_init_video(&s_host)));
   CHECK(SUCCESS(host_init_audio(&s_host)));
   CHECK(SUCCESS(init_emulator(e)));
@@ -389,9 +434,9 @@ int main(int argc, char** argv) {
   e->joypad_callback.func = joypad_callback;
   e->joypad_callback.user_data = &s_host;
 
-  const char* save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
+  const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
   s_host.save_state_filename =
-      replace_extension(rom_filename, SAVE_STATE_EXTENSION);
+      replace_extension(s_rom_filename, SAVE_STATE_EXTENSION);
   read_ext_ram_from_file(e, save_filename);
 
   while (host_poll_events(e, &s_host)) {

@@ -7,7 +7,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
-#include <unistd.h>
+
+#include "options.h"
 
 #define AUDIO_FREQUENCY 44100
 /* This value is arbitrary. Why not 1/10th of a second? */
@@ -16,6 +17,14 @@
 #define DEFAULT_FRAMES 60
 
 #include "binjgb.c"
+
+static FILE* s_controller_input_file;
+static int s_frames = DEFAULT_FRAMES;
+static const char* s_output_ppm;
+static Bool s_animate;
+static int s_delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
+static const char* s_rom_filename;
+
 
 static char* replace_extension(const char* filename, const char* extension) {
   size_t length = strlen(filename) + strlen(extension) + 1; /* +1 for \0. */
@@ -54,12 +63,12 @@ Result write_frame_ppm(Emulator* e, const char* filename) {
 void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
-      "  -h       help\n"
-      "  -i FILE  read controller input from FILE\n"
-      "  -f N     run for N frames (default: %u)\n"
-      "  -o FILE  output PPM file to FILE\n"
-      "  -a       output an image every frame\n"
-      "  -t N     timeout after N seconds (default: %u)\n",
+      "  -h,--help          help\n"
+      "  -i,--input FILE    read controller input from FILE\n"
+      "  -f,--frames N      run for N frames (default: %u)\n"
+      "  -o,--output FILE   output PPM file to FILE\n"
+      "  -a,--animate       output an image every frame\n"
+      "  -t,--timeout N     timeout after N seconds (default: %u)\n",
       argv[0],
       DEFAULT_FRAMES,
       DEFAULT_TIMEOUT_SEC);
@@ -75,66 +84,115 @@ static f64 get_time_sec(void) {
   return now - s_start_time;
 }
 
+void parse_options(int argc, char**argv) {
+  static const Option options[] = {
+    {'h', "help", 0},
+    {'i', "input", 1},
+    {'f', "frames", 1},
+    {'o', "output", 1},
+    {'a', "animate", 0},
+    {'t', "timeout", 1},
+  };
+
+  struct OptionParser* parser = new_option_parser(
+      options, sizeof(options) / sizeof(options[0]), argc, argv);
+
+  int errors = 0;
+  int done = 0;
+  while (!done) {
+    OptionResult result = parse_next_option(parser);
+    switch (result.kind) {
+      case OPTION_RESULT_KIND_UNKNOWN:
+        PRINT_ERROR("ERROR: Unknown option: %s.\n\n", result.arg);
+        goto error;
+
+      case OPTION_RESULT_KIND_EXPECTED_VALUE:
+        PRINT_ERROR("ERROR: Option --%s requires a value.\n\n",
+                    result.option->long_name);
+        goto error;
+
+      case OPTION_RESULT_KIND_BAD_SHORT_OPTION:
+        PRINT_ERROR("ERROR: Short option -%c is too long: %s.\n\n",
+                    result.option->short_name, result.arg);
+        goto error;
+
+      case OPTION_RESULT_KIND_OPTION:
+        switch (result.option->short_name) {
+          case 'h':
+            goto error;
+
+          case 'i':
+            CHECK_MSG((s_controller_input_file = fopen(result.value, "r")) != 0,
+                      "ERROR: Unable to open \"%s\".\n\n", result.value);
+            break;
+
+          case 'f':
+            s_frames = atoi(result.value);
+            break;
+
+          case 'o':
+            s_output_ppm = result.value;
+            break;
+
+          case 'a':
+            s_animate = TRUE;
+            break;
+
+          case 't':
+            s_delta_timeout_sec = atoi(result.value);
+            break;
+
+          default:
+            assert(0);
+            break;
+        }
+        break;
+
+      case OPTION_RESULT_KIND_ARG:
+        s_rom_filename = result.value;
+        break;
+
+      case OPTION_RESULT_KIND_DONE:
+        done = 1;
+        break;
+    }
+  }
+
+  if (!s_rom_filename) {
+    PRINT_ERROR("ERROR: expected input .gb\n\n");
+    usage(argc, argv);
+    goto error;
+  }
+
+  destroy_option_parser(parser);
+  return;
+
+error:
+  usage(argc, argv);
+  destroy_option_parser(parser);
+  exit(1);
+}
+
 int main(int argc, char** argv) {
   init_time();
   Emulator emulator;
   ZERO_MEMORY(emulator);
   Emulator* e = &emulator;
 
-  int frames = DEFAULT_FRAMES;
-  const char* output_ppm = NULL;
-  Bool animate = FALSE;
-  int delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
-  FILE* controller_input_file = NULL;
+  parse_options(argc, argv);
 
-  int opt;
-  while ((opt = getopt(argc, argv, "hi:f:o:at:")) != -1) {
-    switch (opt) {
-      case 'h':
-        usage(argc, argv);
-        return 1;
-      case 'i':
-        CHECK_MSG((controller_input_file = fopen(optarg, "r")) != 0,
-                  "Unable to open \"%s\".", optarg);
-        break;
-      case 'f':
-        frames = atoi(optarg);
-        break;
-      case 'o':
-        output_ppm = optarg;
-        break;
-      case 'a':
-        animate = TRUE;
-        break;
-      case 't':
-        delta_timeout_sec = atoi(optarg);
-        break;
-      default:
-        PRINT_ERROR("unknown option: -%c\n", opt);
-        break;
-    }
-  }
-
-  if (optind >= argc) {
-    PRINT_ERROR("expected input .gb\n");
-    usage(argc, argv);
-    return 1;
-  }
-
-  const char* rom_filename = argv[optind];
-
-  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
+  CHECK(SUCCESS(read_data_from_file(e, s_rom_filename)));
   CHECK(SUCCESS(init_emulator(e)));
   CHECK(SUCCESS(init_audio_buffer(e, AUDIO_FREQUENCY, AUDIO_FRAMES)));
 
   /* Run for N frames, measured by audio frames (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
    * we still produce audio frames at a fixed rate. */
-  u32 total_audio_frames = (u32)((f64)frames * PPU_FRAME_CYCLES *
+  u32 total_audio_frames = (u32)((f64)s_frames * PPU_FRAME_CYCLES *
                                      AUDIO_FREQUENCY / CPU_CYCLES_PER_SECOND +
                                  1);
-  printf("frames = %u total_audio_frames = %u\n", frames, total_audio_frames);
-  f64 timeout_sec = get_time_sec() + delta_timeout_sec;
+  printf("frames = %u total_audio_frames = %u\n", s_frames, total_audio_frames);
+  f64 timeout_sec = get_time_sec() + s_delta_timeout_sec;
   Bool finish_at_next_frame = FALSE;
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
   u32 next_input_frame = 0;
@@ -146,17 +204,17 @@ int main(int argc, char** argv) {
       goto error;
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
-      if (output_ppm && animate) {
+      if (s_output_ppm && s_animate) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), ".%08d.ppm", animation_frame++);
-        char* result = replace_extension(output_ppm, buffer);
+        char* result = replace_extension(s_output_ppm, buffer);
         CHECK(SUCCESS(write_frame_ppm(e, result)));
         free(result);
       }
 
       /* TODO(binji): use timer rather than NEW_FRAME for timing button
        * presses? */
-      if (controller_input_file) {
+      if (s_controller_input_file) {
         if (e->state.ppu.frame >= next_input_frame) {
           e->state.JOYP.A = !!(next_input_frame_buttons & 0x01);
           e->state.JOYP.B = !!(next_input_frame_buttons & 0x02);
@@ -170,7 +228,7 @@ int main(int argc, char** argv) {
           /* Read the next input from the file. */
           char input_buffer[256];
           while (TRUE) {
-            fgets(input_buffer, sizeof(input_buffer), controller_input_file);
+            fgets(input_buffer, sizeof(input_buffer), s_controller_input_file);
             char* p = input_buffer;
             while (*p == ' ' || *p == '\t') {
               p++;
@@ -181,8 +239,8 @@ int main(int argc, char** argv) {
             u32 rel_frame = 0;
             if(sscanf(p, "%u %u", &rel_frame,
                       &next_input_frame_buttons) != 2) {
-              fclose(controller_input_file);
-              controller_input_file = NULL;
+              fclose(s_controller_input_file);
+              s_controller_input_file = NULL;
               next_input_frame = UINT32_MAX;
             } else {
               next_input_frame += rel_frame;
@@ -205,8 +263,8 @@ int main(int argc, char** argv) {
       }
     }
   }
-  if (output_ppm && !animate) {
-    CHECK(SUCCESS(write_frame_ppm(e, output_ppm)));
+  if (s_output_ppm && !s_animate) {
+    CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
   }
 
   return 0;

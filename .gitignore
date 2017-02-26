@@ -1,4 +1,6 @@
+/bin
 /out
+/test
 *.gb
 __pycache__
 *.pyc
