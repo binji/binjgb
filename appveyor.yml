@@ -1,4 +1,6 @@
 environment:
+  SDL2_ZIP: SDL2-devel-2.0.5-VC.zip
+  SDL2_ROOT_DIR: c:\sdl2
   matrix:
     - GENERATOR: Visual Studio 14 2015
       CONFIG: Release
@@ -8,5 +10,11 @@ environment:
       CONFIG: Release
 
 build_script:
-  - cmake . -DCMAKE_BUILD_TYPE=%CONFIG% -G %GENERATOR%
+  - cmake --version
+  - mkdir %SDL2_ROOT_DIR%
+  - cd %SDL2_ROOT_DIR%
+  - appveyor DownloadFile https://www.libsdl.org/release/%SDL2_ZIP%
+  - 7z x %SDL2_ZIP% > nul
+  - cd %APPVEYOR_BUILD_FOLDER%
+  - cmake .  -G "%GENERATOR%" -DSDL2_ROOT_DIR=%SDL2_ROOT_DIR% -DCMAKE_BUILD_TYPE=%CONFIG%
   - cmake --build . --config %CONFIG%
