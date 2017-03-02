@@ -1,0 +1,29 @@
+script:
+  - cmake . -DCMAKE_BUILD_TYPE=$CONFIG
+  - cmake --build . --config %CONFIG%
+
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+      sudo: required
+      compiler: gcc
+      env: CONFIG=Release
+    - os: linux
+      dist: trusty
+      sudo: required
+      compiler: clang
+      env: CONFIG=Debug
+    - os: linux
+      dist: trusty
+      sudo: required
+      compiler: clang
+      env: CONFIG=Release
+    - os: osx
+      compiler: clang
+      env: CONFIG=Release
+
+  allow_failures:
+    - os: osx
+
+  fast_finish: true
