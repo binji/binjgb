@@ -1,8 +1,7 @@
 environment:
-  SDL2_VERSION: 2.0.5
-  SDL2_ZIP: SDL2-devel-%SDL2_VERSION%-VC.zip
+  SDL2_ZIP: SDL2-devel-2.0.5-VC.zip
   SDL2_DOWNLOAD_DIR: c:\sdl2
-  SDL2_ROOT_DIR: %SDL2_DOWNLOAD_DIR%\SDL2-%SDL2_VERSION%
+  SDL2_ROOT_DIR: c:\sdl2\SDL2-2.0.5
   matrix:
     - GENERATOR: Visual Studio 14 2015
       CONFIG: Release
