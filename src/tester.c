@@ -227,8 +227,8 @@ int main(int argc, char** argv) {
 
           /* Read the next input from the file. */
           char input_buffer[256];
-          while (TRUE) {
-            fgets(input_buffer, sizeof(input_buffer), s_controller_input_file);
+          while (fgets(input_buffer, sizeof(input_buffer),
+                       s_controller_input_file)) {
             char* p = input_buffer;
             while (*p == ' ' || *p == '\t') {
               p++;
