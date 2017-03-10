@@ -22,13 +22,14 @@ endif ()
 
 if (NOT EMSCRIPTEN)
   find_package(SDL2)
+  find_package(OpenGL)
 
-  if (SDL2_FOUND)
+  if (SDL2_FOUND AND OPENGL_FOUND)
     add_executable(binjgb src/binjgb.c)
-    target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main)
+    target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
 
     add_executable(binjgb-debugger src/debugger.c src/options.c)
-    target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main)
+    target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)
 
     install(TARGETS binjgb DESTINATION bin)

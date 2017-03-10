@@ -56,6 +56,7 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef float f32;
 typedef double f64;
 typedef u16 Address;
 typedef u16 MaskedAddress;
@@ -3669,6 +3670,33 @@ Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
 #ifndef NO_SDL
 
 #include <SDL.h>
+#include <SDL_opengl.h>
+#include <SDL_opengl_glext.h>
+
+#define FOREACH_GLEXT_PROC(V)                                    \
+  V(glAttachShader, PFNGLATTACHSHADERPROC)                       \
+  V(glBindBuffer, PFNGLBINDBUFFERPROC)                           \
+  V(glBufferData, PFNGLBUFFERDATAPROC)                           \
+  V(glCompileShader, PFNGLCOMPILESHADERPROC)                     \
+  V(glCreateProgram, PFNGLCREATEPROGRAMPROC)                     \
+  V(glCreateShader, PFNGLCREATESHADERPROC)                       \
+  V(glEnableVertexAttribArray, PFNGLENABLEVERTEXATTRIBARRAYPROC) \
+  V(glGenBuffers, PFNGLGENBUFFERSPROC)                           \
+  V(glGetAttribLocation, PFNGLGETATTRIBLOCATIONPROC)             \
+  V(glGetProgramInfoLog, PFNGLGETPROGRAMINFOLOGPROC)             \
+  V(glGetProgramiv, PFNGLGETPROGRAMIVPROC)                       \
+  V(glGetShaderInfoLog, PFNGLGETSHADERINFOLOGPROC)               \
+  V(glGetShaderiv, PFNGLGETSHADERIVPROC)                         \
+  V(glGetUniformLocation, PFNGLGETUNIFORMLOCATIONPROC)           \
+  V(glLinkProgram, PFNGLLINKPROGRAMPROC)                         \
+  V(glShaderSource, PFNGLSHADERSOURCEPROC)                       \
+  V(glUniform1i, PFNGLUNIFORM1IPROC)                             \
+  V(glUseProgram, PFNGLUSEPROGRAMPROC)                           \
+  V(glVertexAttribPointer, PFNGLVERTEXATTRIBPOINTERPROC)
+
+#define V(name, type) type name;
+FOREACH_GLEXT_PROC(V)
+#undef V
 
 #define DESTROY_IF(ptr, destroy) \
   if (ptr) {                     \
@@ -3724,40 +3752,98 @@ typedef struct {
 typedef struct {
   const char* save_state_filename;
   SDL_Window* window;
-  SDL_Renderer* renderer;
-  SDL_Texture* texture;
+  SDL_GLContext gl_context;
   HostAudio audio;
   u32 last_sync_cycles;  /* GB CPU cycle count of last synchronization. */
   f64 last_sync_real_ms; /* Wall clock time of last synchronization. */
 } Host;
 
-static Result host_init_renderer(Host* host, Bool vsync) {
-  DESTROY_IF(host->renderer, SDL_DestroyRenderer);
-  host->renderer = SDL_CreateRenderer(host->window, -1,
-                                      vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
-  CHECK_MSG(host->renderer != NULL, "SDL_CreateRenderer failed.\n");
-  CHECK_MSG(SDL_RenderSetLogicalSize(host->renderer, SCREEN_WIDTH,
-                                     SCREEN_HEIGHT) == 0,
-            "SDL_SetRendererLogicalSize failed.\n");
-  DESTROY_IF(host->texture, SDL_DestroyTexture);
-  host->texture = SDL_CreateTexture(host->renderer, SDL_PIXELFORMAT_ARGB8888,
-                                    SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH,
-                                    SCREEN_HEIGHT);
-  CHECK_MSG(host->texture != NULL, "SDL_CreateTexture failed.\n");
-  return OK;
-error:
-  DESTROY_IF(host->texture, SDL_DestroyTexture);
-  DESTROY_IF(host->renderer, SDL_DestroyRenderer);
-  return ERROR;
-}
+#define CHECK_LOG(var, kind, status_enum, kind_str)      \
+  do {                                                   \
+    GLint status;                                        \
+    glGet##kind##iv(var, status_enum, &status);          \
+    if (!status) {                                       \
+      GLint length;                                      \
+      glGet##kind##iv(var, GL_INFO_LOG_LENGTH, &length); \
+      GLchar* log = malloc(length + 1); /* Leaks. */     \
+      glGet##kind##InfoLog(var, length, NULL, log);      \
+      PRINT_ERROR(kind_str " ERROR: %s\n", log);         \
+      goto error;                                        \
+    }                                                    \
+  } while (0)
+
+#define COMPILE_SHADER(var, type, source)           \
+  GLuint var = glCreateShader(type);                \
+  glShaderSource(var, 1, &(source), NULL);          \
+  glCompileShader(var);                             \
+  CHECK_LOG(var, Shader, GL_COMPILE_STATUS, #type); \
+  glAttachShader(program, var);
 
 static Result host_init_video(Host* host) {
+  static const f32 s_buffer[] = {
+    -1, -1,  0, SCREEN_HEIGHT / 256.0f,
+    +1, -1,  SCREEN_WIDTH / 256.0f, SCREEN_HEIGHT / 256.0f,
+    -1, +1,  0, 0,
+    +1, +1,  SCREEN_WIDTH / 256.0f, 0,
+  };
+
+  static const char* s_vertex_shader =
+      "attribute vec2 aPos;\n"
+      "attribute vec2 aTexCoord;\n"
+      "varying vec2 vTexCoord;\n"
+      "void main(void) {\n"
+      "  gl_Position = vec4(aPos, 0.0, 1.0);\n"
+      "  vTexCoord = aTexCoord;\n"
+      "}\n";
+
+  static const char* s_fragment_shader =
+      "varying vec2 vTexCoord;\n"
+      "uniform sampler2D uSampler;\n"
+      "void main(void) {\n"
+      "  gl_FragColor = texture2D(uSampler, vTexCoord);\n"
+      "}\n";
+
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
-  host->window =
-      SDL_CreateWindow("binjgb", SDL_WINDOWPOS_UNDEFINED,
-                       SDL_WINDOWPOS_UNDEFINED, RENDER_WIDTH, RENDER_HEIGHT, 0);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  host->window = SDL_CreateWindow(
+      "binjgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, RENDER_WIDTH,
+      RENDER_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
-  CHECK(SUCCESS(host_init_renderer(host, TRUE)));
+  host->gl_context = SDL_GL_CreateContext(host->window);
+  GLint major;
+  SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
+  CHECK_MSG(major >= 2, "Unable to create GL context at version 2.\n");
+#define V(name, type)                  \
+  name = SDL_GL_GetProcAddress(#name); \
+  CHECK_MSG(name != 0, "Unable to get GL function: " #name);
+  FOREACH_GLEXT_PROC(V)
+#undef V
+  GLuint buffer, texture;
+  glGenBuffers(1, &buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, buffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(s_buffer), s_buffer, GL_STATIC_DRAW);
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  GLuint program = glCreateProgram();
+  COMPILE_SHADER(vertex_shader, GL_VERTEX_SHADER, s_vertex_shader);
+  COMPILE_SHADER(fragment_shader, GL_FRAGMENT_SHADER, s_fragment_shader);
+  glLinkProgram(program);
+  CHECK_LOG(program, Program, GL_LINK_STATUS, "GL_PROGRAM");
+  glUseProgram(program);
+  GLint aPos = glGetAttribLocation(program, "aPos");
+  GLint aTexCoord = glGetAttribLocation(program, "aTexCoord");
+  glEnableVertexAttribArray(aPos);
+  glEnableVertexAttribArray(aTexCoord);
+  glVertexAttribPointer(aPos, 2, GL_FLOAT, GL_FALSE, sizeof(f32) * 4, 0);
+  glVertexAttribPointer(aTexCoord, 2, GL_FLOAT, GL_FALSE, sizeof(f32) * 4,
+                        (void*)(sizeof(f32) * 2));
+  glUniform1i(glGetUniformLocation(program, "uSampler"), 0);
   return OK;
 error:
   SDL_Quit();
@@ -3865,6 +3951,18 @@ static Bool host_poll_events(Emulator* e, Host* host) {
   EmulatorConfig old_config = e->config;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
+      case SDL_WINDOWEVENT:
+        switch (event.window.event) {
+          case SDL_WINDOWEVENT_RESIZED: {
+            f32 w = event.window.data1, h = event.window.data2;
+            f32 aspect = w / h, want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+            f32 new_w = aspect < want_aspect ? w : h * want_aspect;
+            f32 new_h = aspect < want_aspect ? w / want_aspect : h;
+            glViewport((w - new_w) * 0.5f, (h - new_h) * 0.5f, new_w, new_h);
+            break;
+          }
+        }
+        break;
       case SDL_KEYDOWN:
         switch (event.key.keysym.scancode) {
           case SDL_SCANCODE_1: e->config.disable_sound[CHANNEL1] ^= 1; break;
@@ -3896,7 +3994,7 @@ static Bool host_poll_events(Emulator* e, Host* host) {
     }
   }
   if (old_config.no_sync != e->config.no_sync) {
-    host_init_renderer(host, !e->config.no_sync);
+    SDL_GL_SetSwapInterval(e->config.no_sync ? 0 : 1);
   }
   if (old_config.fullscreen != e->config.fullscreen) {
     SDL_SetWindowFullscreen(
@@ -3906,20 +4004,13 @@ static Bool host_poll_events(Emulator* e, Host* host) {
 }
 
 static void host_render_video(Host* host, Emulator* e) {
-  SDL_RenderClear(host->renderer);
-  void* pixels;
-  int pitch;
-  if (SDL_LockTexture(host->texture, NULL, &pixels, &pitch) == 0) {
-    int y;
-    for (y = 0; y < SCREEN_HEIGHT; y++) {
-      memcpy((u8*)pixels + y * pitch, &e->frame_buffer[y * SCREEN_WIDTH],
-             SCREEN_WIDTH * sizeof(RGBA));
-    }
-    SDL_UnlockTexture(host->texture);
-    SDL_RenderCopy(host->renderer, host->texture, NULL, NULL);
-  }
+  glClearColor(0.1f, 0.1f, 0.1f, 1);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA,
+                  GL_UNSIGNED_BYTE, e->frame_buffer);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   HOOK(render_present_f, host_get_time_ms());
-  SDL_RenderPresent(host->renderer);
+  SDL_GL_SwapWindow(host->window);
 }
 
 static void host_synchronize(Host* host, Emulator* e) {
