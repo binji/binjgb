@@ -4,10 +4,12 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
-#include <stdint.h>
+#include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
+#include "binjgb.h"
 #include "options.h"
 
 #define AUDIO_FREQUENCY 44100
@@ -15,8 +17,6 @@
 #define AUDIO_FRAMES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
 #define DEFAULT_TIMEOUT_SEC 30
 #define DEFAULT_FRAMES 60
-
-#include "binjgb.c"
 
 static FILE* s_controller_input_file;
 static int s_frames = DEFAULT_FRAMES;
@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
 
   parse_options(argc, argv);
 
-  CHECK(SUCCESS(read_data_from_file(e, s_rom_filename)));
+  CHECK(SUCCESS(read_rom_data_from_file(e, s_rom_filename)));
   CHECK(SUCCESS(init_emulator(e)));
   CHECK(SUCCESS(init_audio_buffer(e, AUDIO_FREQUENCY, AUDIO_FRAMES)));
 

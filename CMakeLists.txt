@@ -38,7 +38,7 @@ if (NOT EMSCRIPTEN)
     endif ()
   endif ()
 
-  add_executable(binjgb-tester src/tester.c src/options.c)
+  add_executable(binjgb-tester src/tester.c src/binjgb.c src/options.c)
   target_compile_definitions(binjgb-tester PRIVATE NO_SDL)
   install(TARGETS binjgb-tester DESTINATION bin)
 else (EMSCRIPTEN)

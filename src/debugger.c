@@ -423,7 +423,7 @@ int main(int argc, char** argv) {
   int result = 1;
   parse_arguments(argc, argv);
   Emulator* e = &s_emulator;
-  CHECK(SUCCESS(read_data_from_file(e, s_rom_filename)));
+  CHECK(SUCCESS(read_rom_data_from_file(e, s_rom_filename)));
   CHECK(SUCCESS(host_init_video(&s_host)));
   CHECK(SUCCESS(host_init_audio(&s_host)));
   CHECK(SUCCESS(init_emulator(e)));

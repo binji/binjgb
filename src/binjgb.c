@@ -5,17 +5,16 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <assert.h>
-#include <inttypes.h>
 #include <string.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 
-#define SUCCESS(x) ((x) == OK)
+#include "binjgb.h"
 
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define DIV_CEIL(numer, denom) (((numer) + (denom) - 1) / (denom))
@@ -29,39 +28,7 @@
 #define HOOK(name, ...)
 #endif
 
-#define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
-#define CHECK_MSG(x, ...)                       \
-  if (!(x)) {                                   \
-    PRINT_ERROR("%s:%d: ", __FILE__, __LINE__); \
-    PRINT_ERROR(__VA_ARGS__);                   \
-    goto error;                                 \
-  }
-#define CHECK(x) do if (!(x)) { goto error; } while(0)
-#define ON_ERROR_RETURN \
-  error:                \
-  return ERROR
-#define ON_ERROR_CLOSE_FILE_AND_RETURN \
-  error:                               \
-  if (f) {                             \
-    fclose(f);                         \
-  }                                    \
-  return ERROR
-
-#define UNREACHABLE(...) PRINT_ERROR(__VA_ARGS__), exit(1)
 #define VALUE_WRAPPED(X, MAX) ((X) >= (MAX) ? ((X) -= (MAX), TRUE) : FALSE)
-
-typedef int8_t s8;
-typedef int32_t s32;
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef float f32;
-typedef double f64;
-typedef u16 Address;
-typedef u16 MaskedAddress;
-typedef u32 RGBA;
-typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 
 /* Configurable constants */
 #define RGBA_WHITE 0xffffffffu
@@ -70,7 +37,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define RGBA_BLACK 0xff000000u
 
 /* ROM header stuff */
-#define MAX_CART_INFOS 256 /* 8Mb / 32k */
 #define LOGO_START_ADDR 0x104
 #define LOGO_END_ADDR 0x133
 #define TITLE_START_ADDR 0x134
@@ -84,36 +50,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define GLOBAL_CHECKSUM_START_ADDR 0x14e
 #define HEADER_CHECKSUM_RANGE_START 0x134
 #define HEADER_CHECKSUM_RANGE_END 0x14c
-
-/* Sizes */
-#define MINIMUM_ROM_SIZE 32768
-#define VIDEO_RAM_SIZE 8192
-#define WORK_RAM_SIZE 8192
-#define EXT_RAM_MAX_SIZE 32768
-#define WAVE_RAM_SIZE 16
-#define HIGH_RAM_SIZE 127
-#define CART_INFO_SHIFT 15
-#define ROM_BANK_SHIFT 14
-#define EXT_RAM_BANK_SHIFT 13
-
-/* Cycle counts */
-#define MILLISECONDS_PER_SECOND 1000
-#define MICROSECONDS_PER_SECOND 1000000
-#define MICROSECONDS_PER_MILLISECOND \
-  (MICROSECONDS_PER_SECOND / MILLISECONDS_PER_SECOND)
-#define CPU_CYCLES_PER_SECOND 4194304
-#define CPU_MCYCLE 4
-#define APU_CYCLES_PER_SECOND (CPU_CYCLES_PER_SECOND / APU_CYCLES)
-#define APU_CYCLES 2 /* APU runs at 2MHz */
-#define PPU_MODE2_CYCLES 80
-#define PPU_MODE3_MIN_CYCLES 172
-#define PPU_LINE_CYCLES 456
-#define PPU_VBLANK_CYCLES (PPU_LINE_CYCLES * 10)
-#define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
-#define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
-#define DMA_CYCLES 648
-#define DMA_DELAY_CYCLES 8
-#define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
 
 /* Memory map */
 #define ADDR_MASK_4K 0x0fff
@@ -149,21 +85,28 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 
 #define OAM_TRANSFER_SIZE (OAM_END_ADDR - OAM_START_ADDR + 1)
 
+#define CART_INFO_SHIFT 15
+#define ROM_BANK_SHIFT 14
+#define EXT_RAM_BANK_SHIFT 13
+
+/* Cycle counts */
+#define CPU_MCYCLE 4
+#define APU_CYCLES 2
+#define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
+#define PPU_MODE2_CYCLES 80
+#define PPU_MODE3_MIN_CYCLES 172
+#define DMA_CYCLES 648
+#define DMA_DELAY_CYCLES 8
+#define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
+
 /* Video */
-#define SCREEN_WIDTH 160
-#define SCREEN_HEIGHT 144
-#define SCREEN_HEIGHT_WITH_VBLANK 154
 #define TILE_HEIGHT 8
 #define TILE_ROW_BYTES 2
 #define TILE_MAP_WIDTH 32
 #define WINDOW_MAX_X 166
 #define WINDOW_X_OFFSET 7
-#define OBJ_COUNT 40
-#define OBJ_PER_LINE_COUNT 10
-#define OBJ_PALETTE_COUNT 2
 #define OBJ_Y_OFFSET 16
 #define OBJ_X_OFFSET 8
-#define PALETTE_COLOR_COUNT 4
 
 /* Audio */
 #define NRX1_MAX_LENGTH 64
@@ -176,7 +119,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define ENVELOPE_MAX_PERIOD 8
 #define ENVELOPE_MAX_VOLUME 15
 #define DUTY_CYCLE_COUNT 8
-#define SOUND_OUTPUT_COUNT 2
 #define SOUND_OUTPUT_MAX_VOLUME 7
 #define AUDIO_BUFFER_FRAMES(e) \
   (((e)->audio_buffer.position - (e)->audio_buffer.data) / SOUND_OUTPUT_COUNT)
@@ -193,54 +135,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define FRAME_SEQUENCER_COUNT 8
 #define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
 #define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
-
-/* Addresses are relative to IO_START_ADDR (0xff00). */
-#define FOREACH_IO_REG(V)                     \
-  V(JOYP, 0x00) /* Joypad */                  \
-  V(SB, 0x01)   /* Serial transfer data */    \
-  V(SC, 0x02)   /* Serial transfer control */ \
-  V(DIV, 0x04)  /* Divider */                 \
-  V(TIMA, 0x05) /* Timer counter */           \
-  V(TMA, 0x06)  /* Timer modulo */            \
-  V(TAC, 0x07)  /* Timer control */           \
-  V(IF, 0x0f)   /* Interrupt request */       \
-  V(LCDC, 0x40) /* LCD control */             \
-  V(STAT, 0x41) /* LCD status */              \
-  V(SCY, 0x42)  /* Screen Y */                \
-  V(SCX, 0x43)  /* Screen X */                \
-  V(LY, 0x44)   /* Y Line */                  \
-  V(LYC, 0x45)  /* Y Line compare */          \
-  V(DMA, 0x46)  /* DMA transfer to OAM */     \
-  V(BGP, 0x47)  /* BG palette */              \
-  V(OBP0, 0x48) /* OBJ palette 0 */           \
-  V(OBP1, 0x49) /* OBJ palette 1 */           \
-  V(WY, 0x4a)   /* Window Y */                \
-  V(WX, 0x4b)   /* Window X */                \
-  V(IE, 0xff)   /* Interrupt enable */
-
-/* Addresses are relative to APU_START_ADDR (0xff10). */
-#define FOREACH_APU_REG(V)                                   \
-  V(NR10, 0x0)  /* Channel 1 sweep */                        \
-  V(NR11, 0x1)  /* Channel 1 sound length/wave pattern */    \
-  V(NR12, 0x2)  /* Channel 1 volume envelope */              \
-  V(NR13, 0x3)  /* Channel 1 frequency lo */                 \
-  V(NR14, 0x4)  /* Channel 1 frequency hi */                 \
-  V(NR21, 0x6)  /* Channel 2 sound length/wave pattern */    \
-  V(NR22, 0x7)  /* Channel 2 volume envelope */              \
-  V(NR23, 0x8)  /* Channel 2 frequency lo */                 \
-  V(NR24, 0x9)  /* Channel 2 frequency hi */                 \
-  V(NR30, 0xa)  /* Channel 3 DAC enabled */                  \
-  V(NR31, 0xb)  /* Channel 3 sound length */                 \
-  V(NR32, 0xc)  /* Channel 3 select output level */          \
-  V(NR33, 0xd)  /* Channel 3 frequency lo */                 \
-  V(NR34, 0xe)  /* Channel 3 frequency hi */                 \
-  V(NR41, 0x10) /* Channel 4 sound length */                 \
-  V(NR42, 0x11) /* Channel 4 volume envelope */              \
-  V(NR43, 0x12) /* Channel 4 polynomial counter */           \
-  V(NR44, 0x13) /* Channel 4 counter/consecutive; trigger */ \
-  V(NR50, 0x14) /* Sound volume */                           \
-  V(NR51, 0x15) /* Sound output select */                    \
-  V(NR52, 0x16) /* Sound enabled */
 
 #define INVALID_READ_BYTE 0xff
 
@@ -345,127 +239,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define OBJ_XFLIP(X) BIT(X, 5)
 #define OBJ_PALETTE(X) BIT(X, 4)
 
-#define FOREACH_RESULT(V) \
-  V(OK, 0)                \
-  V(ERROR, 1)
-
-#define FOREACH_BOOL(V) \
-  V(FALSE, 0)           \
-  V(TRUE, 1)
-
-#define FOREACH_CGB_FLAG(V)   \
-  V(CGB_FLAG_NONE, 0)         \
-  V(CGB_FLAG_SUPPORTED, 0x80) \
-  V(CGB_FLAG_REQUIRED, 0xC0)
-
-#define FOREACH_SGB_FLAG(V) \
-  V(SGB_FLAG_NONE, 0)       \
-  V(SGB_FLAG_SUPPORTED, 3)
-
-#define FOREACH_CART_TYPE(V)                                               \
-  V(CART_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY)                   \
-  V(CART_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY)                         \
-  V(CART_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY)                   \
-  V(CART_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY)         \
-  V(CART_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY)                         \
-  V(CART_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY)               \
-  V(CART_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY)                       \
-  V(CART_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY)                 \
-  V(CART_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY)       \
-  V(CART_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY)         \
-  V(CART_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY)  \
-  V(CART_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC4, 0x15, MBC4, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC4_RAM, 0x16, MBC4, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC4_RAM_BATTERY, 0x17, MBC4, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY)                 \
-  V(CART_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY)           \
-  V(CART_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM, WITH_BATTERY) \
-  V(CART_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)             \
-  V(CART_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)               \
-  V(CART_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
-
-#define FOREACH_ROM_SIZE(V) \
-  V(ROM_SIZE_32K, 0, 2)     \
-  V(ROM_SIZE_64K, 1, 4)     \
-  V(ROM_SIZE_128K, 2, 8)    \
-  V(ROM_SIZE_256K, 3, 16)   \
-  V(ROM_SIZE_512K, 4, 32)   \
-  V(ROM_SIZE_1M, 5, 64)     \
-  V(ROM_SIZE_2M, 6, 128)    \
-  V(ROM_SIZE_4M, 7, 256)    \
-  V(ROM_SIZE_8M, 8, 512)
-
-#define FOREACH_EXT_RAM_SIZE(V)   \
-  V(EXT_RAM_SIZE_NONE, 0, 0)      \
-  V(EXT_RAM_SIZE_2K, 1, 2048)     \
-  V(EXT_RAM_SIZE_8K, 2, 8192)     \
-  V(EXT_RAM_SIZE_32K, 3, 32768)   \
-  V(EXT_RAM_SIZE_128K, 4, 131072) \
-  V(EXT_RAM_SIZE_64K, 5, 65536)
-
-#define FOREACH_PPU_MODE(V) \
-  V(PPU_MODE_HBLANK, 0)     \
-  V(PPU_MODE_VBLANK, 1)     \
-  V(PPU_MODE_MODE2, 2)      \
-  V(PPU_MODE_MODE3, 3)
-
-#define FOREACH_PPU_STATE(V)          \
-  V(PPU_STATE_HBLANK, 0)              \
-  V(PPU_STATE_HBLANK_PLUS_4, 1)       \
-  V(PPU_STATE_VBLANK, 2)              \
-  V(PPU_STATE_VBLANK_PLUS_4, 3)       \
-  V(PPU_STATE_VBLANK_LY_0, 4)         \
-  V(PPU_STATE_VBLANK_LY_0_PLUS_4, 5)  \
-  V(PPU_STATE_VBLANK_LINE_Y_0, 6)     \
-  V(PPU_STATE_LCD_ON_MODE2, 7)        \
-  V(PPU_STATE_MODE2, 8)               \
-  V(PPU_STATE_MODE3_EARLY_TRIGGER, 9) \
-  V(PPU_STATE_MODE3, 10)              \
-  V(PPU_STATE_MODE3_COMMON, 11)
-
-#define DEFINE_ENUM(name, code, ...) name = code,
-#define DEFINE_IO_REG_ENUM(name, code, ...) IO_##name##_ADDR = code,
-#define DEFINE_APU_REG_ENUM(name, code, ...) APU_##name##_ADDR = code,
-#define DEFINE_STRING(name, code, ...) [code] = #name,
-
-static const char* get_enum_string(const char** strings, size_t string_count,
-                                   size_t value) {
-  const char* result = value < string_count ? strings[value] : "unknown";
-  return result ? result : "unknown";
-}
-
-#define DEFINE_NAMED_ENUM(NAME, Name, name, foreach, enum_def)               \
-  typedef enum { foreach (enum_def) NAME##_COUNT } Name;                     \
-  static Bool is_##name##_valid(Name value) { return value < NAME##_COUNT; } \
-  static const char* get_##name##_string(Name value) {                       \
-    static const char* s_strings[] = {foreach (DEFINE_STRING)};              \
-    return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value);         \
-  }
-
-DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(CART_TYPE, CartType, cart_type, FOREACH_CART_TYPE,
-                  DEFINE_ENUM)
-DEFINE_NAMED_ENUM(ROM_SIZE, RomSize, rom_size, FOREACH_ROM_SIZE, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(EXT_RAM_SIZE, ExtRamSize, ext_ram_size, FOREACH_EXT_RAM_SIZE,
-                  DEFINE_ENUM)
-DEFINE_NAMED_ENUM(IO_REG, IOReg, io_reg, FOREACH_IO_REG, DEFINE_IO_REG_ENUM)
-DEFINE_NAMED_ENUM(APU_REG, APUReg, apu_reg, FOREACH_APU_REG,
-                  DEFINE_APU_REG_ENUM)
-DEFINE_NAMED_ENUM(PPU_MODE, PPUMode, ppu_mode, FOREACH_PPU_MODE, DEFINE_ENUM)
-DEFINE_NAMED_ENUM(PPU_STATE, PPUState, ppu_state, FOREACH_PPU_STATE,
-                  DEFINE_ENUM)
-
 static u32 s_rom_bank_count[] = {
 #define V(name, code, bank_count) [code] = bank_count,
     FOREACH_ROM_SIZE(V)
@@ -482,35 +255,6 @@ static u32 s_ext_ram_byte_size[] = {
 #define EXT_RAM_BYTE_SIZE(e) s_ext_ram_byte_size[(e)->cart_info->ext_ram_size]
 #define EXT_RAM_BANK_MASK(e) (EXT_RAM_BYTE_SIZE(e) - 1)
 
-typedef enum {
-  MBC_TYPE_NO_MBC,
-  MBC_TYPE_MBC1,
-  MBC_TYPE_MBC2,
-  MBC_TYPE_MBC3,
-  MBC_TYPE_MBC4,
-  MBC_TYPE_MBC5,
-  MBC_TYPE_MMM01,
-  MBC_TYPE_TAMA5,
-  MBC_TYPE_HUC3,
-  MBC_TYPE_HUC1,
-} MBCType;
-
-typedef enum {
-  EXT_RAM_TYPE_NO_RAM,
-  EXT_RAM_TYPE_WITH_RAM,
-} ExtRamType;
-
-typedef enum {
-  BATTERY_TYPE_NO_BATTERY,
-  BATTERY_TYPE_WITH_BATTERY,
-} BatteryType;
-
-typedef struct {
-  MBCType mbc_type;
-  ExtRamType ext_ram_type;
-  BatteryType battery_type;
-} CartTypeInfo;
-
 static CartTypeInfo s_cart_type_info[] = {
 #define V(name, code, mbc, ram, battery) \
   [code] = {MBC_TYPE_##mbc, EXT_RAM_TYPE_##ram, BATTERY_TYPE_##battery},
@@ -518,501 +262,69 @@ static CartTypeInfo s_cart_type_info[] = {
 #undef V
 };
 
-typedef enum {
-  MEMORY_MAP_ROM0,
-  MEMORY_MAP_ROM1,
-  MEMORY_MAP_VRAM,
-  MEMORY_MAP_EXT_RAM,
-  MEMORY_MAP_WORK_RAM0,
-  MEMORY_MAP_WORK_RAM1,
-  MEMORY_MAP_OAM,
-  MEMORY_MAP_UNUSED,
-  MEMORY_MAP_IO,
-  MEMORY_MAP_APU,
-  MEMORY_MAP_WAVE_RAM,
-  MEMORY_MAP_HIGH_RAM,
-} MemoryMapType;
-
-typedef enum {
-  BANK_MODE_ROM = 0,
-  BANK_MODE_RAM = 1,
-} BankMode;
-
-typedef enum {
-  JOYPAD_SELECT_BOTH = 0,
-  JOYPAD_SELECT_BUTTONS = 1,
-  JOYPAD_SELECT_DPAD = 2,
-  JOYPAD_SELECT_NONE = 3,
-} JoypadSelect;
-
-typedef enum {
-  TIMER_CLOCK_4096_HZ = 0,
-  TIMER_CLOCK_262144_HZ = 1,
-  TIMER_CLOCK_65536_HZ = 2,
-  TIMER_CLOCK_16384_HZ = 3,
-} TimerClock;
 /* TIMA is incremented when the given bit of DIV_counter changes from 1 to 0. */
 static const u16 s_tima_mask[] = {1 << 9, 1 << 3, 1 << 5, 1 << 7};
-
-typedef enum {
-  TIMA_STATE_NORMAL,
-  TIMA_STATE_OVERFLOW,
-  TIMA_STATE_RESET,
-} TimaState;
-
-typedef enum {
-  SERIAL_CLOCK_EXTERNAL = 0,
-  SERIAL_CLOCK_INTERNAL = 1,
-} SerialClock;
-
-enum {
-  CHANNEL1,
-  CHANNEL2,
-  CHANNEL3,
-  CHANNEL4,
-  CHANNEL_COUNT,
-};
-
-enum {
-  SOUND1,
-  SOUND2,
-  SOUND3,
-  SOUND4,
-  VIN,
-  SOUND_COUNT,
-};
-
-typedef enum {
-  SWEEP_DIRECTION_ADDITION = 0,
-  SWEEP_DIRECTION_SUBTRACTION = 1,
-} SweepDirection;
-
-typedef enum {
-  ENVELOPE_ATTENUATE = 0,
-  ENVELOPE_AMPLIFY = 1,
-} EnvelopeDirection;
-
-typedef enum {
-  WAVE_DUTY_12_5 = 0,
-  WAVE_DUTY_25 = 1,
-  WAVE_DUTY_50 = 2,
-  WAVE_DUTY_75 = 3,
-  WAVE_DUTY_COUNT,
-} WaveDuty;
-
-typedef enum {
-  WAVE_VOLUME_MUTE = 0,
-  WAVE_VOLUME_100 = 1,
-  WAVE_VOLUME_50 = 2,
-  WAVE_VOLUME_25 = 3,
-  WAVE_VOLUME_COUNT,
-} WaveVolume;
 static u8 s_wave_volume_shift[WAVE_VOLUME_COUNT] = {4, 0, 1, 2};
-
-typedef enum {
-  LFSR_WIDTH_15 = 0, /* 15-bit LFSR */
-  LFSR_WIDTH_7 = 1,  /* 7-bit LFSR */
-} LFSRWidth;
-
-typedef enum {
-  TILE_MAP_9800_9BFF = 0,
-  TILE_MAP_9C00_9FFF = 1,
-} TileMapSelect;
-
-typedef enum {
-  TILE_DATA_8800_97FF = 0,
-  TILE_DATA_8000_8FFF = 1,
-} TileDataSelect;
-
-typedef enum {
-  OBJ_SIZE_8X8 = 0,
-  OBJ_SIZE_8X16 = 1,
-} ObjSize;
 static u8 s_obj_size_to_height[] = {[OBJ_SIZE_8X8] = 8, [OBJ_SIZE_8X16] = 16};
-
-typedef enum {
-  COLOR_WHITE = 0,
-  COLOR_LIGHT_GRAY = 1,
-  COLOR_DARK_GRAY = 2,
-  COLOR_BLACK = 3,
-} Color;
 static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
                                  [COLOR_LIGHT_GRAY] = RGBA_LIGHT_GRAY,
                                  [COLOR_DARK_GRAY] = RGBA_DARK_GRAY,
                                  [COLOR_BLACK] = RGBA_BLACK};
 
-typedef enum {
-  OBJ_PRIORITY_ABOVE_BG = 0,
-  OBJ_PRIORITY_BEHIND_BG = 1,
-} ObjPriority;
-
-typedef enum {
-  DMA_INACTIVE = 0,
-  DMA_TRIGGERED = 1,
-  DMA_ACTIVE = 2,
-} DMAState;
-
-typedef struct {
-  u8* data;
-  size_t size;
-} FileData;
-
-typedef struct {
-  u8 data[EXT_RAM_MAX_SIZE];
-  size_t size;
-  BatteryType battery_type;
-} ExtRam;
-
-typedef struct {
-  size_t offset; /* Offset of cart in FileData. */
-  u8* data;      /* == FileData.data + offset */
-  size_t size;
-  CgbFlag cgb_flag;
-  SgbFlag sgb_flag;
-  CartType cart_type;
-  RomSize rom_size;
-  ExtRamSize ext_ram_size;
-} CartInfo;
-
-struct Emulator;
-
-typedef struct {
-  u8 byte_2000_3fff;
-  u8 byte_4000_5fff;
-  BankMode bank_mode;
-} MBC1, HUC1, MMM01;
-
-typedef struct {
-  u8 byte_2000_2fff;
-  u8 byte_3000_3fff;
-} MBC5;
-
-typedef struct {
-  u8 (*read_ext_ram)(struct Emulator*, MaskedAddress);
-  void (*write_rom)(struct Emulator*, MaskedAddress, u8);
-  void (*write_ext_ram)(struct Emulator*, MaskedAddress, u8);
-} MemoryMap;
-
-typedef struct {
-  u32 rom1_base;
-  u32 ext_ram_base;
-  Bool ext_ram_enabled;
-  union {
-    MBC1 mbc1;
-    MMM01 mmm01;
-    HUC1 huc1;
-    MBC5 mbc5;
-  };
-} MemoryMapState;
-
-typedef struct {
-  MemoryMapType type;
-  MaskedAddress addr;
-} MemoryTypeAddressPair;
-
-/* TODO(binji): endianness */
-#define REGISTER_PAIR(X, Y) \
-  union {                   \
-    struct { u8 Y; u8 X; }; \
-    u16 X##Y;               \
-  }
-
-typedef struct {
-  u8 A;
-  REGISTER_PAIR(B, C);
-  REGISTER_PAIR(D, E);
-  REGISTER_PAIR(H, L);
-  u16 SP;
-  u16 PC;
-  struct { Bool Z, N, H, C; } F;
-} Registers;
-
-typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
-
-typedef struct {
-  u8 y;
-  u8 x;
-  u8 tile;
-  u8 byte3;
-  ObjPriority priority;
-  Bool yflip;
-  Bool xflip;
-  u8 palette;
-} Obj;
-
-typedef struct {
-  Bool down, up, left, right;
-  Bool start, select, B, A;
-  JoypadSelect joypad_select;
-  u8 last_p10_p13;
-} Joypad;
-
-typedef struct {
-  Bool IME;      /* Interrupt Master Enable */
-  u8 IE;         /* Interrupt Enable */
-  u8 IF;         /* Interrupt Request, delayed by 1 M-cycle for some IRQs. */
-  u8 new_IF;     /* The new value of IF, updated in 1 M-cycle. */
-  Bool enable;   /* Set after EI instruction. This delays updating IME. */
-  Bool halt;     /* Halted, waiting for an interrupt. */
-  Bool halt_DI;  /* Halted w/ disabled interrupts. */
-  Bool halt_bug; /* Halt bug occurred. */
-  Bool stop;     /* Stopped, waiting for an interrupt. */
-} Interrupt;
-
-typedef struct {
-  u8 TIMA;                 /* Incremented at rate defined by clock_select */
-  u8 TMA;                  /* When TIMA overflows, it is set to this value */
-  TimerClock clock_select; /* Select the rate of TIMA */
-  u16 DIV_counter;         /* Internal clock counter, upper 8 bits are DIV. */
-  TimaState TIMA_state;    /* Used to implement TIMA overflow delay. */
-  Bool on;
-} Timer;
-
-typedef struct {
-  Bool transferring;
-  SerialClock clock;
-  u8 SB; /* Serial transfer data. */
-  u8 transferred_bits;
-  u32 cycles;
-} Serial;
-
-typedef struct {
-  u8 period;
-  SweepDirection direction;
-  u8 shift;
-  u16 frequency;
-  u8 timer; /* 0..period */
-  Bool enabled;
-  Bool calculated_subtract;
-} Sweep;
-
-typedef struct {
-  u8 initial_volume;
-  EnvelopeDirection direction;
-  u8 period;
-  u8 volume;      /* 0..15 */
-  u32 timer;      /* 0..period */
-  Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
-} Envelope;
-
-/* Channel 1 and 2 */
-typedef struct {
-  WaveDuty duty;
-  u8 sample;   /* Last sample generated, 0..1 */
-  u32 period;  /* Calculated from the frequency. */
-  u8 position; /* Position in the duty cycle, 0..7 */
-  u32 cycles;  /* 0..period */
-} SquareWave;
-
-/* Channel 3 */
-typedef struct {
-  WaveVolume volume;
-  u8 volume_shift;
-  u8 ram[WAVE_RAM_SIZE];
-  u32 sample_time; /* Time (in cycles) the sample was read. */
-  u8 sample_data;  /* Last sample generated, 0..1 */
-  u32 period;      /* Calculated from the frequency. */
-  u8 position;     /* 0..31 */
-  u32 cycles;      /* 0..period */
-  Bool playing;    /* TRUE if the channel has been triggered but the DAC not
-                           disabled. */
-} Wave;
-
-/* Channel 4 */
-typedef struct {
-  u8 clock_shift;
-  LFSRWidth lfsr_width;
-  u8 divisor; /* 0..NOISE_DIVISOR_COUNT */
-  u8 sample;  /* Last sample generated, 0..1 */
-  u16 lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
-  u32 period; /* Calculated from the clock_shift and divisor. */
-  u32 cycles; /* 0..period */
-} Noise;
-
-typedef struct {
-  SquareWave square_wave; /* Channel 1, 2 */
-  Envelope envelope;      /* Channel 1, 2, 4 */
-  u16 frequency;          /* Channel 1, 2, 3 */
-  u16 length;             /* All channels */
-  Bool length_enabled;    /* All channels */
-  Bool dac_enabled;
-  Bool status;     /* Status bit for NR52 */
-  u32 accumulator; /* Accumulates samples for resampling. */
-} Channel;
-
-typedef struct {
-  u32 frequency;    /* Sample frequency, as N samples per second */
-  u32 freq_counter; /* Used for resampling; [0..APU_CYCLES_PER_SECOND). */
-  u32 divisor;
-  u8* data; /* Unsigned 8-bit 2-channel samples @ |frequency| */
-  u8* end;
-  u8* position;
-} AudioBuffer;
-
-typedef struct {
-  u8 so_volume[SOUND_OUTPUT_COUNT];
-  Bool so_output[SOUND_COUNT][SOUND_OUTPUT_COUNT];
-  Bool enabled;
-  Sweep sweep;
-  Wave wave;
-  Noise noise;
-  Channel channel[CHANNEL_COUNT];
-  u8 frame;         /* 0..FRAME_SEQUENCER_COUNT */
-  u32 cycles;       /* Raw cycle counter */
-  Bool initialized;
-} APU;
-
-typedef struct {
-  Bool display;
-  TileMapSelect window_tile_map_select;
-  Bool window_display;
-  TileDataSelect bg_tile_data_select;
-  TileMapSelect bg_tile_map_select;
-  ObjSize obj_size;
-  Bool obj_display;
-  Bool bg_display;
-} LCDControl;
-
-typedef struct {
-  Bool irq;
-  Bool trigger;
-} LCDStatusInterrupt;
-
-typedef struct {
-  LCDStatusInterrupt y_compare;
-  LCDStatusInterrupt mode2;
-  LCDStatusInterrupt vblank;
-  LCDStatusInterrupt hblank;
-  Bool LY_eq_LYC;       /* TRUE if LY=LYC, delayed by 1 M-cycle. */
-  PPUMode mode;         /* The current PPU mode. */
-  Bool IF;              /* Internal interrupt flag for STAT interrupts. */
-  PPUMode trigger_mode; /* This mode is used for checking STAT IRQ triggers. */
-  Bool new_LY_eq_LYC;   /* The new value for LY_eq_LYC, updated in 1 M-cycle. */
-} LCDStatus;
-
-typedef struct {
-  LCDControl LCDC;                /* LCD control */
-  LCDStatus STAT;                 /* LCD status */
-  u8 SCY;                         /* Screen Y */
-  u8 SCX;                         /* Screen X */
-  u8 LY;                          /* Line Y */
-  u8 LYC;                         /* Line Y Compare */
-  u8 WY;                          /* Window Y */
-  u8 WX;                          /* Window X */
-  Palette BGP;                    /* BG Palette */
-  Palette OBP[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
-  PPUState state;
-  u32 state_cycles;
-  u32 line_cycles;                /* Counts cycles until line_y changes. */
-  u32 frame;                      /* The currently rendering frame. */
-  u8 last_LY;                     /* LY from the previous M-cycle. */
-  u8 render_x;                    /* Currently rendering X coordinate. */
-  u8 line_y;   /* The currently rendering line. Can be different than LY. */
-  u8 win_y;    /* The window Y is only incremented when rendered. */
-  u8 frame_WY; /* WY is cached per frame. */
-  Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
-  u8 line_obj_count;     /* Number of sprites to draw on this line. */
-  u8 oam_index;          /* Current sprite index in mode 2. */
-  Bool rendering_window; /* TRUE when this line is rendering the window. */
-  Bool new_frame_edge;
-  u8 display_delay_frames; /* Wait this many frames before displaying. */
-} PPU;
-
-typedef struct {
-  DMAState state;
-  MemoryTypeAddressPair source;
-  u32 cycles;
-} DMA;
-
-typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
-
-typedef struct {
-  Bool disable_sound[CHANNEL_COUNT];
-  Bool disable_bg;
-  Bool disable_window;
-  Bool disable_obj;
-  Bool no_sync;
-  Bool paused;
-  Bool step;
-  Bool fullscreen;
-  Bool allow_simulataneous_dpad_opposites;
-} EmulatorConfig;
-
-typedef struct {
-  u8 cart_info_index;
-  MemoryMapState memory_map_state;
-  Registers reg;
-  u8 vram[VIDEO_RAM_SIZE];
-  ExtRam ext_ram;
-  u8 wram[WORK_RAM_SIZE];
-  Interrupt interrupt;
-  Obj oam[OBJ_COUNT];
-  Joypad JOYP;
-  Serial serial;
-  Timer timer;
-  APU apu;
-  PPU ppu;
-  DMA dma;
-  u8 hram[HIGH_RAM_SIZE];
-  u32 cycles;
-  Bool is_cgb;
-} EmulatorState;
-
-typedef struct JoypadCallback {
-  void (*func)(struct Emulator* e, void* user_data);
-  void* user_data;
-} JoypadCallback;
-
-typedef u32 EmulatorEvent;
-enum {
-  EMULATOR_EVENT_NEW_FRAME = 0x1,
-  EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
-};
-
-typedef struct Emulator {
-  EmulatorConfig config;
-  FileData file_data;
-  CartInfo cart_infos[MAX_CART_INFOS];
-  u32 cart_info_count;
-  CartInfo* cart_info; /* Cached for convenience. */
-  MemoryMap memory_map;
-  EmulatorState state;
-  FrameBuffer frame_buffer;
-  AudioBuffer audio_buffer;
-  JoypadCallback joypad_callback;
-  EmulatorEvent last_event;
-} Emulator;
-
-static void write_apu(Emulator*, MaskedAddress, u8);
-static void write_io(Emulator*, MaskedAddress, u8);
 static Result init_memory_map(Emulator*);
-static void log_cart_info(CartInfo*);
+static void apu_synchronize(Emulator* e);
 
-static Result get_file_size(FILE* f, long* out_size) {
-  CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
-  long size = ftell(f);
-  CHECK_MSG(size >= 0, "ftell failed.");
-  CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
-  *out_size = size;
-  return OK;
-  ON_ERROR_RETURN;
+static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
+  MemoryTypeAddressPair result;
+  result.type = type;
+  result.addr = addr;
+  return result;
 }
 
-static Result read_data_from_file(Emulator* e, const char* filename) {
-  FILE* f = fopen(filename, "rb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  long size;
-  CHECK(SUCCESS(get_file_size(f, &size)));
-  CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
-            MINIMUM_ROM_SIZE);
-  u8* data = malloc(size); /* Leaks. */
-  CHECK_MSG(data, "allocation failed.\n");
-  CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
-  fclose(f);
-  e->file_data.data = data;
-  e->file_data.size = size;
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
+static MemoryTypeAddressPair map_address(Address addr) {
+  switch (addr >> 12) {
+    case 0x0: case 0x1: case 0x2: case 0x3:
+      return make_pair(MEMORY_MAP_ROM0, addr & ADDR_MASK_16K);
+    case 0x4: case 0x5: case 0x6: case 0x7:
+      return make_pair(MEMORY_MAP_ROM1, addr & ADDR_MASK_16K);
+    case 0x8: case 0x9:
+      return make_pair(MEMORY_MAP_VRAM, addr & ADDR_MASK_8K);
+    case 0xA: case 0xB:
+      return make_pair(MEMORY_MAP_EXT_RAM, addr & ADDR_MASK_8K);
+    case 0xC: case 0xE: /* mirror of 0xc000..0xcfff */
+      return make_pair(MEMORY_MAP_WORK_RAM0, addr & ADDR_MASK_4K);
+    case 0xD:
+      return make_pair(MEMORY_MAP_WORK_RAM1, addr & ADDR_MASK_4K);
+    default: case 0xF:
+      switch ((addr >> 8) & 0xf) {
+        default: /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
+          return make_pair(MEMORY_MAP_WORK_RAM1, addr & ADDR_MASK_4K);
+        case 0xe:
+          if (addr <= OAM_END_ADDR) { /* 0xfe00 - 0xfe9f */
+            return make_pair(MEMORY_MAP_OAM, addr - OAM_START_ADDR);
+          } else { /* 0xfea0 - 0xfeff */
+            return make_pair(MEMORY_MAP_UNUSED, addr);
+          }
+          break;
+        case 0xf:
+          switch ((addr >> 4) & 0xf) {
+            case 0: case 4: case 5: case 6: case 7:
+              /* 0xff00 - 0xff0f, 0xff40 - 0xff7f */
+              return make_pair(MEMORY_MAP_IO, addr - IO_START_ADDR);
+            case 1: case 2: /* 0xff10 - 0xff2f */
+              return make_pair(MEMORY_MAP_APU, addr - APU_START_ADDR);
+            case 3: /* 0xff30 - 0xff3f */
+              return make_pair(MEMORY_MAP_WAVE_RAM, addr - WAVE_RAM_START_ADDR);
+            case 0xf:
+              if (addr == IE_ADDR) {
+                return make_pair(MEMORY_MAP_IO, addr - IO_START_ADDR);
+              }
+              /* fallthrough */
+            default: /* 0xff80 - 0xfffe */
+              return make_pair(MEMORY_MAP_HIGH_RAM, addr - HIGH_RAM_START_ADDR);
+          }
+      }
+  }
 }
 
 static void set_cart_info(Emulator* e, u8 index) {
@@ -1072,32 +384,6 @@ static Result get_cart_infos(Emulator* e) {
   set_cart_info(e, 0);
   return OK;
   ON_ERROR_RETURN;
-}
-
-static Result validate_header_checksum(CartInfo* cart_info) {
-  u8 checksum = 0;
-  size_t i = 0;
-  for (i = HEADER_CHECKSUM_RANGE_START; i <= HEADER_CHECKSUM_RANGE_END; ++i) {
-    checksum = checksum - cart_info->data[i] - 1;
-  }
-  return checksum == cart_info->data[HEADER_CHECKSUM_ADDR] ? OK : ERROR;
-}
-
-static void log_cart_info(CartInfo* cart_info) {
-  char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
-  char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
-  int title_length =
-      (int)(title_end ? title_end - title_start : TITLE_MAX_LENGTH);
-  printf("title: \"%.*s\"\n", title_length, title_start);
-  printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
-  printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
-  printf("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
-  printf("rom size: %s\n", get_rom_size_string(cart_info->rom_size));
-  printf("ext ram size: %s\n",
-         get_ext_ram_size_string(cart_info->ext_ram_size));
-  printf("header checksum: 0x%02x [%s]\n",
-         cart_info->data[HEADER_CHECKSUM_ADDR],
-         get_result_string(validate_header_checksum(cart_info)));
 }
 
 static void dummy_write(Emulator* e, MaskedAddress addr, u8 value) {}
@@ -1376,118 +662,6 @@ static Result init_memory_map(Emulator* e) {
   return OK;
 }
 
-static u16 get_af_reg(Registers* reg) {
-  return (reg->A << 8) | PACK(reg->F.Z, CPU_FLAG_Z) |
-         PACK(reg->F.N, CPU_FLAG_N) | PACK(reg->F.H, CPU_FLAG_H) |
-         PACK(reg->F.C, CPU_FLAG_C);
-}
-
-static void set_af_reg(Registers* reg, u16 af) {
-  reg->A = af >> 8;
-  reg->F.Z = UNPACK(af, CPU_FLAG_Z);
-  reg->F.N = UNPACK(af, CPU_FLAG_N);
-  reg->F.H = UNPACK(af, CPU_FLAG_H);
-  reg->F.C = UNPACK(af, CPU_FLAG_C);
-}
-
-Result init_emulator(Emulator* e) {
-  static u8 s_initial_wave_ram[WAVE_RAM_SIZE] = {
-      0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
-      0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
-  };
-  CHECK(SUCCESS(get_cart_infos(e)));
-  log_cart_info(e->cart_info);
-  e->state.memory_map_state.rom1_base = 1 << ROM_BANK_SHIFT;
-  set_af_reg(&e->state.reg, 0x01b0);
-  e->state.reg.BC = 0x0013;
-  e->state.reg.DE = 0x00d8;
-  e->state.reg.HL = 0x014d;
-  e->state.reg.SP = 0xfffe;
-  e->state.reg.PC = 0x0100;
-  e->state.interrupt.IME = FALSE;
-  e->state.timer.DIV_counter = 0xAC00;
-  /* Enable apu first, so subsequent writes succeed. */
-  write_apu(e, APU_NR52_ADDR, 0xf1);
-  write_apu(e, APU_NR11_ADDR, 0x80);
-  write_apu(e, APU_NR12_ADDR, 0xf3);
-  write_apu(e, APU_NR14_ADDR, 0x80);
-  write_apu(e, APU_NR50_ADDR, 0x77);
-  write_apu(e, APU_NR51_ADDR, 0xf3);
-  e->state.apu.initialized = TRUE;
-  memcpy(&e->state.apu.wave.ram, s_initial_wave_ram, WAVE_RAM_SIZE);
-  /* Turn down the volume on channel1, it is playing by default (because of the
-   * GB startup sound), but we don't want to hear it when starting the
-   * emulator. */
-  e->state.apu.channel[CHANNEL1].envelope.volume = 0;
-  write_io(e, IO_LCDC_ADDR, 0x91);
-  write_io(e, IO_SCY_ADDR, 0x00);
-  write_io(e, IO_SCX_ADDR, 0x00);
-  write_io(e, IO_LYC_ADDR, 0x00);
-  write_io(e, IO_BGP_ADDR, 0xfc);
-  write_io(e, IO_OBP0_ADDR, 0xff);
-  write_io(e, IO_OBP1_ADDR, 0xff);
-  write_io(e, IO_IF_ADDR, 0x1);
-  write_io(e, IO_IE_ADDR, 0x0);
-
-  /* Start the cycle counter near 2**32 to catch overflow bugs. */
-  e->state.apu.cycles = e->state.cycles = (u32)-CPU_CYCLES_PER_SECOND;
-  return OK;
-  ON_ERROR_RETURN;
-}
-
-static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
-  MemoryTypeAddressPair result;
-  result.type = type;
-  result.addr = addr;
-  return result;
-}
-
-static MemoryTypeAddressPair map_address(Address addr) {
-  switch (addr >> 12) {
-    case 0x0: case 0x1: case 0x2: case 0x3:
-      return make_pair(MEMORY_MAP_ROM0, addr & ADDR_MASK_16K);
-    case 0x4: case 0x5: case 0x6: case 0x7:
-      return make_pair(MEMORY_MAP_ROM1, addr & ADDR_MASK_16K);
-    case 0x8: case 0x9:
-      return make_pair(MEMORY_MAP_VRAM, addr & ADDR_MASK_8K);
-    case 0xA: case 0xB:
-      return make_pair(MEMORY_MAP_EXT_RAM, addr & ADDR_MASK_8K);
-    case 0xC: case 0xE: /* mirror of 0xc000..0xcfff */
-      return make_pair(MEMORY_MAP_WORK_RAM0, addr & ADDR_MASK_4K);
-    case 0xD:
-      return make_pair(MEMORY_MAP_WORK_RAM1, addr & ADDR_MASK_4K);
-    default: case 0xF:
-      switch ((addr >> 8) & 0xf) {
-        default: /* 0xf000 - 0xfdff: mirror of 0xd000-0xddff */
-          return make_pair(MEMORY_MAP_WORK_RAM1, addr & ADDR_MASK_4K);
-        case 0xe:
-          if (addr <= OAM_END_ADDR) { /* 0xfe00 - 0xfe9f */
-            return make_pair(MEMORY_MAP_OAM, addr - OAM_START_ADDR);
-          } else { /* 0xfea0 - 0xfeff */
-            return make_pair(MEMORY_MAP_UNUSED, addr);
-          }
-          break;
-        case 0xf:
-          switch ((addr >> 4) & 0xf) {
-            case 0: case 4: case 5: case 6: case 7:
-              /* 0xff00 - 0xff0f, 0xff40 - 0xff7f */
-              return make_pair(MEMORY_MAP_IO, addr - IO_START_ADDR);
-            case 1: case 2: /* 0xff10 - 0xff2f */
-              return make_pair(MEMORY_MAP_APU, addr - APU_START_ADDR);
-            case 3: /* 0xff30 - 0xff3f */
-              return make_pair(MEMORY_MAP_WAVE_RAM, addr - WAVE_RAM_START_ADDR);
-            case 0xf:
-              if (addr == IE_ADDR) {
-                return make_pair(MEMORY_MAP_IO, addr - IO_START_ADDR);
-              }
-              /* fallthrough */
-            default: /* 0xff80 - 0xfffe */
-              return make_pair(MEMORY_MAP_HIGH_RAM, addr - HIGH_RAM_START_ADDR);
-          }
-      }
-  }
-}
-
 static u8 read_vram(Emulator* e, MaskedAddress addr) {
   if (e->state.ppu.STAT.mode == PPU_MODE_MODE3) {
     HOOK(read_vram_in_use_a, addr);
@@ -1647,8 +821,6 @@ static u8 read_nrx4_reg(Channel* channel) {
   return PACK(channel->length_enabled, NRX4_LENGTH_ENABLED);
 }
 
-static void apu_synchronize(Emulator* e);
-
 static u8 read_apu(Emulator* e, MaskedAddress addr) {
   apu_synchronize(e);
   APU* apu = &e->state.apu;
@@ -1773,7 +945,7 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   }
 }
 
-static u8 read_u8(Emulator* e, Address addr) {
+u8 read_u8(Emulator* e, Address addr) {
   MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     HOOK(read_during_dma_a, addr);
@@ -2419,7 +1591,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 }
 
-static void write_u8(Emulator* e, Address addr, u8 value) {
+void write_u8(Emulator* e, Address addr, u8 value) {
   MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     HOOK(write_during_dma_ab, addr, value);
@@ -2462,31 +1634,6 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
     case MEMORY_MAP_HIGH_RAM:
       e->state.hram[pair.addr] = value;
       break;
-  }
-}
-
-static void dma_mcycle(Emulator* e) {
-  if (e->state.dma.state == DMA_INACTIVE) {
-    return;
-  }
-  if (e->state.dma.cycles < DMA_DELAY_CYCLES) {
-    e->state.dma.cycles += CPU_MCYCLE;
-    if (e->state.dma.cycles >= DMA_DELAY_CYCLES) {
-      e->state.dma.cycles = DMA_DELAY_CYCLES;
-      e->state.dma.state = DMA_ACTIVE;
-    }
-    return;
-  }
-
-  u8 addr_offset = (e->state.dma.cycles - DMA_DELAY_CYCLES) >> 2;
-  assert(addr_offset < OAM_TRANSFER_SIZE);
-  MemoryTypeAddressPair pair = e->state.dma.source;
-  pair.addr += addr_offset;
-  u8 value = read_u8_no_dma_check(e, pair);
-  write_oam_no_mode_check(e, addr_offset, value);
-  e->state.dma.cycles += CPU_MCYCLE;
-  if (VALUE_WRAPPED(e->state.dma.cycles, DMA_CYCLES)) {
-    e->state.dma.state = DMA_INACTIVE;
   }
 }
 
@@ -2811,18 +1958,6 @@ static void ppu_mcycle(Emulator* e) {
   }
 }
 
-static void timer_mcycle(Emulator* e) {
-  if (e->state.timer.on) {
-    if (e->state.timer.TIMA_state == TIMA_STATE_OVERFLOW) {
-      e->state.timer.TIMA_state = TIMA_STATE_RESET;
-      e->state.timer.TIMA = e->state.timer.TMA;
-    } else if (e->state.timer.TIMA_state == TIMA_STATE_RESET) {
-      e->state.timer.TIMA_state = TIMA_STATE_NORMAL;
-    }
-  }
-  write_div_counter(e, e->state.timer.DIV_counter + CPU_MCYCLE);
-}
-
 static void update_sweep(Emulator* e) {
   Channel* channel = &e->state.apu.channel[CHANNEL1];
   Sweep* sweep = &e->state.apu.sweep;
@@ -3058,6 +2193,43 @@ static void apu_synchronize(Emulator* e) {
   }
 }
 
+static void dma_mcycle(Emulator* e) {
+  if (e->state.dma.state == DMA_INACTIVE) {
+    return;
+  }
+  if (e->state.dma.cycles < DMA_DELAY_CYCLES) {
+    e->state.dma.cycles += CPU_MCYCLE;
+    if (e->state.dma.cycles >= DMA_DELAY_CYCLES) {
+      e->state.dma.cycles = DMA_DELAY_CYCLES;
+      e->state.dma.state = DMA_ACTIVE;
+    }
+    return;
+  }
+
+  u8 addr_offset = (e->state.dma.cycles - DMA_DELAY_CYCLES) >> 2;
+  assert(addr_offset < OAM_TRANSFER_SIZE);
+  MemoryTypeAddressPair pair = e->state.dma.source;
+  pair.addr += addr_offset;
+  u8 value = read_u8_no_dma_check(e, pair);
+  write_oam_no_mode_check(e, addr_offset, value);
+  e->state.dma.cycles += CPU_MCYCLE;
+  if (VALUE_WRAPPED(e->state.dma.cycles, DMA_CYCLES)) {
+    e->state.dma.state = DMA_INACTIVE;
+  }
+}
+
+static void timer_mcycle(Emulator* e) {
+  if (e->state.timer.on) {
+    if (e->state.timer.TIMA_state == TIMA_STATE_OVERFLOW) {
+      e->state.timer.TIMA_state = TIMA_STATE_RESET;
+      e->state.timer.TIMA = e->state.timer.TMA;
+    } else if (e->state.timer.TIMA_state == TIMA_STATE_RESET) {
+      e->state.timer.TIMA_state = TIMA_STATE_NORMAL;
+    }
+  }
+  write_div_counter(e, e->state.timer.DIV_counter + CPU_MCYCLE);
+}
+
 static void serial_mcycle(Emulator* e) {
   if (!e->state.serial.transferring) {
     return;
@@ -3106,6 +2278,20 @@ static void write_u16_cy(Emulator* e, Address addr, u16 value) {
   write_u8_cy(e, addr, (u8)value);
 }
 
+static u16 get_af_reg(Registers* reg) {
+  return (reg->A << 8) | PACK(reg->F.Z, CPU_FLAG_Z) |
+         PACK(reg->F.N, CPU_FLAG_N) | PACK(reg->F.H, CPU_FLAG_H) |
+         PACK(reg->F.C, CPU_FLAG_C);
+}
+
+static void set_af_reg(Registers* reg, u16 af) {
+  reg->A = af >> 8;
+  reg->F.Z = UNPACK(af, CPU_FLAG_Z);
+  reg->F.N = UNPACK(af, CPU_FLAG_N);
+  reg->F.H = UNPACK(af, CPU_FLAG_H);
+  reg->F.C = UNPACK(af, CPU_FLAG_C);
+}
+
 static u8 s_opcode_bytes[] = {
     /*       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
     /* 00 */ 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
@@ -3125,8 +2311,6 @@ static u8 s_opcode_bytes[] = {
     /* e0 */ 2, 1, 1, 0, 0, 1, 2, 1, 2, 1, 3, 0, 0, 0, 2, 1,
     /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
 };
-
-#define INVALID UNREACHABLE("invalid opcode 0x%02x!\n", opcode);
 
 #define REG(R) e->state.reg.R
 #define INTR(m) e->state.interrupt.m
@@ -3544,7 +2728,7 @@ static void execute_instruction(Emulator* e) {
     case 0xfb: EI; break;
     case 0xfe: CP_N; break;
     case 0xff: CALL(0x38); break;
-    default: INVALID; break;
+    default: UNREACHABLE("invalid opcode 0x%02x!\n", opcode); break;
   }
   e->state.reg.PC = new_pc;
 }
@@ -3614,7 +2798,7 @@ static void handle_interrupts(Emulator* e) {
   e->state.interrupt.halt = e->state.interrupt.stop = FALSE;
 }
 
-static void step_emulator(Emulator* e) {
+void step_emulator(Emulator* e) {
   HOOK0(print_emulator_info);
   execute_instruction(e);
   handle_interrupts(e);
@@ -3651,6 +2835,32 @@ EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames) {
   return e->last_event = event;
 }
 
+static Result validate_header_checksum(CartInfo* cart_info) {
+  u8 checksum = 0;
+  size_t i = 0;
+  for (i = HEADER_CHECKSUM_RANGE_START; i <= HEADER_CHECKSUM_RANGE_END; ++i) {
+    checksum = checksum - cart_info->data[i] - 1;
+  }
+  return checksum == cart_info->data[HEADER_CHECKSUM_ADDR] ? OK : ERROR;
+}
+
+static void log_cart_info(CartInfo* cart_info) {
+  char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
+  char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
+  int title_length =
+      (int)(title_end ? title_end - title_start : TITLE_MAX_LENGTH);
+  printf("title: \"%.*s\"\n", title_length, title_start);
+  printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
+  printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
+  printf("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
+  printf("rom size: %s\n", get_rom_size_string(cart_info->rom_size));
+  printf("ext ram size: %s\n",
+         get_ext_ram_size_string(cart_info->ext_ram_size));
+  printf("header checksum: 0x%02x [%s]\n",
+         cart_info->data[HEADER_CHECKSUM_ADDR],
+         get_result_string(validate_header_checksum(cart_info)));
+}
+
 Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   AudioBuffer* audio_buffer = &e->audio_buffer;
   size_t buffer_size =
@@ -3664,6 +2874,77 @@ Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   ON_ERROR_RETURN;
 }
 
+Result init_emulator(Emulator* e) {
+  static u8 s_initial_wave_ram[WAVE_RAM_SIZE] = {
+      0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
+      0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
+  };
+  CHECK(SUCCESS(get_cart_infos(e)));
+  log_cart_info(e->cart_info);
+  e->state.memory_map_state.rom1_base = 1 << ROM_BANK_SHIFT;
+  set_af_reg(&e->state.reg, 0x01b0);
+  e->state.reg.BC = 0x0013;
+  e->state.reg.DE = 0x00d8;
+  e->state.reg.HL = 0x014d;
+  e->state.reg.SP = 0xfffe;
+  e->state.reg.PC = 0x0100;
+  e->state.interrupt.IME = FALSE;
+  e->state.timer.DIV_counter = 0xAC00;
+  /* Enable apu first, so subsequent writes succeed. */
+  write_apu(e, APU_NR52_ADDR, 0xf1);
+  write_apu(e, APU_NR11_ADDR, 0x80);
+  write_apu(e, APU_NR12_ADDR, 0xf3);
+  write_apu(e, APU_NR14_ADDR, 0x80);
+  write_apu(e, APU_NR50_ADDR, 0x77);
+  write_apu(e, APU_NR51_ADDR, 0xf3);
+  e->state.apu.initialized = TRUE;
+  memcpy(&e->state.apu.wave.ram, s_initial_wave_ram, WAVE_RAM_SIZE);
+  /* Turn down the volume on channel1, it is playing by default (because of the
+   * GB startup sound), but we don't want to hear it when starting the
+   * emulator. */
+  e->state.apu.channel[CHANNEL1].envelope.volume = 0;
+  write_io(e, IO_LCDC_ADDR, 0x91);
+  write_io(e, IO_SCY_ADDR, 0x00);
+  write_io(e, IO_SCX_ADDR, 0x00);
+  write_io(e, IO_LYC_ADDR, 0x00);
+  write_io(e, IO_BGP_ADDR, 0xfc);
+  write_io(e, IO_OBP0_ADDR, 0xff);
+  write_io(e, IO_OBP1_ADDR, 0xff);
+  write_io(e, IO_IF_ADDR, 0x1);
+  write_io(e, IO_IE_ADDR, 0x0);
+
+  /* Start the cycle counter near 2**32 to catch overflow bugs. */
+  e->state.apu.cycles = e->state.cycles = (u32)-CPU_CYCLES_PER_SECOND;
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result get_file_size(FILE* f, long* out_size) {
+  CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
+  long size = ftell(f);
+  CHECK_MSG(size >= 0, "ftell failed.");
+  CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
+  *out_size = size;
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result read_rom_data_from_file(Emulator* e, const char* filename) {
+  FILE* f = fopen(filename, "rb");
+  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
+  long size;
+  CHECK(SUCCESS(get_file_size(f, &size)));
+  CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
+            MINIMUM_ROM_SIZE);
+  u8* data = malloc(size); /* Leaks. */
+  CHECK_MSG(data, "allocation failed.\n");
+  CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
+  fclose(f);
+  e->file_data.data = data;
+  e->file_data.size = size;
+  return OK;
+  ON_ERROR_CLOSE_FILE_AND_RETURN;
+}
 
 /* SDL stuff */
 
@@ -4142,7 +3423,7 @@ int main(int argc, char** argv) {
   CHECK_MSG(argc == 1, "no rom file given.\n");
   const char* rom_filename = argv[0];
   Emulator* e = &s_emulator;
-  CHECK(SUCCESS(read_data_from_file(e, rom_filename)));
+  CHECK(SUCCESS(read_rom_data_from_file(e, rom_filename)));
   CHECK(SUCCESS(host_init_video(&s_host)));
   CHECK(SUCCESS(host_init_audio(&s_host)));
   CHECK(SUCCESS(init_emulator(e)));
@@ -4192,3 +3473,7 @@ error:
 #endif /* NO_MAIN */
 
 #endif /* NO_SDL */
+
+#ifdef __cplusplus
+}
+#endif

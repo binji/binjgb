@@ -6,7 +6,6 @@ A simple GB emulator.
 
 ## Features
 
-* One file, less than 5000 lines of C!
 * Cycle accurate, passes many timing tests (see below)
 * Supports MBC1, MBC1M, MMM01, MBC2, MBC3, MBC5 and HuC1
 * Save/load battery backup
