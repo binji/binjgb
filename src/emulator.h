@@ -4,50 +4,16 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
-#ifndef BINJGB_H_
-#define BINJGB_H_
+#ifndef BINJGB_EMULATOR_H_
+#define BINJGB_EMULATOR_H_
 
 #include <stdint.h>
+
+#include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
-
-#define SUCCESS(x) ((x) == OK)
-#define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
-#define CHECK_MSG(x, ...)                       \
-  if (!(x)) {                                   \
-    PRINT_ERROR("%s:%d: ", __FILE__, __LINE__); \
-    PRINT_ERROR(__VA_ARGS__);                   \
-    goto error;                                 \
-  }
-#define CHECK(x) do if (!(x)) { goto error; } while(0)
-#define ON_ERROR_RETURN \
-  error:                \
-  return ERROR
-#define ON_ERROR_CLOSE_FILE_AND_RETURN \
-  error:                               \
-  if (f) {                             \
-    fclose(f);                         \
-  }                                    \
-  return ERROR
-#define UNREACHABLE(...) PRINT_ERROR(__VA_ARGS__), exit(1)
-
-typedef int8_t s8;
-typedef int32_t s32;
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef float f32;
-typedef double f64;
-typedef u16 Address;
-typedef u16 MaskedAddress;
-typedef u32 RGBA;
-typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 
 #define MAXIMUM_ROM_SIZE 8388608
 #define MINIMUM_ROM_SIZE 32768
@@ -67,16 +33,15 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 #define PALETTE_COLOR_COUNT 4
 #define SOUND_OUTPUT_COUNT 2
 
-#define MILLISECONDS_PER_SECOND 1000
-#define MICROSECONDS_PER_SECOND 1000000
-#define MICROSECONDS_PER_MILLISECOND \
-  (MICROSECONDS_PER_SECOND / MILLISECONDS_PER_SECOND)
-
 #define CPU_CYCLES_PER_SECOND 4194304
 #define APU_CYCLES_PER_SECOND 2097152
 #define PPU_LINE_CYCLES 456
 #define PPU_VBLANK_CYCLES (PPU_LINE_CYCLES * 10)
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
+
+#define MILLISECONDS_PER_SECOND 1000
+#define VIDEO_FRAME_MS \
+  ((f64)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
 
 /* Addresses are relative to IO_START_ADDR (0xff00). */
 #define FOREACH_IO_REG(V)                     \
@@ -125,10 +90,6 @@ typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
   V(NR50, 0x14) /* Sound volume */                           \
   V(NR51, 0x15) /* Sound output select */                    \
   V(NR52, 0x16) /* Sound enabled */
-
-#define FOREACH_RESULT(V) \
-  V(OK, 0)                \
-  V(ERROR, 1)
 
 #define FOREACH_BOOL(V) \
   V(FALSE, 0)           \
@@ -234,7 +195,6 @@ static inline const char* get_enum_string(const char** strings,
     return get_enum_string(s_strings, ARRAY_SIZE(s_strings), value); \
   }
 
-DEFINE_NAMED_ENUM(RESULT, Result, result, FOREACH_RESULT, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(CGB_FLAG, CgbFlag, cgb_flag, FOREACH_CGB_FLAG, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(SGB_FLAG, SgbFlag, sgb_flag, FOREACH_SGB_FLAG, DEFINE_ENUM)
 DEFINE_NAMED_ENUM(CART_TYPE, CartType, cart_type, FOREACH_CART_TYPE,
@@ -601,6 +561,9 @@ typedef struct {
   u8* position;
 } AudioBuffer;
 
+#define AUDIO_BUFFER_FRAMES(e) \
+  (((e)->audio_buffer.position - (e)->audio_buffer.data) / SOUND_OUTPUT_COUNT)
+
 typedef struct {
   u8 so_volume[SOUND_OUTPUT_COUNT];
   Bool so_output[SOUND_COUNT][SOUND_OUTPUT_COUNT];
@@ -736,11 +699,20 @@ typedef struct Emulator {
 } Emulator;
 
 Result get_file_size(FILE* f, long* out_size);
+const char* replace_extension(const char* filename, const char* extension);
+
 Result read_rom_data_from_file(Emulator* e, const char* filename);
+Result read_state_from_file(Emulator* e, const char* filename);
+Result read_ext_ram_from_file(Emulator* e, const char* filename);
+Result write_state_to_file(Emulator* e, const char* filename);
+Result write_ext_ram_to_file(Emulator* e, const char* filename);
+
 Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames);
 Result init_emulator(Emulator* e);
+
 void step_emulator(Emulator* e);
 EmulatorEvent run_emulator(Emulator* e, u32 max_audio_frames);
+
 u8 read_u8(Emulator* e, Address addr);
 void write_u8(Emulator* e, Address addr, u8 value);
 
@@ -748,4 +720,4 @@ void write_u8(Emulator* e, Address addr, u8 value);
 }
 #endif
 
-#endif /* BINJGB_H_ */
+#endif /* BINJGB_EMULATOR_H_ */

@@ -6,9 +6,7 @@
  */
 #include <stdlib.h>
 
-#define NO_SDL
-
-#include "binjgb.c"
+#include "emulator.c"
 
 Emulator* new_emulator(void) { return calloc(1, sizeof(Emulator)); }
 

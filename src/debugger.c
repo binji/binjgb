@@ -9,8 +9,7 @@
 #include <stdio.h>
 
 #include "options.h"
-
-#define NO_MAIN
+#include "host.h"
 
 #define FOREACH_LOG_SYSTEM(V) \
   V(apu, APU, A)              \
@@ -134,7 +133,9 @@ static void HOOK_print_emulator_info(const char* func_name);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
-#include "binjgb.c"
+#include "emulator.c"
+
+static Emulator s_emulator;
 
 FOREACH_LOG_HOOKS(DEFINE_LOG_HOOK)
 
@@ -418,55 +419,54 @@ error:
   exit(1);
 }
 
+#define SAVE_EXTENSION ".sav"
+
 /* Copied from binjgb.c; probably will diverge. */
 int main(int argc, char** argv) {
   int result = 1;
   parse_arguments(argc, argv);
   Emulator* e = &s_emulator;
+  struct Host* host = NULL;
   CHECK(SUCCESS(read_rom_data_from_file(e, s_rom_filename)));
-  CHECK(SUCCESS(host_init_video(&s_host)));
-  CHECK(SUCCESS(host_init_audio(&s_host)));
   CHECK(SUCCESS(init_emulator(e)));
-  CHECK(SUCCESS(init_audio_buffer(e, s_host.audio.spec.freq,
-                                  s_host.audio.spec.size / AUDIO_FRAME_SIZE)));
-  s_host.last_sync_cycles = e->state.cycles;
 
-  e->joypad_callback.func = joypad_callback;
-  e->joypad_callback.user_data = &s_host;
+  HostConfig host_config;
+  ZERO_MEMORY(host_config);
+  host_config.render_scale = 4;
+  host_config.frequency = 44100;
+  host_config.samples = 2048;
+  host = host_new(&host_config, e);
 
   const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
-  s_host.save_state_filename =
-      replace_extension(s_rom_filename, SAVE_STATE_EXTENSION);
   read_ext_ram_from_file(e, save_filename);
 
-  while (host_poll_events(e, &s_host)) {
+  while (host_poll_events(host)) {
     if (e->config.paused) {
-      SDL_PauseAudioDevice(s_host.audio.dev, !s_host.audio.ready);
-      SDL_Delay(VIDEO_FRAME_MS);
+      host_delay(host, VIDEO_FRAME_MS);
       continue;
     }
 
-    size_t size =
-        NEXT_MODULO(s_host.audio.buffer_available, s_host.audio.spec.size);
-    EmulatorEvent event = run_emulator(e, size / AUDIO_FRAME_SIZE);
+    EmulatorEvent event = host_run_emulator(host);
     if (!e->config.no_sync) {
-      host_synchronize(&s_host, e);
+      host_synchronize(host);
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
-      host_render_video(&s_host, e);
+      host_render_video(host);
       if (e->config.step) {
         e->config.paused = TRUE;
         e->config.step = FALSE;
       }
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      host_render_audio(&s_host, e);
+      host_render_audio(host);
     }
   }
 
   write_ext_ram_to_file(e, save_filename);
   result = 0;
 error:
-  SDL_Quit();
+  if (host) {
+    host_delete(host);
+  }
   return result;
 }

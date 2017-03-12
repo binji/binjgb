@@ -25,10 +25,19 @@ if (NOT EMSCRIPTEN)
   find_package(OpenGL)
 
   if (SDL2_FOUND AND OPENGL_FOUND)
-    add_executable(binjgb src/binjgb.c)
+    add_executable(binjgb
+      src/emulator.c
+      src/host.c
+      src/binjgb.c
+    )
     target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
 
-    add_executable(binjgb-debugger src/debugger.c src/options.c)
+    add_executable(binjgb-debugger
+      src/options.c
+      src/host.c
+      src/debugger.c
+    )
+
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)
 
@@ -38,7 +47,11 @@ if (NOT EMSCRIPTEN)
     endif ()
   endif ()
 
-  add_executable(binjgb-tester src/tester.c src/binjgb.c src/options.c)
+  add_executable(binjgb-tester
+    src/options.c
+    src/emulator.c
+    src/tester.c
+  )
   target_compile_definitions(binjgb-tester PRIVATE NO_SDL)
   install(TARGETS binjgb-tester DESTINATION bin)
 else (EMSCRIPTEN)

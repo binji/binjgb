@@ -9,7 +9,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "binjgb.h"
+#include "emulator.h"
 #include "options.h"
 
 #define AUDIO_FREQUENCY 44100
@@ -24,20 +24,6 @@ static const char* s_output_ppm;
 static Bool s_animate;
 static int s_delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
 static const char* s_rom_filename;
-
-
-static char* replace_extension(const char* filename, const char* extension) {
-  size_t length = strlen(filename) + strlen(extension) + 1; /* +1 for \0. */
-  char* result = malloc(length); /* Leaks. */
-  char* last_dot = strrchr(filename, '.');
-  if (last_dot == NULL) {
-    snprintf(result, length, "%s%s", filename, extension);
-  } else {
-    snprintf(result, length, "%.*s%s", (int)(last_dot - filename), filename,
-             extension);
-  }
-  return result;
-}
 
 Result write_frame_ppm(Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
@@ -207,9 +193,9 @@ int main(int argc, char** argv) {
       if (s_output_ppm && s_animate) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), ".%08d.ppm", animation_frame++);
-        char* result = replace_extension(s_output_ppm, buffer);
+        const char* result = replace_extension(s_output_ppm, buffer);
         CHECK(SUCCESS(write_frame_ppm(e, result)));
-        free(result);
+        free((char*)result);
       }
 
       /* TODO(binji): use timer rather than NEW_FRAME for timing button
