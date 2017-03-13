@@ -80,13 +80,13 @@ void parse_options(int argc, char**argv) {
     {'t', "timeout", 1},
   };
 
-  struct OptionParser* parser = new_option_parser(
+  struct OptionParser* parser = option_parser_new(
       options, sizeof(options) / sizeof(options[0]), argc, argv);
 
   int errors = 0;
   int done = 0;
   while (!done) {
-    OptionResult result = parse_next_option(parser);
+    OptionResult result = option_parser_next(parser);
     switch (result.kind) {
       case OPTION_RESULT_KIND_UNKNOWN:
         PRINT_ERROR("ERROR: Unknown option: %s.\n\n", result.arg);
@@ -150,12 +150,12 @@ void parse_options(int argc, char**argv) {
     goto error;
   }
 
-  destroy_option_parser(parser);
+  option_parser_delete(parser);
   return;
 
 error:
   usage(argc, argv);
-  destroy_option_parser(parser);
+  option_parser_delete(parser);
   exit(1);
 }
 

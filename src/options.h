@@ -37,11 +37,11 @@ typedef struct OptionResult {
 extern "C" {
 #endif
 
-struct OptionParser* new_option_parser(const Option* options,
+struct OptionParser* option_parser_new(const Option* options,
                                        size_t num_options, int argc,
                                        char** argv);
-OptionResult parse_next_option(struct OptionParser*);
-void destroy_option_parser(struct OptionParser*);
+OptionResult option_parser_next(struct OptionParser*);
+void option_parser_delete(struct OptionParser*);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -17,7 +17,7 @@ typedef struct OptionParser {
   int arg_index;
 } OptionParser;
 
-OptionParser* new_option_parser(const Option* options, size_t num_options,
+OptionParser* option_parser_new(const Option* options, size_t num_options,
                                 int argc, char** argv) {
   OptionParser* parser = calloc(1, sizeof(OptionParser));
   parser->options = options;
@@ -47,7 +47,7 @@ static OptionResult make_option_result_with_value(OptionResultKind kind,
   }
 }
 
-OptionResult parse_next_option(OptionParser* parser) {
+OptionResult option_parser_next(OptionParser* parser) {
   if (parser->arg_index >= parser->argc) {
     return make_option_result(OPTION_RESULT_KIND_DONE, NULL, NULL);
   }
@@ -123,6 +123,6 @@ OptionResult parse_next_option(OptionParser* parser) {
   }
 }
 
-void destroy_option_parser(OptionParser* parser) {
+void option_parser_delete(OptionParser* parser) {
   free(parser);
 }
