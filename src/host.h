@@ -17,13 +17,13 @@ struct Emulator;
 struct Host;
 typedef u32 EmulatorEvent;
 
-typedef struct {
+typedef struct HostHookContext {
   struct Host* host;
   struct Emulator* e;
   void* user_data;
 } HostHookContext;
 
-typedef struct {
+typedef struct HostHooks {
   void* user_data;
   void (*audio_underflow)(HostHookContext* ctx, int desired, int available);
   void (*audio_overflow)(HostHookContext* ctx, int old_available);
@@ -37,14 +37,21 @@ typedef struct {
   void (*read_state)(HostHookContext* ctx);
 } HostHooks;
 
-typedef struct {
+typedef struct HostInit {
   HostHooks hooks;
   int render_scale;
-  int frequency;
-  int samples;
+  int audio_frequency;
+  int audio_frames;
+} HostInit;
+
+typedef struct HostConfig {
+  Bool no_sync;
+  Bool paused;
+  Bool step;
+  Bool fullscreen;
 } HostConfig;
 
-struct Host* host_new(const HostConfig*, struct Emulator*);
+struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
 EmulatorEvent host_run_emulator(struct Host*);
@@ -53,6 +60,8 @@ void host_render_audio(struct Host*);
 void host_synchronize(struct Host*);
 f64 host_get_time_ms(struct Host*);
 void host_delay(struct Host*, f64 ms);
+void host_set_config(struct Host*, const HostConfig*);
+HostConfig host_get_config(struct Host*);
 
 #ifdef __cplusplus
 }

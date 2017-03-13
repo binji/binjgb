@@ -25,12 +25,12 @@ static Bool s_animate;
 static int s_delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
 static const char* s_rom_filename;
 
-Result write_frame_ppm(Emulator* e, const char* filename) {
+Result write_frame_ppm(struct Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
   u8 x, y;
-  RGBA* data = &e->frame_buffer[0];
+  RGBA* data = *emulator_get_frame_buffer(e);
   for (y = 0; y < SCREEN_HEIGHT; ++y) {
     for (x = 0; x < SCREEN_WIDTH; ++x) {
       RGBA pixel = *data++;
@@ -161,15 +161,14 @@ error:
 
 int main(int argc, char** argv) {
   init_time();
-  Emulator emulator;
-  ZERO_MEMORY(emulator);
-  Emulator* e = &emulator;
-
   parse_options(argc, argv);
 
-  CHECK(SUCCESS(read_rom_data_from_file(e, s_rom_filename)));
-  CHECK(SUCCESS(init_emulator(e)));
-  CHECK(SUCCESS(init_audio_buffer(e, AUDIO_FREQUENCY, AUDIO_FRAMES)));
+  EmulatorInit emulator_init;
+  ZERO_MEMORY(emulator_init);
+  emulator_init.rom_filename = s_rom_filename;
+  emulator_init.audio_frequency = AUDIO_FREQUENCY;
+  emulator_init.audio_frames = AUDIO_FRAMES;
+  struct Emulator* e = emulator_new(&emulator_init);
 
   /* Run for N frames, measured by audio frames (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
@@ -184,7 +183,7 @@ int main(int argc, char** argv) {
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
-    EmulatorEvent event = run_emulator(e, AUDIO_FRAMES);
+    EmulatorEvent event = emulator_run(e, AUDIO_FRAMES);
     if (get_time_sec() > timeout_sec) {
       PRINT_ERROR("test timed out.\n");
       goto error;
@@ -201,15 +200,17 @@ int main(int argc, char** argv) {
       /* TODO(binji): use timer rather than NEW_FRAME for timing button
        * presses? */
       if (s_controller_input_file) {
-        if (e->state.ppu.frame >= next_input_frame) {
-          e->state.JOYP.A = !!(next_input_frame_buttons & 0x01);
-          e->state.JOYP.B = !!(next_input_frame_buttons & 0x02);
-          e->state.JOYP.select = !!(next_input_frame_buttons & 0x4);
-          e->state.JOYP.start = !!(next_input_frame_buttons & 0x8);
-          e->state.JOYP.right = !!(next_input_frame_buttons & 0x10);
-          e->state.JOYP.left = !!(next_input_frame_buttons & 0x20);
-          e->state.JOYP.up = !!(next_input_frame_buttons & 0x40);
-          e->state.JOYP.down = !!(next_input_frame_buttons & 0x80);
+        if (emulator_get_ppu_frame(e) >= next_input_frame) {
+          JoypadButtons buttons;
+          buttons.A = !!(next_input_frame_buttons & 0x01);
+          buttons.B = !!(next_input_frame_buttons & 0x02);
+          buttons.select = !!(next_input_frame_buttons & 0x4);
+          buttons.start = !!(next_input_frame_buttons & 0x8);
+          buttons.right = !!(next_input_frame_buttons & 0x10);
+          buttons.left = !!(next_input_frame_buttons & 0x20);
+          buttons.up = !!(next_input_frame_buttons & 0x40);
+          buttons.down = !!(next_input_frame_buttons & 0x80);
+          emulator_set_joypad_buttons(e, &buttons);
 
           /* Read the next input from the file. */
           char input_buffer[256];

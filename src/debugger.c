@@ -38,15 +38,14 @@ static unsigned s_trace_counter = 0;
 static int s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
 static const char* s_rom_filename;
 
-#define HOOK0(name) HOOK_##name(__func__)
-#define HOOK(name, ...) HOOK_##name(__func__, __VA_ARGS__)
+#define HOOK0(name) HOOK_##name(e, __func__)
+#define HOOK(name, ...) HOOK_##name(e, __func__, __VA_ARGS__)
 
 #define DECLARE_LOG_HOOK(system, level, name, format) \
-  static void HOOK_##name(const char* func_name, ...);
+  static void HOOK_##name(struct Emulator* e, const char* func_name, ...);
 
 #define DEFINE_LOG_HOOK(system, level, name, format)               \
-  void HOOK_##name(const char* func_name, ...) {                   \
-    struct Emulator* e = &s_emulator;                              \
+  void HOOK_##name(Emulator* e, const char* func_name, ...) {      \
     va_list args;                                                  \
     va_start(args, func_name);                                     \
     if (s_log_level[LOG_SYSTEM_##system] >= LOG_LEVEL_##level) {   \
@@ -129,13 +128,11 @@ static const char* s_rom_filename;
   X(M, I, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, I, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
-static void HOOK_print_emulator_info(const char* func_name);
+static void HOOK_print_emulator_info(struct Emulator* e, const char* func_name);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
 #include "emulator.c"
-
-static Emulator s_emulator;
 
 FOREACH_LOG_HOOKS(DEFINE_LOG_HOOK)
 
@@ -276,8 +273,7 @@ static void print_instruction(Emulator* e, Address addr) {
          mnemonic);
 }
 
-void HOOK_print_emulator_info(const char* func_name) {
-  struct Emulator* e = &s_emulator;
+void HOOK_print_emulator_info(Emulator* e, const char* func_name) {
   if (s_trace && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
            e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
@@ -423,38 +419,46 @@ error:
 
 /* Copied from binjgb.c; probably will diverge. */
 int main(int argc, char** argv) {
+  const int audio_frequency = 44100;
+  const int audio_frames = 2048;
+
   int result = 1;
   parse_arguments(argc, argv);
-  Emulator* e = &s_emulator;
-  struct Host* host = NULL;
-  CHECK(SUCCESS(read_rom_data_from_file(e, s_rom_filename)));
-  CHECK(SUCCESS(init_emulator(e)));
 
-  HostConfig host_config;
-  ZERO_MEMORY(host_config);
-  host_config.render_scale = 4;
-  host_config.frequency = 44100;
-  host_config.samples = 2048;
-  host = host_new(&host_config, e);
+  EmulatorInit emulator_init;
+  ZERO_MEMORY(emulator_init);
+  emulator_init.rom_filename = s_rom_filename;
+  emulator_init.audio_frequency = audio_frequency;
+  emulator_init.audio_frames = audio_frames;
+  struct Emulator* e = emulator_new(&emulator_init);
+
+  HostInit host_init;
+  ZERO_MEMORY(host_init);
+  host_init.render_scale = 4;
+  host_init.audio_frequency = audio_frequency;
+  host_init.audio_frames = audio_frames;
+  struct Host* host = host_new(&host_init, e);
 
   const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
-  read_ext_ram_from_file(e, save_filename);
+  emulator_read_ext_ram_from_file(e, save_filename);
 
   while (host_poll_events(host)) {
-    if (e->config.paused) {
+    HostConfig config = host_get_config(host);
+    if (config.paused) {
       host_delay(host, VIDEO_FRAME_MS);
       continue;
     }
 
     EmulatorEvent event = host_run_emulator(host);
-    if (!e->config.no_sync) {
+    if (!config.no_sync) {
       host_synchronize(host);
     }
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       host_render_video(host);
-      if (e->config.step) {
-        e->config.paused = TRUE;
-        e->config.step = FALSE;
+      if (config.step) {
+        config.paused = TRUE;
+        config.step = FALSE;
+        host_set_config(host, &config);
       }
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
@@ -462,11 +466,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  write_ext_ram_to_file(e, save_filename);
+  emulator_write_ext_ram_to_file(e, save_filename);
   result = 0;
-error:
   if (host) {
     host_delete(host);
+  }
+  if (e) {
+    emulator_delete(e);
   }
   return result;
 }

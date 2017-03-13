@@ -14,18 +14,18 @@
 
 #include "emulator.h"
 
-#define HOOK0(name)                             \
-  do                                            \
-    if (host->config.hooks.name) {              \
-      host->config.hooks.name(&host->hook_ctx); \
-    }                                           \
+#define HOOK0(name)                           \
+  do                                          \
+    if (host->init.hooks.name) {              \
+      host->init.hooks.name(&host->hook_ctx); \
+    }                                         \
   while (0)
 
-#define HOOK(name, ...)                                      \
-  do                                                         \
-    if (host->config.hooks.name) {                           \
-      host->config.hooks.name(&host->hook_ctx, __VA_ARGS__); \
-    }                                                        \
+#define HOOK(name, ...)                                    \
+  do                                                       \
+    if (host->init.hooks.name) {                           \
+      host->init.hooks.name(&host->hook_ctx, __VA_ARGS__); \
+    }                                                      \
   while (0)
 
 #define FOREACH_GLEXT_PROC(V)                                    \
@@ -114,6 +114,7 @@ typedef struct {
 } HostAudio;
 
 typedef struct Host {
+  HostInit init;
   HostConfig config;
   HostHookContext hook_ctx;
   SDL_Window* window;
@@ -154,8 +155,8 @@ Result host_init_video(Host* host) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   host->window = SDL_CreateWindow("binjgb", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED,
-                                  SCREEN_WIDTH * host->config.render_scale,
-                                  SCREEN_HEIGHT * host->config.render_scale,
+                                  SCREEN_WIDTH * host->init.render_scale,
+                                  SCREEN_HEIGHT * host->init.render_scale,
                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
   host->gl_context = SDL_GL_CreateContext(host->window);
@@ -237,10 +238,10 @@ static Result host_init_audio(Host* host) {
   host->last_sync_real_ms = host_get_time_ms(host);
 
   SDL_AudioSpec want;
-  want.freq = host->config.frequency;
+  want.freq = host->init.audio_frequency;
   want.format = AUDIO_SPEC_FORMAT;
   want.channels = AUDIO_SPEC_CHANNELS;
-  want.samples = host->config.samples;
+  want.samples = host->init.audio_frames * AUDIO_SPEC_CHANNELS;
   want.callback = host_audio_callback;
   want.userdata = host;
   host->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &host->audio.spec, 0);
@@ -264,10 +265,11 @@ static Result host_init_audio(Host* host) {
 }
 
 Bool host_poll_events(Host* host) {
-  Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host->hook_ctx.e;
   Bool running = TRUE;
   SDL_Event event;
-  EmulatorConfig old_config = e->config;
+  EmulatorConfig emu_config = emulator_get_config(e);
+  HostConfig host_config = host_get_config(host);
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
       case SDL_WINDOWEVENT:
@@ -284,17 +286,20 @@ Bool host_poll_events(Host* host) {
         break;
       case SDL_KEYDOWN:
         switch (event.key.keysym.scancode) {
-          case SDL_SCANCODE_1: e->config.disable_sound[CHANNEL1] ^= 1; break;
-          case SDL_SCANCODE_2: e->config.disable_sound[CHANNEL2] ^= 1; break;
-          case SDL_SCANCODE_3: e->config.disable_sound[CHANNEL3] ^= 1; break;
-          case SDL_SCANCODE_4: e->config.disable_sound[CHANNEL4] ^= 1; break;
-          case SDL_SCANCODE_B: e->config.disable_bg ^= 1; break;
-          case SDL_SCANCODE_W: e->config.disable_window ^= 1; break;
-          case SDL_SCANCODE_O: e->config.disable_obj ^= 1; break;
+          case SDL_SCANCODE_1: emu_config.disable_sound[CHANNEL1] ^= 1; break;
+          case SDL_SCANCODE_2: emu_config.disable_sound[CHANNEL2] ^= 1; break;
+          case SDL_SCANCODE_3: emu_config.disable_sound[CHANNEL3] ^= 1; break;
+          case SDL_SCANCODE_4: emu_config.disable_sound[CHANNEL4] ^= 1; break;
+          case SDL_SCANCODE_B: emu_config.disable_bg ^= 1; break;
+          case SDL_SCANCODE_W: emu_config.disable_window ^= 1; break;
+          case SDL_SCANCODE_O: emu_config.disable_obj ^= 1; break;
           case SDL_SCANCODE_F6: HOOK0(write_state); break;
           case SDL_SCANCODE_F9: HOOK0(read_state); break;
-          case SDL_SCANCODE_N: e->config.step = 1; e->config.paused = 0; break;
-          case SDL_SCANCODE_SPACE: e->config.paused ^= 1; break;
+          case SDL_SCANCODE_N:
+            host_config.step = 1;
+            host_config.paused = 0;
+            break;
+          case SDL_SCANCODE_SPACE: host_config.paused ^= 1; break;
           case SDL_SCANCODE_ESCAPE: running = FALSE; break;
           default: break;
         }
@@ -302,8 +307,8 @@ Bool host_poll_events(Host* host) {
       case SDL_KEYUP: {
         Bool down = event.type == SDL_KEYDOWN;
         switch (event.key.keysym.scancode) {
-          case SDL_SCANCODE_TAB: e->config.no_sync = down; break;
-          case SDL_SCANCODE_F11: if (!down) e->config.fullscreen ^= 1; break;
+          case SDL_SCANCODE_TAB: host_config.no_sync = down; break;
+          case SDL_SCANCODE_F11: if (!down) host_config.fullscreen ^= 1; break;
           default: break;
         }
         break;
@@ -312,37 +317,32 @@ Bool host_poll_events(Host* host) {
       default: break;
     }
   }
-  if (old_config.no_sync != e->config.no_sync) {
-    SDL_GL_SetSwapInterval(e->config.no_sync ? 0 : 1);
-  }
-  if (old_config.fullscreen != e->config.fullscreen) {
-    SDL_SetWindowFullscreen(
-        host->window, e->config.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-  }
+  emulator_set_config(e, &emu_config);
+  host_set_config(host, &host_config);
   return running;
 }
 
 EmulatorEvent host_run_emulator(Host* host) {
-  Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host->hook_ctx.e;
   size_t size =
       NEXT_MODULO(host->audio.buffer_available, host->audio.spec.size);
-  return run_emulator(e, (u32)(size / AUDIO_FRAME_SIZE));
+  return emulator_run(e, (u32)(size / AUDIO_FRAME_SIZE));
 }
 
 void host_render_video(Host* host) {
-  Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host->hook_ctx.e;
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA,
-                  GL_UNSIGNED_BYTE, e->frame_buffer);
+                  GL_UNSIGNED_BYTE, emulator_get_frame_buffer(e));
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   SDL_GL_SwapWindow(host->window);
 }
 
 void host_synchronize(Host* host) {
-  Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host->hook_ctx.e;
   f64 now_ms = host_get_time_ms(host);
-  f64 gb_ms = (f64)(e->state.cycles - host->last_sync_cycles) *
+  f64 gb_ms = (f64)(emulator_get_cycles(e) - host->last_sync_cycles) *
               MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
   f64 real_ms = now_ms - host->last_sync_real_ms;
   f64 delta_ms = gb_ms - real_ms;
@@ -370,18 +370,18 @@ void host_synchronize(Host* host) {
     }
     host->last_sync_real_ms = delay_until_ms;
   }
-  host->last_sync_cycles = e->state.cycles;
+  host->last_sync_cycles = emulator_get_cycles(e);
 }
 
 void host_render_audio(Host* host) {
-  assert(AUDIO_SPEC_CHANNELS == SOUND_OUTPUT_COUNT);
-  Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host->hook_ctx.e;
   HostAudio* audio = &host->audio;
-  u8* src = e->audio_buffer.data;
+  AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
+  u8* src = audio_buffer->data;
 
   SDL_LockAudioDevice(audio->dev);
   size_t old_buffer_available = audio->buffer_available;
-  size_t src_frames = AUDIO_BUFFER_FRAMES(e);
+  size_t src_frames = audio_buffer_get_frames(audio_buffer);
   size_t max_dst_frames =
       (audio->buffer_capacity - audio->buffer_available) / AUDIO_FRAME_SIZE;
   size_t frames = MIN(src_frames, max_dst_frames);
@@ -412,39 +412,36 @@ void host_render_audio(Host* host) {
   }
 }
 
-static void joypad_callback(Emulator* e, void* user_data) {
+static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* sdl = user_data;
   const u8* state = SDL_GetKeyboardState(NULL);
-  e->state.JOYP.up = state[SDL_SCANCODE_UP];
-  e->state.JOYP.down = state[SDL_SCANCODE_DOWN];
-  e->state.JOYP.left = state[SDL_SCANCODE_LEFT];
-  e->state.JOYP.right = state[SDL_SCANCODE_RIGHT];
-  e->state.JOYP.B = state[SDL_SCANCODE_Z];
-  e->state.JOYP.A = state[SDL_SCANCODE_X];
-  e->state.JOYP.start = state[SDL_SCANCODE_RETURN];
-  e->state.JOYP.select = state[SDL_SCANCODE_BACKSPACE];
+  joyp->up = state[SDL_SCANCODE_UP];
+  joyp->down = state[SDL_SCANCODE_DOWN];
+  joyp->left = state[SDL_SCANCODE_LEFT];
+  joyp->right = state[SDL_SCANCODE_RIGHT];
+  joyp->B = state[SDL_SCANCODE_Z];
+  joyp->A = state[SDL_SCANCODE_X];
+  joyp->start = state[SDL_SCANCODE_RETURN];
+  joyp->select = state[SDL_SCANCODE_BACKSPACE];
 }
 
-Result host_init(Host* host, Emulator* e) {
+Result host_init(Host* host, struct Emulator* e) {
   CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
-  CHECK(SUCCESS(init_audio_buffer(e, host->audio.spec.freq,
-                                  host->audio.spec.size / AUDIO_FRAME_SIZE)));
-  host->last_sync_cycles = e->state.cycles;
-  e->joypad_callback.func = joypad_callback;
-  e->joypad_callback.user_data = host;
+  host->last_sync_cycles = emulator_get_cycles(e);
+  emulator_set_joypad_callback(e, joypad_callback, host);
   return OK;
   ON_ERROR_RETURN;
 }
 
-Host* host_new(const HostConfig *config, Emulator* e) {
-  Host* host = malloc(sizeof(Host));
-  host->config = *config;
+Host* host_new(const HostInit *init, struct Emulator* e) {
+  Host* host = calloc(1, sizeof(Host));
+  host->init = *init;
   host->hook_ctx.host = host;
   host->hook_ctx.e = e;
-  host->hook_ctx.user_data = host->config.hooks.user_data;
+  host->hook_ctx.user_data = host->init.hooks.user_data;
   CHECK(SUCCESS(host_init(host, e)));
   return host;
 error:
@@ -457,4 +454,20 @@ void host_delete(Host* host) {
   SDL_DestroyWindow(host->window);
   SDL_Quit();
   free(host);
+}
+
+void host_set_config(struct Host* host, const HostConfig* new_config) {
+  if (host->config.no_sync != new_config->no_sync) {
+    SDL_GL_SetSwapInterval(new_config->no_sync ? 0 : 1);
+  }
+  if (host->config.fullscreen != new_config->fullscreen) {
+    SDL_SetWindowFullscreen(host->window, new_config->fullscreen
+                                              ? SDL_WINDOW_FULLSCREEN_DESKTOP
+                                              : 0);
+  }
+  host->config = *new_config;
+}
+
+HostConfig host_get_config(struct Host* host) {
+  return host->config;
 }
