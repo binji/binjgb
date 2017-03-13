@@ -7,8 +7,6 @@
 #ifndef BINJGB_EMULATOR_H_
 #define BINJGB_EMULATOR_H_
 
-#include <stdint.h>
-
 #include "common.h"
 
 #ifdef __cplusplus

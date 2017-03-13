@@ -34,6 +34,7 @@ if (NOT EMSCRIPTEN)
 
     add_executable(binjgb-debugger
       src/options.c
+      src/emulator-debug.c
       src/host.c
       src/debugger.c
     )

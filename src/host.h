@@ -25,16 +25,16 @@ typedef struct HostHookContext {
 
 typedef struct HostHooks {
   void* user_data;
-  void (*audio_underflow)(HostHookContext* ctx, int desired, int available);
-  void (*audio_overflow)(HostHookContext* ctx, int old_available);
-  void (*audio_add_buffer)(HostHookContext* ctx, int old_available,
+  void (*audio_underflow)(HostHookContext*, int desired, int available);
+  void (*audio_overflow)(HostHookContext*, int old_available);
+  void (*audio_add_buffer)(HostHookContext*, int old_available,
                            int new_available);
-  void (*audio_buffer_ready)(HostHookContext* ctx, int new_available);
-  void (*desync)(HostHookContext* ctx, f64 now_ms, f64 gb_ms, f64 real_ms);
-  void (*sync_wait)(HostHookContext* ctx, f64 now_ms, f64 delta_ms, f64 gb_ms,
+  void (*audio_buffer_ready)(HostHookContext*, int new_available);
+  void (*desync)(HostHookContext*, f64 now_ms, f64 gb_ms, f64 real_ms);
+  void (*sync_wait)(HostHookContext*, f64 now_ms, f64 delta_ms, f64 gb_ms,
                     f64 real_ms);
-  void (*write_state)(HostHookContext* ctx);
-  void (*read_state)(HostHookContext* ctx);
+  void (*write_state)(HostHookContext*);
+  void (*read_state)(HostHookContext*);
 } HostHooks;
 
 typedef struct HostInit {

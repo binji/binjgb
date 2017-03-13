@@ -151,7 +151,7 @@ Emulator.prototype.renderVideo = function(startMs) {
   var deltaCycles = Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_CYCLES_PER_SECOND;
   var runUntilCycles = (startCycles + deltaCycles - this.leftoverCycles) >>> 0;
   while (((runUntilCycles - this.getCycles()) | 0) > 0) {
-    var event = _run_emulator(this.e, AUDIO_FRAMES);
+    var event = _emulator_run(this.e);
     if (event & EVENT_NEW_FRAME) {
       this.renderer.uploadTexture(this.frameBuffer);
     }
