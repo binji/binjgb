@@ -16,9 +16,9 @@ static const char* s_rom_filename;
 
 static void print_log_systems(void) {
   PRINT_ERROR("valid log systems:\n");
-  size_t i;
-  for (i = 0; i < NUM_LOG_SYSTEMS; ++i) {
-    PRINT_ERROR("  %s\n", emulator_get_log_system_name(i));
+  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+    PRINT_ERROR("  %s\n",
+                emulator_get_log_system_name(static_cast<LogSystem>(i)));
   }
 }
 
@@ -79,12 +79,12 @@ void parse_arguments(int argc, char** argv) {
               continue;
             }
 
-            size_t i;
             LogSystem system = NUM_LOG_SYSTEMS;
-            for (i = 0; i < NUM_LOG_SYSTEMS; ++i) {
-              const char* name = emulator_get_log_system_name(i);
+            for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+              const char* name =
+                  emulator_get_log_system_name(static_cast<LogSystem>(i));
               if (strncmp(log_system_name, name, strlen(name)) == 0) {
-                system = i;
+                system = static_cast<LogSystem>(i);
                 break;
               }
             }
@@ -95,7 +95,8 @@ void parse_arguments(int argc, char** argv) {
               print_log_systems();
               continue;
             }
-            emulator_set_log_level(system, atoi(equals + 1));
+            emulator_set_log_level(system,
+                                   static_cast<LogLevel>(atoi(equals + 1)));
             break;
           }
 

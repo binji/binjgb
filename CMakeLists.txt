@@ -36,7 +36,7 @@ if (NOT EMSCRIPTEN)
       src/options.c
       src/emulator-debug.c
       src/host.c
-      src/debugger.c
+      src/debugger.cc
     )
 
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
