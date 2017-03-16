@@ -52,7 +52,8 @@ typedef struct AudioBuffer {
   u32 frequency;    /* Sample frequency, as N samples per second */
   u32 freq_counter; /* Used for resampling; [0..APU_CYCLES_PER_SECOND). */
   u32 divisor;
-  u8* data; /* Unsigned 8-bit 2-channel samples @ |frequency| */
+  u32 frames; /* Number of frames to generate per call to emulator_run. */
+  u8* data;   /* Unsigned 8-bit 2-channel samples @ |frequency| */
   u8* end;
   u8* position;
 } AudioBuffer;
@@ -99,7 +100,7 @@ Result emulator_write_state_to_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
 void emulator_step(struct Emulator*);
-EmulatorEvent emulator_run(struct Emulator*, u32 max_audio_frames);
+EmulatorEvent emulator_run(struct Emulator*);
 
 #ifdef __cplusplus
 }

@@ -65,11 +65,9 @@ FOREACH_GLEXT_PROC(V)
 #define AUDIO_FRAME_SIZE (AUDIO_SPEC_SAMPLE_SIZE * AUDIO_SPEC_CHANNELS)
 #define AUDIO_CONVERT_SAMPLE_FROM_U8(X) ((X) << 8)
 typedef u16 HostAudioSample;
-/* Try to keep the audio buffer filled to |number of frames| *
- * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER frames. */
-#define AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER 1.5
-#define AUDIO_MAX_BUFFER_SIZE_MULTIPLIER 4
-/* One buffer will be requested every AUDIO_BUFFER_REFILL_MS milliseconds. */
+#define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
+#define AUDIO_MAX_QUEUED_SIZE (4 * host->audio.spec.size)
+/* One buffer must be supplied every AUDIO_BUFFER_REFILL_MS milliseconds. */
 #define AUDIO_BUFFER_REFILL_MS                        \
   ((host->audio.spec.samples / AUDIO_SPEC_CHANNELS) * \
    MILLISECONDS_PER_SECOND / host->audio.spec.freq)
@@ -103,14 +101,8 @@ typedef u16 HostAudioSample;
 typedef struct {
   SDL_AudioDeviceID dev;
   SDL_AudioSpec spec;
-  u8* buffer;
-  u8* buffer_end;
-  u8* read_pos;
-  u8* write_pos;
-  size_t buffer_capacity;         /* Total capacity in bytes of the buffer. */
-  size_t buffer_available;        /* Number of bytes available for reading. */
-  size_t buffer_target_available; /* Try to keep the buffer this size. */
-  Bool ready; /* Set to TRUE when audio is first rendered. */
+  u8* buffer; /* Size is spec.size. */
+  Bool ready;
 } HostAudio;
 
 typedef struct Host {
@@ -198,27 +190,6 @@ error:
   return ERROR;
 }
 
-static void host_audio_callback(void* userdata, u8* dst, int len) {
-  memset(dst, 0, len);
-  Host* host = userdata;
-  HostAudio* audio = &host->audio;
-  if (len > (int)audio->buffer_available) {
-    HOOK(audio_underflow, audio->buffer_available, len);
-    len = (int)audio->buffer_available;
-  }
-  if (audio->read_pos + len > audio->buffer_end) {
-    size_t len1 = audio->buffer_end - audio->read_pos;
-    size_t len2 = len - len1;
-    memcpy(dst, audio->read_pos, len1);
-    memcpy(dst + len1, audio->buffer, len2);
-    audio->read_pos = audio->buffer + len2;
-  } else {
-    memcpy(dst, audio->read_pos, len);
-    audio->read_pos += len;
-  }
-  audio->buffer_available -= len;
-}
-
 static void host_init_time(Host* host) {
   host->performance_frequency = SDL_GetPerformanceFrequency();
   host->start_counter = SDL_GetPerformanceCounter();
@@ -236,30 +207,20 @@ void host_delay(Host* host, f64 ms) {
 static Result host_init_audio(Host* host) {
   host->last_sync_cycles = 0;
   host->last_sync_real_ms = host_get_time_ms(host);
+  host->audio.ready = FALSE;
 
   SDL_AudioSpec want;
   want.freq = host->init.audio_frequency;
   want.format = AUDIO_SPEC_FORMAT;
   want.channels = AUDIO_SPEC_CHANNELS;
   want.samples = host->init.audio_frames * AUDIO_SPEC_CHANNELS;
-  want.callback = host_audio_callback;
+  want.callback = NULL;
   want.userdata = host;
   host->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &host->audio.spec, 0);
   CHECK_MSG(host->audio.dev != 0, "SDL_OpenAudioDevice failed.\n");
 
-  host->audio.buffer_target_available =
-      (size_t)(host->audio.spec.size * AUDIO_TARGET_BUFFER_SIZE_MULTIPLIER);
-
-  size_t buffer_capacity =
-      (size_t)(host->audio.spec.size * AUDIO_MAX_BUFFER_SIZE_MULTIPLIER);
-  host->audio.buffer_capacity = buffer_capacity;
-
-  host->audio.buffer = malloc(buffer_capacity); /* Leaks. */
+  host->audio.buffer = calloc(1, host->audio.spec.size);
   CHECK_MSG(host->audio.buffer != NULL, "Audio buffer allocation failed.\n");
-  memset(host->audio.buffer, 0, buffer_capacity);
-
-  host->audio.buffer_end = host->audio.buffer + buffer_capacity;
-  host->audio.read_pos = host->audio.write_pos = host->audio.buffer;
   return OK;
   ON_ERROR_RETURN;
 }
@@ -322,13 +283,6 @@ Bool host_poll_events(Host* host) {
   return running;
 }
 
-EmulatorEvent host_run_emulator(Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
-  size_t size =
-      NEXT_MODULO(host->audio.buffer_available, host->audio.spec.size);
-  return emulator_run(e, (u32)(size / AUDIO_FRAME_SIZE));
-}
-
 void host_render_video(Host* host) {
   struct Emulator* e = host->hook_ctx.e;
   glClearColor(0.1f, 0.1f, 0.1f, 1);
@@ -351,14 +305,11 @@ void host_synchronize(Host* host) {
       delta_ms > AUDIO_MAX_FAST_DESYNC_MS) {
     HOOK(desync, now_ms, gb_ms, real_ms);
     /* Major desync; don't try to catch up, just reset. But our audio buffer
-     * is probably behind (or way ahead), so pause to refill. */
+     * is probably behind (or way ahead), so clear any queued audio. */
     host->last_sync_real_ms = now_ms;
+    SDL_ClearQueuedAudio(host->audio.dev);
     SDL_PauseAudioDevice(host->audio.dev, 1);
     host->audio.ready = FALSE;
-    SDL_LockAudioDevice(host->audio.dev);
-    host->audio.read_pos = host->audio.write_pos = host->audio.buffer;
-    host->audio.buffer_available = 0;
-    SDL_UnlockAudioDevice(host->audio.dev);
   } else {
     if (real_ms < gb_ms) {
       HOOK(sync_wait, now_ms, delta_ms, gb_ms, real_ms);
@@ -377,36 +328,26 @@ void host_render_audio(Host* host) {
   struct Emulator* e = host->hook_ctx.e;
   HostAudio* audio = &host->audio;
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
-  u8* src = audio_buffer->data;
 
-  SDL_LockAudioDevice(audio->dev);
-  size_t old_buffer_available = audio->buffer_available;
   size_t src_frames = audio_buffer_get_frames(audio_buffer);
-  size_t max_dst_frames =
-      (audio->buffer_capacity - audio->buffer_available) / AUDIO_FRAME_SIZE;
+  size_t max_dst_frames = audio->spec.size / AUDIO_FRAME_SIZE;
   size_t frames = MIN(src_frames, max_dst_frames);
-  HostAudioSample* dst = (HostAudioSample*)audio->write_pos;
-  HostAudioSample* dst_end = (HostAudioSample*)audio->buffer_end;
+  u8* src = audio_buffer->data;
+  HostAudioSample* dst = (HostAudioSample*)audio->buffer;
+  HostAudioSample* dst_end = dst + frames * AUDIO_SPEC_CHANNELS;
+  assert((u8*)dst_end <= audio->buffer + audio->spec.size);
   for (size_t i = 0; i < frames; i++) {
     assert(dst + 2 <= dst_end);
     *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
     *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
-    if (dst == dst_end) {
-      dst = (HostAudioSample*)audio->buffer;
-    }
   }
-  audio->write_pos = (u8*)dst;
-  audio->buffer_available += frames * AUDIO_FRAME_SIZE;
-  size_t new_buffer_available = audio->buffer_available;
-  SDL_UnlockAudioDevice(audio->dev);
-
-  if (frames < src_frames) {
-    HOOK(audio_overflow, old_buffer_available);
-  } else {
-    HOOK(audio_add_buffer, old_buffer_available, new_buffer_available);
+  u32 queued_size = SDL_GetQueuedAudioSize(audio->dev);
+  if (queued_size < AUDIO_MAX_QUEUED_SIZE) {
+    u32 buffer_size = (u8*)dst_end - (u8*)audio->buffer;
+    SDL_QueueAudio(audio->dev, audio->buffer, buffer_size);
+    queued_size += buffer_size;
   }
-  if (!audio->ready && new_buffer_available >= audio->buffer_target_available) {
-    HOOK(audio_buffer_ready, new_buffer_available);
+  if (!audio->ready && queued_size >= AUDIO_TARGET_QUEUED_SIZE) {
     audio->ready = TRUE;
     SDL_PauseAudioDevice(audio->dev, 0);
   }
@@ -453,6 +394,7 @@ void host_delete(Host* host) {
   SDL_GL_DeleteContext(host->gl_context);
   SDL_DestroyWindow(host->window);
   SDL_Quit();
+  free(host->audio.buffer);
   free(host);
 }
 

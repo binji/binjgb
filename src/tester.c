@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
-    EmulatorEvent event = emulator_run(e, AUDIO_FRAMES);
+    EmulatorEvent event = emulator_run(e);
     if (get_time_sec() > timeout_sec) {
       PRINT_ERROR("test timed out.\n");
       goto error;

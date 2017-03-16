@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
       continue;
     }
 
-    EmulatorEvent event = host_run_emulator(host);
+    EmulatorEvent event = emulator_run(e);
     if (!config.no_sync) {
       host_synchronize(host);
     }

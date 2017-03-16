@@ -54,7 +54,6 @@ typedef struct HostConfig {
 struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
-EmulatorEvent host_run_emulator(struct Host*);
 void host_render_video(struct Host*);
 void host_render_audio(struct Host*);
 void host_synchronize(struct Host*);

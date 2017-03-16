@@ -2764,6 +2764,7 @@ static void write_audio_frame(Emulator* e, u32 gb_frames) {
     }
     buffer->divisor = 0;
   }
+  assert(buffer->position <= buffer->end);
 }
 
 static void apu_update_channels(Emulator* e, u32 total_frames) {
@@ -3425,20 +3426,20 @@ void emulator_step(Emulator* e) {
   handle_interrupts(e);
 }
 
-EmulatorEvent emulator_run(Emulator* e, u32 max_audio_frames) {
+EmulatorEvent emulator_run(Emulator* e) {
+  AudioBuffer* ab = &e->audio_buffer;
   if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
   }
   if (e->last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-    e->audio_buffer.position = e->audio_buffer.data;
+    ab->position = ab->data;
   }
   check_joyp_intr(e);
 
-  u64 frames_left =
-      max_audio_frames - audio_buffer_get_frames(&e->audio_buffer);
+  u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
   u32 max_cycles =
-      e->state.apu.cycles + (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND,
-                                          e->audio_buffer.frequency);
+      e->state.apu.cycles +
+      (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
   while (event == 0) {
     emulator_step(e);
@@ -3453,7 +3454,7 @@ EmulatorEvent emulator_run(Emulator* e, u32 max_audio_frames) {
   }
   apu_synchronize(e);
   assert(!(event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) ||
-         audio_buffer_get_frames(&e->audio_buffer) >= max_audio_frames);
+         audio_buffer_get_frames(ab) >= ab->frames);
   return e->last_event = event;
 }
 
@@ -3490,6 +3491,7 @@ static void log_cart_info(CartInfo* cart_info) {
 
 Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   AudioBuffer* audio_buffer = &e->audio_buffer;
+  audio_buffer->frames = frames;
   size_t buffer_size =
       (frames + AUDIO_BUFFER_EXTRA_FRAMES) * SOUND_OUTPUT_COUNT;
   audio_buffer->data = malloc(buffer_size); /* Leaks. */
