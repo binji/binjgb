@@ -160,15 +160,22 @@ error:
 }
 
 int main(int argc, char** argv) {
+  int result = 1;
+  struct Emulator* e = NULL;
+
   init_time();
   parse_options(argc, argv);
 
+  FileData rom;
+  CHECK(SUCCESS(file_read(s_rom_filename, &rom)));
+
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);
-  emulator_init.rom_filename = s_rom_filename;
+  emulator_init.rom = rom;
   emulator_init.audio_frequency = AUDIO_FREQUENCY;
   emulator_init.audio_frames = AUDIO_FRAMES;
-  struct Emulator* e = emulator_new(&emulator_init);
+  e = emulator_new(&emulator_init);
+  CHECK(e != NULL);
 
   /* Run for N frames, measured by audio frames (measuring using video is
    * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
@@ -254,7 +261,10 @@ int main(int argc, char** argv) {
     CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
   }
 
-  return 0;
+  result = 0;
 error:
-  return 1;
+  if (e) {
+    emulator_delete(e);
+  }
+  return result;
 }

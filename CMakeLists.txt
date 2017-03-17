@@ -26,6 +26,7 @@ if (NOT EMSCRIPTEN)
 
   if (SDL2_FOUND AND OPENGL_FOUND)
     add_executable(binjgb
+      src/common.c
       src/emulator.c
       src/host.c
       src/binjgb.c
@@ -33,6 +34,7 @@ if (NOT EMSCRIPTEN)
     target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
 
     add_executable(binjgb-debugger
+      src/common.c
       src/options.c
       src/emulator-debug.c
       src/host.c
@@ -49,6 +51,7 @@ if (NOT EMSCRIPTEN)
   endif ()
 
   add_executable(binjgb-tester
+    src/common.c
     src/options.c
     src/emulator.c
     src/tester.c
@@ -56,7 +59,7 @@ if (NOT EMSCRIPTEN)
   target_compile_definitions(binjgb-tester PRIVATE NO_SDL)
   install(TARGETS binjgb-tester DESTINATION bin)
 else (EMSCRIPTEN)
-  add_executable(binjgb src/emscripten/main.c)
+  add_executable(binjgb src/emulator.c src/emscripten/wrapper.c)
   set(PRE_JS ${PROJECT_SOURCE_DIR}/src/emscripten/pre.js)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)
   target_include_directories(binjgb PUBLIC ${PROJECT_SOURCE_DIR}/src)

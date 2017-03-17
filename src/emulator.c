@@ -339,11 +339,6 @@ typedef enum {
 } DMAState;
 
 typedef struct {
-  u8* data;
-  size_t size;
-} FileData;
-
-typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
   BatteryType battery_type;
@@ -601,6 +596,7 @@ typedef struct {
 } DMA;
 
 typedef struct {
+  u32 header; /* Set to SAVE_STATE_HEADER; makes it easier to save state. */
   u8 cart_info_index;
   MemoryMapState memory_map_state;
   Registers reg;
@@ -641,7 +637,6 @@ typedef struct Emulator {
 
 #define SAVE_STATE_VERSION (2)
 #define SAVE_STATE_HEADER (u32)(0x6b57a7e0 + SAVE_STATE_VERSION)
-#define SAVE_STATE_FILE_SIZE (sizeof(u32) + sizeof(EmulatorState))
 
 #ifndef HOOK0
 #define HOOK0(name)
@@ -3586,97 +3581,121 @@ u32 audio_buffer_get_frames(AudioBuffer* audio_buffer) {
   return (audio_buffer->position - audio_buffer->data) / SOUND_OUTPUT_COUNT;
 }
 
-Result get_file_size(FILE* f, long* out_size) {
-  CHECK_MSG(fseek(f, 0, SEEK_END) >= 0, "fseek to end failed.\n");
-  long size = ftell(f);
-  CHECK_MSG(size >= 0, "ftell failed.");
-  CHECK_MSG(fseek(f, 0, SEEK_SET) >= 0, "fseek to beginning failed.\n");
-  *out_size = size;
+static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
+  CHECK_MSG(file_data->size >= MINIMUM_ROM_SIZE,
+            "size (%ld) < minimum rom size (%u).\n", (long)file_data->size,
+            MINIMUM_ROM_SIZE);
+  e->file_data = *file_data;
   return OK;
   ON_ERROR_RETURN;
 }
 
-const char* replace_extension(const char* filename, const char* extension) {
-  size_t length = strlen(filename) + strlen(extension) + 1; /* +1 for \0. */
-  char* result = malloc(length);
-  char* last_dot = strrchr(filename, '.');
-  if (last_dot == NULL) {
-    snprintf(result, length, "%s%s", filename, extension);
-  } else {
-    snprintf(result, length, "%.*s%s", (int)(last_dot - filename), filename,
-             extension);
-  }
+Result emulator_read_state(Emulator* e, const FileData* file_data) {
+  CHECK_MSG(file_data->size == sizeof(EmulatorState),
+            "save state file is wrong size: %ld, expected %ld.\n",
+            (long)file_data->size, (long)sizeof(EmulatorState));
+  EmulatorState* new_state = (EmulatorState*)file_data->data;
+  CHECK_MSG(new_state->header == SAVE_STATE_HEADER,
+            "header mismatch: %u, expected %u.\n", new_state->header,
+            SAVE_STATE_HEADER);
+  memcpy(&e->state, new_state, sizeof(EmulatorState));
+  set_cart_info(e, e->state.cart_info_index);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result emulator_write_state(Emulator* e, FileData* file_data) {
+  e->state.header = SAVE_STATE_HEADER;
+  file_data->size = sizeof(EmulatorState);
+  file_data->data = malloc(file_data->size);
+  CHECK_MSG(file_data->data != NULL, "EmulatorState allocation failed.\n");
+  memcpy(file_data->data, &e->state, file_data->size);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result emulator_read_ext_ram(Emulator* e, const FileData* file_data) {
+  if (e->state.ext_ram.battery_type != BATTERY_TYPE_WITH_BATTERY)
+    return OK;
+
+  CHECK_MSG(file_data->size == e->state.ext_ram.size,
+            "save file is wrong size: %ld, expected %ld.\n",
+            (long)file_data->size, (long)e->state.ext_ram.size);
+  memcpy(e->state.ext_ram.data, file_data->data, file_data->size);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result emulator_write_ext_ram(Emulator* e, FileData* file_data) {
+  if (e->state.ext_ram.battery_type != BATTERY_TYPE_WITH_BATTERY)
+    return OK;
+
+  file_data->size = e->state.ext_ram.size;
+  file_data->data = malloc(file_data->size);
+  CHECK_MSG(file_data->data != NULL, "ExtRam allocation failed.\n");
+  memcpy(file_data->data, e->state.ext_ram.data, file_data->size);
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+Result emulator_read_ext_ram_from_file(struct Emulator* e,
+                                       const char* filename) {
+  if (e->state.ext_ram.battery_type != BATTERY_TYPE_WITH_BATTERY)
+    return OK;
+  Result result = ERROR;
+  FileData file_data;
+  ZERO_MEMORY(file_data);
+  CHECK(SUCCESS(file_read(filename, &file_data)));
+  CHECK(SUCCESS(emulator_read_ext_ram(e, &file_data)));
+  result = OK;
+error:
+  file_data_delete(&file_data);
   return result;
 }
 
-static Result read_rom_data_from_file(Emulator* e, const char* filename) {
-  FILE* f = fopen(filename, "rb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  long size;
-  CHECK(SUCCESS(get_file_size(f, &size)));
-  CHECK_MSG(size >= MINIMUM_ROM_SIZE, "size < minimum rom size (%u).\n",
-            MINIMUM_ROM_SIZE);
-  u8* data = malloc(size); /* Leaks. */
-  CHECK_MSG(data, "allocation failed.\n");
-  CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
-  fclose(f);
-  e->file_data.data = data;
-  e->file_data.size = size;
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
+Result emulator_write_ext_ram_to_file(struct Emulator* e,
+                                      const char* filename) {
+  if (e->state.ext_ram.battery_type != BATTERY_TYPE_WITH_BATTERY)
+    return OK;
+
+  Result result = ERROR;
+  FileData file_data;
+  ZERO_MEMORY(file_data);
+  CHECK(SUCCESS(emulator_write_ext_ram(e, &file_data)));
+  CHECK(SUCCESS(file_write(filename, &file_data)));
+  result = OK;
+error:
+  file_data_delete(&file_data);
+  return result;
 }
 
-Result emulator_read_state_from_file(Emulator* e, const char* filename) {
-  FILE* f = fopen(filename, "rb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  long size;
-  CHECK(SUCCESS(get_file_size(f, &size)));
-  CHECK_MSG(size == SAVE_STATE_FILE_SIZE,
-            "save state file is wrong size: %ld, expected %ld.\n", size,
-            (long)SAVE_STATE_FILE_SIZE);
-  u32 header;
-  CHECK_MSG(fread(&header, sizeof(header), 1, f) == 1, "fread failed.\n");
-  CHECK_MSG(header == SAVE_STATE_HEADER, "header mismatch: %u, expected %u.\n",
-            header, SAVE_STATE_HEADER);
-  CHECK_MSG(fread(&e->state, sizeof(e->state), 1, f) == 1, "fread failed.\n");
-  fclose(f);
-  set_cart_info(e, e->state.cart_info_index);
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
+Result emulator_read_state_from_file(struct Emulator* e, const char* filename) {
+  Result result = ERROR;
+  FileData file_data;
+  ZERO_MEMORY(file_data);
+  CHECK(SUCCESS(file_read(filename, &file_data)));
+  CHECK(SUCCESS(emulator_read_state(e, &file_data)));
+  result = OK;
+error:
+  file_data_delete(&file_data);
+  return result;
 }
 
-Result emulator_write_state_to_file(Emulator* e, const char* filename) {
-  FILE* f = fopen(filename, "wb");
-  CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  u32 header = SAVE_STATE_HEADER;
-  CHECK_MSG(fwrite(&header, sizeof(header), 1, f) == 1, "fwrite failed.\n");
-  CHECK_MSG(fwrite(&e->state, sizeof(e->state), 1, f) == 1, "fwrite failed.\n");
-  fclose(f);
-  return OK;
-  ON_ERROR_CLOSE_FILE_AND_RETURN;
+Result emulator_write_state_to_file(struct Emulator* e, const char* filename) {
+  Result result = ERROR;
+  FileData file_data;
+  ZERO_MEMORY(file_data);
+  CHECK(SUCCESS(emulator_write_state(e, &file_data)));
+  CHECK(SUCCESS(file_write(filename, &file_data)));
+  result = OK;
+error:
+  file_data_delete(&file_data);
+  return result;
 }
-
-#define DEFINE_SAVE_EXT_RAM(name, mode, fileop)                            \
-  Result name(Emulator* e, const char* filename) {                         \
-    FILE* f = NULL;                                                        \
-    if (e->state.ext_ram.battery_type == BATTERY_TYPE_WITH_BATTERY) {      \
-      f = fopen(filename, mode);                                           \
-      CHECK_MSG(f, "unable to open file \"%s\".\n", filename);             \
-      CHECK_MSG(                                                           \
-          fileop(e->state.ext_ram.data, e->state.ext_ram.size, 1, f) == 1, \
-          #fileop " failed.\n");                                           \
-      fclose(f);                                                           \
-    }                                                                      \
-    return OK;                                                             \
-    ON_ERROR_CLOSE_FILE_AND_RETURN;                                        \
-  }
-
-DEFINE_SAVE_EXT_RAM(emulator_read_ext_ram_from_file, "rb", fread)
-DEFINE_SAVE_EXT_RAM(emulator_write_ext_ram_to_file, "wb", fwrite)
 
 Emulator* emulator_new(const EmulatorInit* init) {
   Emulator* e = calloc(1, sizeof(Emulator));
-  CHECK(SUCCESS(read_rom_data_from_file(e, init->rom_filename)));
+  CHECK(SUCCESS(set_rom_file_data(e, &init->rom)));
   CHECK(SUCCESS(init_emulator(e)));
   CHECK(
       SUCCESS(init_audio_buffer(e, init->audio_frequency, init->audio_frames)));

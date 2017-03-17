@@ -59,7 +59,7 @@ typedef struct AudioBuffer {
 } AudioBuffer;
 
 typedef struct EmulatorInit {
-  const char* rom_filename;
+  FileData rom;
   int audio_frequency;
   int audio_frames;
 } EmulatorInit;
@@ -78,8 +78,6 @@ enum {
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
 };
 
-const char* replace_extension(const char* filename, const char* extension);
-
 struct Emulator* emulator_new(const EmulatorInit*);
 void emulator_delete(struct Emulator*);
 
@@ -94,9 +92,14 @@ u32 emulator_get_cycles(struct Emulator*);
 u32 emulator_get_ppu_frame(struct Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
+Result emulator_read_state(struct Emulator*, const FileData*);
+Result emulator_write_state(struct Emulator*, FileData*);
+Result emulator_read_ext_ram(struct Emulator*, const FileData*);
+Result emulator_write_ext_ram(struct Emulator*, FileData*);
+
 Result emulator_read_state_from_file(struct Emulator*, const char* filename);
-Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_state_to_file(struct Emulator*, const char* filename);
+Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
 void emulator_step(struct Emulator*);

@@ -141,21 +141,30 @@ int main(int argc, char** argv) {
   int result = 1;
   parse_arguments(argc, argv);
 
+  const char* save_filename;
+  struct Emulator* e = NULL;
+  struct Host* host = NULL;
+
+  FileData rom;
+  CHECK(SUCCESS(file_read(s_rom_filename, &rom)));
+
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);
-  emulator_init.rom_filename = s_rom_filename;
+  emulator_init.rom = rom;
   emulator_init.audio_frequency = audio_frequency;
   emulator_init.audio_frames = audio_frames;
-  struct Emulator* e = emulator_new(&emulator_init);
+  e = emulator_new(&emulator_init);
+  CHECK(e != NULL);
 
   HostInit host_init;
   ZERO_MEMORY(host_init);
   host_init.render_scale = 4;
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
-  struct Host* host = host_new(&host_init, e);
+  host = host_new(&host_init, e);
+  CHECK(host != NULL);
 
-  const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
+  save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
   emulator_read_ext_ram_from_file(e, save_filename);
 
   while (host_poll_events(host)) {
@@ -184,6 +193,7 @@ int main(int argc, char** argv) {
 
   emulator_write_ext_ram_to_file(e, save_filename);
   result = 0;
+error:
   if (host) {
     host_delete(host);
   }

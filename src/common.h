@@ -11,6 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -50,5 +54,19 @@ typedef u16 MaskedAddress;
 typedef u32 RGBA;
 typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 typedef enum Result { OK = 0, ERROR = 1 } Result;
+
+typedef struct FileData {
+  u8* data;
+  size_t size;
+} FileData;
+
+const char* replace_extension(const char* filename, const char* extension);
+Result file_read(const char* filename, FileData* out);
+Result file_write(const char* filename, const FileData*);
+void file_data_delete(const FileData*);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /*  BINJGB_COMMON_H_ */

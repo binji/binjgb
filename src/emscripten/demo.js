@@ -44,19 +44,15 @@ function Emulator(romArrayBuffer) {
   this.audio = new AudioContext();
   this.defer(function() { this.audio.close(); });
 
-  this.e = _new_emulator();
-  this.defer(function() { _clear_emulator(this.e); });
-
   var romData = _malloc(romArrayBuffer.byteLength);
   HEAPU8.set(
       new Uint8Array(romArrayBuffer), romData, romArrayBuffer.byteLength);
-  _init_rom_data(this.e, romData, romArrayBuffer.byteLength);
-  this.defer(function() { _free(romData); });
-
-  if (_init_emulator(this.e) != 0) {
+  this.e = _emulator_new_simple(
+      romData, romArrayBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES);
+  if (this.e == 0) {
     throw Error('Invalid ROM.');
   }
-  _init_audio_buffer(this.e, this.audio.sampleRate, AUDIO_FRAMES);
+  this.defer(function() { _emulator_delete(this.e); });
 
   this.frameBuffer = new Uint8Array(
       Module.buffer, _get_frame_buffer_ptr(this.e),
@@ -106,8 +102,8 @@ Emulator.prototype.bindKeyInput = function(el) {
     38: _set_joyp_up,
     39: _set_joyp_right,
     40: _set_joyp_down,
-    88: _set_joyp_a,
-    90: _set_joyp_b,
+    88: _set_joyp_A,
+    90: _set_joyp_B,
   };
 
   var nop = function() {};
@@ -135,7 +131,7 @@ Emulator.prototype.run = function() {
 };
 
 Emulator.prototype.getCycles = function() {
-  return _get_cycles(this.e) >>> 0;
+  return _emulator_get_cycles(this.e) >>> 0;
 };
 
 function lerp(from, to, alpha) {
