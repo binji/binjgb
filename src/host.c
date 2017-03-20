@@ -31,12 +31,14 @@
 #define FOREACH_GLEXT_PROC(V)                                    \
   V(glAttachShader, PFNGLATTACHSHADERPROC)                       \
   V(glBindBuffer, PFNGLBINDBUFFERPROC)                           \
+  V(glBindVertexArray, PFNGLBINDVERTEXARRAYPROC)                 \
   V(glBufferData, PFNGLBUFFERDATAPROC)                           \
   V(glCompileShader, PFNGLCOMPILESHADERPROC)                     \
   V(glCreateProgram, PFNGLCREATEPROGRAMPROC)                     \
   V(glCreateShader, PFNGLCREATESHADERPROC)                       \
   V(glEnableVertexAttribArray, PFNGLENABLEVERTEXATTRIBARRAYPROC) \
   V(glGenBuffers, PFNGLGENBUFFERSPROC)                           \
+  V(glGenVertexArrays, PFNGLGENVERTEXARRAYSPROC)                 \
   V(glGetAttribLocation, PFNGLGETATTRIBLOCATIONPROC)             \
   V(glGetProgramInfoLog, PFNGLGETPROGRAMINFOLOGPROC)             \
   V(glGetProgramiv, PFNGLGETPROGRAMIVPROC)                       \
@@ -46,6 +48,7 @@
   V(glLinkProgram, PFNGLLINKPROGRAMPROC)                         \
   V(glShaderSource, PFNGLSHADERSOURCEPROC)                       \
   V(glUniform1i, PFNGLUNIFORM1IPROC)                             \
+  V(glUniformMatrix3fv, PFNGLUNIFORMMATRIX3FVPROC)               \
   V(glUseProgram, PFNGLUSEPROGRAMPROC)                           \
   V(glVertexAttribPointer, PFNGLVERTEXATTRIBPOINTERPROC)
 
@@ -68,6 +71,9 @@ typedef u16 HostAudioSample;
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
 
+#define TEXTURE_WIDTH 256
+#define TEXTURE_HEIGHT 256
+
 #define CHECK_LOG(var, kind, status_enum, kind_str)      \
   do {                                                   \
     GLint status;                                        \
@@ -87,7 +93,7 @@ typedef u16 HostAudioSample;
   glShaderSource(var, 1, &(source), NULL);          \
   glCompileShader(var);                             \
   CHECK_LOG(var, Shader, GL_COMPILE_STATUS, #type); \
-  glAttachShader(program, var);
+  glAttachShader(host->program, var);
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -95,6 +101,11 @@ typedef struct {
   u8* buffer; /* Size is spec.size. */
   Bool ready;
 } HostAudio;
+
+typedef struct {
+  f32 pos[2];
+  f32 tex_coord[2];
+} HostVertex;
 
 typedef struct Host {
   HostInit init;
@@ -105,22 +116,24 @@ typedef struct Host {
   HostAudio audio;
   u64 start_counter;
   u64 performance_frequency;
+  HostVertex vertices[4];
+  f32 proj_matrix[9];
+  GLuint vao;
+  GLuint vbo;
+  GLuint texture;
+  GLuint program;
+  GLint uProjMatrix;
+  GLint uSampler;
 } Host;
 
 Result host_init_video(Host* host) {
-  static const f32 s_buffer[] = {
-    -1, -1,  0, SCREEN_HEIGHT / 256.0f,
-    +1, -1,  SCREEN_WIDTH / 256.0f, SCREEN_HEIGHT / 256.0f,
-    -1, +1,  0, 0,
-    +1, +1,  SCREEN_WIDTH / 256.0f, 0,
-  };
-
   static const char* s_vertex_shader =
       "attribute vec2 aPos;\n"
       "attribute vec2 aTexCoord;\n"
       "varying vec2 vTexCoord;\n"
+      "uniform mat3 uProjMatrix;\n"
       "void main(void) {\n"
-      "  gl_Position = vec4(aPos, 0.0, 1.0);\n"
+      "  gl_Position = vec4(uProjMatrix * vec3(aPos, 1.0), 1.0);\n"
       "  vTexCoord = aTexCoord;\n"
       "}\n";
 
@@ -140,6 +153,7 @@ Result host_init_video(Host* host) {
                                   SCREEN_HEIGHT * host->init.render_scale,
                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
+
   host->gl_context = SDL_GL_CreateContext(host->window);
   GLint major;
   SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
@@ -149,30 +163,37 @@ Result host_init_video(Host* host) {
   CHECK_MSG(name != 0, "Unable to get GL function: " #name);
   FOREACH_GLEXT_PROC(V)
 #undef V
-  GLuint buffer, texture;
-  glGenBuffers(1, &buffer);
-  glBindBuffer(GL_ARRAY_BUFFER, buffer);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(s_buffer), s_buffer, GL_STATIC_DRAW);
-  glGenTextures(1, &texture);
-  glBindTexture(GL_TEXTURE_2D, texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA,
-               GL_UNSIGNED_BYTE, NULL);
+
+  glGenBuffers(1, &host->vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, host->vbo);
+
+  glGenTextures(1, &host->texture);
+  glBindTexture(GL_TEXTURE_2D, host->texture);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TEXTURE_WIDTH, TEXTURE_HEIGHT, 0,
+               GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  GLuint program = glCreateProgram();
+
+  host->program = glCreateProgram();
   COMPILE_SHADER(vertex_shader, GL_VERTEX_SHADER, s_vertex_shader);
   COMPILE_SHADER(fragment_shader, GL_FRAGMENT_SHADER, s_fragment_shader);
-  glLinkProgram(program);
-  CHECK_LOG(program, Program, GL_LINK_STATUS, "GL_PROGRAM");
-  glUseProgram(program);
-  GLint aPos = glGetAttribLocation(program, "aPos");
-  GLint aTexCoord = glGetAttribLocation(program, "aTexCoord");
+  glLinkProgram(host->program);
+  CHECK_LOG(host->program, Program, GL_LINK_STATUS, "GL_PROGRAM");
+
+  GLint aPos = glGetAttribLocation(host->program, "aPos");
+  GLint aTexCoord = glGetAttribLocation(host->program, "aTexCoord");
+  host->uProjMatrix = glGetUniformLocation(host->program, "uProjMatrix");
+  host->uSampler = glGetUniformLocation(host->program, "uSampler");
+
+  glGenVertexArrays(1, &host->vao);
+  glBindVertexArray(host->vao);
   glEnableVertexAttribArray(aPos);
   glEnableVertexAttribArray(aTexCoord);
-  glVertexAttribPointer(aPos, 2, GL_FLOAT, GL_FALSE, sizeof(f32) * 4, 0);
-  glVertexAttribPointer(aTexCoord, 2, GL_FLOAT, GL_FALSE, sizeof(f32) * 4,
-                        (void*)(sizeof(f32) * 2));
-  glUniform1i(glGetUniformLocation(program, "uSampler"), 0);
+  glVertexAttribPointer(aPos, 2, GL_FLOAT, GL_FALSE, sizeof(HostVertex),
+                        (void*)offsetof(HostVertex, pos));
+  glVertexAttribPointer(aTexCoord, 2, GL_FLOAT, GL_FALSE, sizeof(HostVertex),
+                        (void*)offsetof(HostVertex, tex_coord));
+
   return OK;
 error:
   SDL_Quit();
@@ -218,11 +239,40 @@ Bool host_poll_events(Host* host) {
       case SDL_WINDOWEVENT:
         switch (event.window.event) {
           case SDL_WINDOWEVENT_RESIZED: {
-            f32 w = event.window.data1, h = event.window.data2;
+            f32 w = event.window.data1;
+            f32 h = event.window.data2;
+            glViewport(0, 0, w, h);
+
+            memset(host->proj_matrix, 0, sizeof(host->proj_matrix));
+            host->proj_matrix[0] = 2.0f / w;
+            host->proj_matrix[4] = -2.0f / h;
+            host->proj_matrix[6] = -1.0f;
+            host->proj_matrix[7] = 1.0f;
+            host->proj_matrix[8] = 1.0f;
+
             f32 aspect = w / h, want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
             f32 new_w = aspect < want_aspect ? w : h * want_aspect;
             f32 new_h = aspect < want_aspect ? w / want_aspect : h;
-            glViewport((w - new_w) * 0.5f, (h - new_h) * 0.5f, new_w, new_h);
+            f32 new_left = (w - new_w) * 0.5f;
+            f32 new_right = new_left + new_w;
+            f32 new_top = (h - new_h) * 0.5f;
+            f32 new_bottom = new_top + new_h;
+            f32 u_right = (f32)SCREEN_WIDTH / TEXTURE_WIDTH;
+            f32 v_bottom = (f32)SCREEN_HEIGHT / TEXTURE_HEIGHT;
+
+#define SET_VERTEX(index, x_val, y_val, u_val, v_val) \
+  host->vertices[index].pos[0] = x_val;               \
+  host->vertices[index].pos[1] = y_val;               \
+  host->vertices[index].tex_coord[0] = u_val;         \
+  host->vertices[index].tex_coord[1] = v_val
+
+            SET_VERTEX(0, new_left, new_top, 0, 0);
+            SET_VERTEX(1, new_left, new_bottom, 0, v_bottom);
+            SET_VERTEX(2, new_right, new_top, u_right, 0);
+            SET_VERTEX(3, new_right, new_bottom, u_right, v_bottom);
+
+#undef SET_VERTEX
+
             break;
           }
         }
@@ -274,6 +324,14 @@ void host_upload_video(Host* host) {
 void host_render_video(Host* host) {
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
+  glUseProgram(host->program);
+  glUniformMatrix3fv(host->uProjMatrix, 1, GL_FALSE, host->proj_matrix);
+  glUniform1i(host->uSampler, 0);
+  glBindVertexArray(host->vao);
+  glBindBuffer(GL_ARRAY_BUFFER, host->vbo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(host->vertices), host->vertices,
+               GL_DYNAMIC_DRAW);
+  glBindTexture(GL_TEXTURE_2D, host->texture);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   SDL_GL_SwapWindow(host->window);
 }
