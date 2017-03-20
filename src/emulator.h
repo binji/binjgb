@@ -23,10 +23,6 @@ extern "C" {
 #define PPU_VBLANK_CYCLES (PPU_LINE_CYCLES * 10)
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
 
-#define MILLISECONDS_PER_SECOND 1000
-#define VIDEO_FRAME_MS \
-  ((f64)MILLISECONDS_PER_SECOND * PPU_FRAME_CYCLES / CPU_CYCLES_PER_SECOND)
-
 #define SOUND_OUTPUT_COUNT 2
 
 struct Emulator;
@@ -76,6 +72,7 @@ typedef u32 EmulatorEvent;
 enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
+  EMULATOR_EVENT_UNTIL_CYCLES = 0x4,
 };
 
 struct Emulator* emulator_new(const EmulatorInit*);
@@ -103,7 +100,7 @@ Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
 void emulator_step(struct Emulator*);
-EmulatorEvent emulator_run(struct Emulator*);
+EmulatorEvent emulator_run_until(struct Emulator*, u32 until_cycles);
 
 #ifdef __cplusplus
 }

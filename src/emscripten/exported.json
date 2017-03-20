@@ -1,7 +1,7 @@
 ["_emulator_delete",
 "_emulator_get_cycles",
 "_emulator_new_simple",
-"_emulator_run",
+"_emulator_run_until",
 "_get_audio_buffer_capacity",
 "_get_audio_buffer_ptr",
 "_get_frame_buffer_ptr",

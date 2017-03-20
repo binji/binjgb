@@ -11,6 +11,9 @@
 
 #include "emulator.h"
 
+#define U32_LESS_THAN_WITH_WRAP(x, y) ((s32)((y) - (x)) >= 0)
+#define U32_MIN_WITH_WRAP(x, y) (U32_LESS_THAN_WITH_WRAP((x), (y)) ? (x) : (y))
+
 #define MAXIMUM_ROM_SIZE 8388608
 #define MINIMUM_ROM_SIZE 32768
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
@@ -3421,7 +3424,7 @@ void emulator_step(Emulator* e) {
   handle_interrupts(e);
 }
 
-EmulatorEvent emulator_run(Emulator* e) {
+EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
   AudioBuffer* ab = &e->audio_buffer;
   if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
@@ -3432,7 +3435,7 @@ EmulatorEvent emulator_run(Emulator* e) {
   check_joyp_intr(e);
 
   u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
-  u32 max_cycles =
+  u32 max_audio_cycles =
       e->state.apu.cycles +
       (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
@@ -3441,15 +3444,14 @@ EmulatorEvent emulator_run(Emulator* e) {
     if (e->state.ppu.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    /* Check whether e->state.cycles >= max_cycles, even if e->state.cycles has
-     * overflowed. */
-    if ((s32)(e->state.cycles - max_cycles) >= 0) {
+    if (U32_LESS_THAN_WITH_WRAP(max_audio_cycles, e->state.cycles)) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
+    }
+    if (U32_LESS_THAN_WITH_WRAP(until_cycles, e->state.cycles)) {
+      event |= EMULATOR_EVENT_UNTIL_CYCLES;
     }
   }
   apu_synchronize(e);
-  assert(!(event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) ||
-         audio_buffer_get_frames(ab) >= ab->frames);
   return e->last_event = event;
 }
 

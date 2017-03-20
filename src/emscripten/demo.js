@@ -14,6 +14,7 @@ const MAX_UPDATE_SEC = 5 / 60;
 const CPU_CYCLES_PER_SECOND = 4194304;
 const EVENT_NEW_FRAME = 1;
 const EVENT_AUDIO_BUFFER_FULL = 2;
+const EVENT_UNTIL_CYCLES = 4;
 
 var $ = document.querySelector.bind(document);
 var canvasEl = $('canvas');
@@ -146,8 +147,8 @@ Emulator.prototype.renderVideo = function(startMs) {
   var startCycles = this.getCycles();
   var deltaCycles = Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_CYCLES_PER_SECOND;
   var runUntilCycles = (startCycles + deltaCycles - this.leftoverCycles) >>> 0;
-  while (((runUntilCycles - this.getCycles()) | 0) > 0) {
-    var event = _emulator_run(this.e);
+  while (true) {
+    var event = _emulator_run_until(this.e, runUntilCycles);
     if (event & EVENT_NEW_FRAME) {
       this.renderer.uploadTexture(this.frameBuffer);
     }
@@ -180,6 +181,9 @@ Emulator.prototype.renderVideo = function(startMs) {
             nowAudioSec.toFixed(2) + ')');
         this.startAudioSec = nowPlusLatency;
       }
+    }
+    if (event & EVENT_UNTIL_CYCLES) {
+      break;
     }
   }
   this.leftoverCycles = (this.getCycles() - runUntilCycles) | 0;

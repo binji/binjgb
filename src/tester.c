@@ -15,14 +15,12 @@
 #define AUDIO_FREQUENCY 44100
 /* This value is arbitrary. Why not 1/10th of a second? */
 #define AUDIO_FRAMES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
-#define DEFAULT_TIMEOUT_SEC 30
 #define DEFAULT_FRAMES 60
 
 static FILE* s_controller_input_file;
 static int s_frames = DEFAULT_FRAMES;
 static const char* s_output_ppm;
 static Bool s_animate;
-static int s_delta_timeout_sec = DEFAULT_TIMEOUT_SEC;
 static const char* s_rom_filename;
 
 Result write_frame_ppm(struct Emulator* e, const char* filename) {
@@ -53,11 +51,9 @@ void usage(int argc, char** argv) {
       "  -i,--input FILE    read controller input from FILE\n"
       "  -f,--frames N      run for N frames (default: %u)\n"
       "  -o,--output FILE   output PPM file to FILE\n"
-      "  -a,--animate       output an image every frame\n"
-      "  -t,--timeout N     timeout after N seconds (default: %u)\n",
+      "  -a,--animate       output an image every frame\n",
       argv[0],
-      DEFAULT_FRAMES,
-      DEFAULT_TIMEOUT_SEC);
+      DEFAULT_FRAMES);
 }
 
 static time_t s_start_time;
@@ -77,7 +73,6 @@ void parse_options(int argc, char**argv) {
     {'f', "frames", 1},
     {'o', "output", 1},
     {'a', "animate", 0},
-    {'t', "timeout", 1},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -122,10 +117,6 @@ void parse_options(int argc, char**argv) {
 
           case 'a':
             s_animate = TRUE;
-            break;
-
-          case 't':
-            s_delta_timeout_sec = atoi(result.value);
             break;
 
           default:
@@ -177,24 +168,15 @@ int main(int argc, char** argv) {
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 
-  /* Run for N frames, measured by audio frames (measuring using video is
-   * tricky, as the LCD can be disabled. Even when the sound unit is disabled,
-   * we still produce audio frames at a fixed rate. */
-  u32 total_audio_frames = (u32)((f64)s_frames * PPU_FRAME_CYCLES *
-                                     AUDIO_FREQUENCY / CPU_CYCLES_PER_SECOND +
-                                 1);
-  printf("frames = %u total_audio_frames = %u\n", s_frames, total_audio_frames);
-  f64 timeout_sec = get_time_sec() + s_delta_timeout_sec;
+  u32 total_cycles = (u32)(s_frames * PPU_FRAME_CYCLES);
+  u32 until_cycles = emulator_get_cycles(e) + total_cycles;
+  printf("frames = %u total_cycles = %u\n", s_frames, total_cycles);
   Bool finish_at_next_frame = FALSE;
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
   while (TRUE) {
-    EmulatorEvent event = emulator_run(e);
-    if (get_time_sec() > timeout_sec) {
-      PRINT_ERROR("test timed out.\n");
-      goto error;
-    }
+    EmulatorEvent event = emulator_run_until(e, until_cycles);
     if (event & EMULATOR_EVENT_NEW_FRAME) {
       if (s_output_ppm && s_animate) {
         char buffer[32];
@@ -248,13 +230,8 @@ int main(int argc, char** argv) {
         break;
       }
     }
-    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      if (total_audio_frames > AUDIO_FRAMES) {
-        total_audio_frames -= AUDIO_FRAMES;
-      } else {
-        total_audio_frames = 0;
-        finish_at_next_frame = TRUE;
-      }
+    if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
+      finish_at_next_frame = TRUE;
     }
   }
   if (s_output_ppm && !s_animate) {

@@ -144,6 +144,7 @@ int main(int argc, char** argv) {
   const char* save_filename;
   struct Emulator* e = NULL;
   struct Host* host = NULL;
+  f64 refresh_ms;
 
   FileData rom;
   CHECK(SUCCESS(file_read(s_rom_filename, &rom)));
@@ -167,28 +168,10 @@ int main(int argc, char** argv) {
   save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
   emulator_read_ext_ram_from_file(e, save_filename);
 
+  refresh_ms = host_get_monitor_refresh_ms(host);
   while (host_poll_events(host)) {
-    HostConfig config = host_get_config(host);
-    if (config.paused) {
-      host_delay(host, VIDEO_FRAME_MS);
-      continue;
-    }
-
-    EmulatorEvent event = emulator_run(e);
-    if (!config.no_sync) {
-      host_synchronize(host);
-    }
-    if (event & EMULATOR_EVENT_NEW_FRAME) {
-      host_render_video(host);
-      if (config.step) {
-        config.paused = TRUE;
-        config.step = FALSE;
-        host_set_config(host, &config);
-      }
-    }
-    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      host_render_audio(host);
-    }
+    host_run_ms(host, refresh_ms);
+    host_render_video(host);
   }
 
   emulator_write_ext_ram_to_file(e, save_filename);

@@ -66,16 +66,7 @@ FOREACH_GLEXT_PROC(V)
 #define AUDIO_CONVERT_SAMPLE_FROM_U8(X) ((X) << 8)
 typedef u16 HostAudioSample;
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
-#define AUDIO_MAX_QUEUED_SIZE (4 * host->audio.spec.size)
-/* One buffer must be supplied every AUDIO_BUFFER_REFILL_MS milliseconds. */
-#define AUDIO_BUFFER_REFILL_MS                        \
-  ((host->audio.spec.samples / AUDIO_SPEC_CHANNELS) * \
-   MILLISECONDS_PER_SECOND / host->audio.spec.freq)
-/* If the emulator is running behind by AUDIO_MAX_SLOW_DESYNC_MS milliseconds
- * (or ahead by AUDIO_MAX_FAST_DESYNC_MS), it won't try to catch up, and
- * instead just forcibly resync. */
-#define AUDIO_MAX_SLOW_DESYNC_MS (0.5 * AUDIO_BUFFER_REFILL_MS)
-#define AUDIO_MAX_FAST_DESYNC_MS (2 * AUDIO_BUFFER_REFILL_MS)
+#define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
 
 #define CHECK_LOG(var, kind, status_enum, kind_str)      \
   do {                                                   \
@@ -112,8 +103,6 @@ typedef struct Host {
   SDL_Window* window;
   SDL_GLContext gl_context;
   HostAudio audio;
-  u32 last_sync_cycles;  /* GB CPU cycle count of last synchronization. */
-  f64 last_sync_real_ms; /* Wall clock time of last synchronization. */
   u64 start_counter;
   u64 performance_frequency;
 } Host;
@@ -200,15 +189,8 @@ f64 host_get_time_ms(Host* host) {
   return (f64)(now - host->start_counter) * 1000 / host->performance_frequency;
 }
 
-void host_delay(Host* host, f64 ms) {
-  SDL_Delay((u32)ms);
-}
-
 static Result host_init_audio(Host* host) {
-  host->last_sync_cycles = 0;
-  host->last_sync_real_ms = host_get_time_ms(host);
   host->audio.ready = FALSE;
-
   SDL_AudioSpec want;
   want.freq = host->init.audio_frequency;
   want.format = AUDIO_SPEC_FORMAT;
@@ -283,45 +265,23 @@ Bool host_poll_events(Host* host) {
   return running;
 }
 
-void host_render_video(Host* host) {
+void host_upload_video(Host* host) {
   struct Emulator* e = host->hook_ctx.e;
-  glClearColor(0.1f, 0.1f, 0.1f, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA,
                   GL_UNSIGNED_BYTE, emulator_get_frame_buffer(e));
+}
+
+void host_render_video(Host* host) {
+  glClearColor(0.1f, 0.1f, 0.1f, 1);
+  glClear(GL_COLOR_BUFFER_BIT);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   SDL_GL_SwapWindow(host->window);
 }
 
-void host_synchronize(Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
-  f64 now_ms = host_get_time_ms(host);
-  f64 gb_ms = (f64)(emulator_get_cycles(e) - host->last_sync_cycles) *
-              MILLISECONDS_PER_SECOND / CPU_CYCLES_PER_SECOND;
-  f64 real_ms = now_ms - host->last_sync_real_ms;
-  f64 delta_ms = gb_ms - real_ms;
-  f64 delay_until_ms = now_ms + delta_ms;
-  if (delta_ms < -AUDIO_MAX_SLOW_DESYNC_MS ||
-      delta_ms > AUDIO_MAX_FAST_DESYNC_MS) {
-    HOOK(desync, now_ms, gb_ms, real_ms);
-    /* Major desync; don't try to catch up, just reset. But our audio buffer
-     * is probably behind (or way ahead), so clear any queued audio. */
-    host->last_sync_real_ms = now_ms;
-    SDL_ClearQueuedAudio(host->audio.dev);
-    SDL_PauseAudioDevice(host->audio.dev, 1);
-    host->audio.ready = FALSE;
-  } else {
-    if (real_ms < gb_ms) {
-      HOOK(sync_wait, now_ms, delta_ms, gb_ms, real_ms);
-      do {
-        SDL_Delay((u32)delta_ms);
-        now_ms = host_get_time_ms(host);
-        delta_ms = delay_until_ms - now_ms;
-      } while (delta_ms > 0);
-    }
-    host->last_sync_real_ms = delay_until_ms;
-  }
-  host->last_sync_cycles = emulator_get_cycles(e);
+static void host_reset_audio(Host* host) {
+  host->audio.ready = FALSE;
+  SDL_ClearQueuedAudio(host->audio.dev);
+  SDL_PauseAudioDevice(host->audio.dev, 1);
 }
 
 void host_render_audio(Host* host) {
@@ -345,9 +305,11 @@ void host_render_audio(Host* host) {
   if (queued_size < AUDIO_MAX_QUEUED_SIZE) {
     u32 buffer_size = (u8*)dst_end - (u8*)audio->buffer;
     SDL_QueueAudio(audio->dev, audio->buffer, buffer_size);
+    HOOK(audio_add_buffer, queued_size, queued_size + buffer_size);
     queued_size += buffer_size;
   }
   if (!audio->ready && queued_size >= AUDIO_TARGET_QUEUED_SIZE) {
+    HOOK(audio_buffer_ready, queued_size);
     audio->ready = TRUE;
     SDL_PauseAudioDevice(audio->dev, 0);
   }
@@ -371,10 +333,37 @@ Result host_init(Host* host, struct Emulator* e) {
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
-  host->last_sync_cycles = emulator_get_cycles(e);
   emulator_set_joypad_callback(e, joypad_callback, host);
   return OK;
   ON_ERROR_RETURN;
+}
+
+void host_run_ms(struct Host* host, f64 delta_ms) {
+  if (host->config.paused) {
+    return;
+  }
+
+  struct Emulator* e = host->hook_ctx.e;
+  u32 delta_cycles = (u32)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
+  u32 until_cycles = emulator_get_cycles(e) + delta_cycles;
+  while (1) {
+    EmulatorEvent event = emulator_run_until(e, until_cycles);
+    if (event & EMULATOR_EVENT_NEW_FRAME) {
+      host_upload_video(host);
+    }
+    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+      host_render_audio(host);
+    }
+    if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
+      break;
+    }
+  }
+  HostConfig config = host_get_config(host);
+  if (config.step) {
+    config.paused = TRUE;
+    config.step = FALSE;
+    host_set_config(host, &config);
+  }
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {
@@ -401,7 +390,13 @@ void host_delete(Host* host) {
 void host_set_config(struct Host* host, const HostConfig* new_config) {
   if (host->config.no_sync != new_config->no_sync) {
     SDL_GL_SetSwapInterval(new_config->no_sync ? 0 : 1);
+    host_reset_audio(host);
   }
+
+  if (host->config.paused != new_config->paused) {
+    host_reset_audio(host);
+  }
+
   if (host->config.fullscreen != new_config->fullscreen) {
     SDL_SetWindowFullscreen(host->window, new_config->fullscreen
                                               ? SDL_WINDOW_FULLSCREEN_DESKTOP
@@ -412,4 +407,16 @@ void host_set_config(struct Host* host, const HostConfig* new_config) {
 
 HostConfig host_get_config(struct Host* host) {
   return host->config;
+}
+
+f64 host_get_monitor_refresh_ms(struct Host* host) {
+  int refresh_rate_hz = 0;
+  SDL_DisplayMode mode;
+  if (SDL_GetWindowDisplayMode(host->window, &mode) == 0) {
+    refresh_rate_hz = mode.refresh_rate;
+  }
+  if (refresh_rate_hz == 0) {
+    refresh_rate_hz = 60;
+  }
+  return 1000.0 / refresh_rate_hz;
 }
