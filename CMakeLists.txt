@@ -29,18 +29,36 @@ if (NOT EMSCRIPTEN)
       src/common.c
       src/emulator.c
       src/host.c
+      src/host-gl.c
+      src/host-ui-simple.c
       src/binjgb.c
     )
     target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
 
     add_executable(binjgb-debugger
+      third_party/imgui/imgui.cpp
+      third_party/imgui/imgui_draw.cpp
       src/common.c
       src/options.c
       src/emulator-debug.c
       src/host.c
+      src/host-gl.c
+      src/host-ui-imgui.cc
       src/debugger.cc
     )
 
+    if (NOT MSVC)
+      # Disable warnings in stb_truetype.h.
+      set_source_files_properties(
+        third_party/imgui/imgui_draw.cpp
+        PROPERTIES
+        COMPILE_FLAGS "-Wno-maybe-uninitialized"
+      )
+    endif ()
+
+    target_include_directories(binjgb-debugger PUBLIC
+        ${PROJECT_SOURCE_DIR}/third_party/imgui)
+    target_compile_definitions(binjgb-debugger PUBLIC BINJGB_HOST_IMGUI)
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)
 
@@ -56,7 +74,6 @@ if (NOT EMSCRIPTEN)
     src/emulator.c
     src/tester.c
   )
-  target_compile_definitions(binjgb-tester PRIVATE NO_SDL)
   install(TARGETS binjgb-tester DESTINATION bin)
 else (EMSCRIPTEN)
   add_executable(binjgb src/emulator.c src/emscripten/wrapper.c)

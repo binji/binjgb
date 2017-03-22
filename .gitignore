@@ -4,3 +4,4 @@
 *.gb
 __pycache__
 *.pyc
+imgui.ini

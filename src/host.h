@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+#define HOST_FRAME_BUFFER_TEXTURE_WIDTH 256
+#define HOST_FRAME_BUFFER_TEXTURE_HEIGHT 256
+
 struct Emulator;
 struct Host;
 typedef u32 EmulatorEvent;
@@ -50,13 +53,14 @@ struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
 void host_run_ms(struct Host*, f64 delta_ms);
-void host_upload_video(struct Host*);
-void host_render_video(struct Host*);
 void host_render_audio(struct Host*);
 f64 host_get_monitor_refresh_ms(struct Host*);
 f64 host_get_time_ms(struct Host*);
 void host_set_config(struct Host*, const HostConfig*);
 HostConfig host_get_config(struct Host*);
+intptr_t host_get_frame_buffer_texture(struct Host*);
+void host_begin_video(struct Host*);
+void host_end_video(struct Host*);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,33 @@
+/*
+ * Copyright (C) 2017 Ben Smith
+ *
+ * This software may be modified and distributed under the terms
+ * of the MIT license.  See the LICENSE file for details.
+ */
+#ifndef BINJGB_HOST_UI_H_
+#define BINJGB_HOST_UI_H_
+
+#include "common.h"
+#include "emulator.h"
+
+union SDL_Event;
+struct SDL_Window;
+struct HostUI;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct HostUI* host_ui_new(struct SDL_Window*);
+void host_ui_delete(struct HostUI*);
+void host_ui_event(struct HostUI*, union SDL_Event*);
+void host_ui_upload_frame_buffer(struct HostUI*, FrameBuffer*);
+void host_ui_begin_frame(struct HostUI*);
+void host_ui_end_frame(struct HostUI*);
+intptr_t host_ui_get_frame_buffer_texture(struct HostUI*);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* BINJGB_HOST_UI_H_ */

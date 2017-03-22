@@ -65,7 +65,8 @@ int main(int argc, char** argv) {
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
   while (host_poll_events(host)) {
     host_run_ms(host, refresh_ms);
-    host_render_video(host);
+    host_begin_video(host);
+    host_end_video(host);
   }
 
   emulator_write_ext_ram_to_file(e, save_filename);
