@@ -14,7 +14,10 @@
 
 #include "imgui.h"
 
+#define SAVE_EXTENSION ".sav"
+
 static const char* s_rom_filename;
+static f32 s_font_scale = 1.0f;
 
 static void print_log_systems(void) {
   PRINT_ERROR("valid log systems:\n");
@@ -27,9 +30,10 @@ static void print_log_systems(void) {
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
-      "  -h,--help      help\n"
-      "  -t,--trace     trace each instruction\n"
-      "  -l,--log S=N   set log level for system S to N\n\n",
+      "  -h,--help          help\n"
+      "  -t,--trace         trace each instruction\n"
+      "  -f,--font-scale=F  set the global font scale factor to F\n"
+      "  -l,--log S=N       set log level for system S to N\n\n",
       argv[0]);
 
   print_log_systems();
@@ -39,6 +43,7 @@ void parse_arguments(int argc, char** argv) {
   static const Option options[] = {
     {'h', "help", 0},
     {'t', "trace", 0},
+    {'f', "font-scale", 1},
     {'l', "log", 1},
   };
 
@@ -71,6 +76,10 @@ void parse_arguments(int argc, char** argv) {
 
           case 't':
             emulator_set_trace(TRUE);
+            break;
+
+          case 'f':
+            s_font_scale = atof(result.value);
             break;
 
           case 'l': {
@@ -133,7 +142,16 @@ error:
   exit(1);
 }
 
-#define SAVE_EXTENSION ".sav"
+namespace ImGui {
+
+IMGUI_API bool CheckboxNot(const char* label, Bool* v) {
+  bool bv = !*v;
+  bool result = Checkbox(label, &bv);
+  *v = static_cast<Bool>(!bv);
+  return result;
+}
+
+}  // namespace ImGui
 
 template <typename T>
 struct Deleter {
@@ -160,6 +178,20 @@ static void keep_aspect(ImGuiSizeConstraintCallbackData* data) {
   f32 dist1_squared = dist_squared(size1, data->DesiredSize);
   f32 dist2_squared = dist_squared(size2, data->DesiredSize);
   data->DesiredSize = dist1_squared < dist2_squared ? size1 : size2;
+}
+
+static const int kAudioDataSamples = 1000;
+static f32 s_audio_data[2][kAudioDataSamples];
+
+static void on_audio_buffer_full(HostHookContext* ctx) {
+  AudioBuffer* audio_buffer = emulator_get_audio_buffer(ctx->e);
+  int size = audio_buffer->position - audio_buffer->data;
+
+  for (int i = 0; i < kAudioDataSamples; ++i) {
+    int index = (i * size / kAudioDataSamples) & ~1;
+    s_audio_data[0][i] = audio_buffer->data[index];
+    s_audio_data[1][i] = audio_buffer->data[index + 1];
+  }
 }
 
 /* Copied from binjgb.c; probably will diverge. */
@@ -190,32 +222,69 @@ int main(int argc, char** argv) {
   host_init.render_scale = 4;
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
+  host_init.hooks.audio_buffer_full = on_audio_buffer_full;
   struct Host* host = host_new(&host_init, e);
   Deleter<Host> dh(host, host_delete);
   if (host == NULL) {
     return 1;
   }
 
+  ImGui::GetIO().FontGlobalScale = s_font_scale;
+
   const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
   emulator_read_ext_ram_from_file(e, save_filename);
 
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
+  bool main_open = true;
+  bool audio_open = true;
   while (host_poll_events(host)) {
     host_begin_video(host);
     host_run_ms(host, refresh_ms);
 
+    if (ImGui::BeginMainMenuBar()) {
+      if (ImGui::BeginMenu("Window")) {
+        ImGui::MenuItem("Binjgb", NULL, &main_open);
+        ImGui::MenuItem("Audio", NULL, &audio_open);
+        ImGui::EndMenu();
+      }
+      ImGui::EndMainMenuBar();
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(16, 48), ImGuiSetCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(SCREEN_WIDTH * host_init.render_scale,
                                     SCREEN_HEIGHT * host_init.render_scale),
                              ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(1, 1), ImVec2(4000, 4000),
+    ImGui::SetNextWindowSizeConstraints(ImVec2(32, 32), ImVec2(4000, 4000),
                                         keep_aspect);
-    if (ImGui::Begin("binjgb")) {
-      intptr_t fb_texture = host_get_frame_buffer_texture(host);
-      ImVec2 image_size = ImGui::GetContentRegionAvail();
-      ImVec2 uv0(0, 0);
-      ImVec2 uv1((f32)SCREEN_WIDTH / HOST_FRAME_BUFFER_TEXTURE_WIDTH,
-                 (f32)SCREEN_HEIGHT / HOST_FRAME_BUFFER_TEXTURE_HEIGHT);
-      ImGui::Image((ImTextureID)fb_texture, image_size, uv0, uv1);
+    if (main_open) {
+      if (ImGui::Begin("Binjgb", &main_open)) {
+        intptr_t fb_texture = host_get_frame_buffer_texture(host);
+        ImVec2 image_size = ImGui::GetContentRegionAvail();
+        ImVec2 uv0(0, 0);
+        ImVec2 uv1((f32)SCREEN_WIDTH / HOST_FRAME_BUFFER_TEXTURE_WIDTH,
+                   (f32)SCREEN_HEIGHT / HOST_FRAME_BUFFER_TEXTURE_HEIGHT);
+        ImGui::Image((ImTextureID)fb_texture, image_size, uv0, uv1);
+      }
+      ImGui::End();
+    }
+
+    if (audio_open) {
+      ImGui::SetNextWindowPos(ImVec2(16, 640), ImGuiSetCond_FirstUseEver);
+      ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiSetCond_FirstUseEver);
+      if (ImGui::Begin("Audio", &audio_open)) {
+        EmulatorConfig config = emulator_get_config(e);
+        ImGui::CheckboxNot("channel1", &config.disable_sound[CHANNEL1]);
+        ImGui::CheckboxNot("channel2", &config.disable_sound[CHANNEL2]);
+        ImGui::CheckboxNot("channel3", &config.disable_sound[CHANNEL3]);
+        ImGui::CheckboxNot("channel4", &config.disable_sound[CHANNEL4]);
+        emulator_set_config(e, &config);
+
+        ImGui::Spacing();
+        ImGui::PlotLines("left", s_audio_data[0], kAudioDataSamples, 0, nullptr,
+                         0, 128, ImVec2(0, 80));
+        ImGui::PlotLines("right", s_audio_data[1], kAudioDataSamples, 0,
+                         nullptr, 0, 128, ImVec2(0, 80));
+      }
       ImGui::End();
     }
 

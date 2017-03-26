@@ -31,6 +31,7 @@ typedef struct HostHooks {
   void (*audio_add_buffer)(HostHookContext*, int old_available,
                            int new_available);
   void (*audio_buffer_ready)(HostHookContext*, int new_available);
+  void (*audio_buffer_full)(HostHookContext*);
   void (*write_state)(HostHookContext*);
   void (*read_state)(HostHookContext*);
 } HostHooks;

@@ -247,6 +247,7 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
       host_render_audio(host);
+      HOOK0(audio_buffer_full);
     }
     if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
       break;

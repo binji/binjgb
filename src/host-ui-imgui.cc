@@ -77,6 +77,8 @@ Result HostUI::init() {
   init_font();
 
   ImGuiIO& io = ImGui::GetIO();
+  io.DisplaySize.x = 0;
+  io.DisplaySize.y = 0;
   io.KeyMap[ImGuiKey_Tab] = SDLK_TAB;
   io.KeyMap[ImGuiKey_LeftArrow] = SDL_SCANCODE_LEFT;
   io.KeyMap[ImGuiKey_RightArrow] = SDL_SCANCODE_RIGHT;
@@ -249,7 +251,7 @@ void HostUI::begin_frame() {
   ImGuiIO& io = ImGui::GetIO();
 
   // Setup time step
-  f64 now_sec = SDL_GetTicks();
+  f64 now_sec = SDL_GetTicks() / 1000.0;
   io.DeltaTime = (f32)(time_sec ? now_sec - time_sec : 1.0 / 60.0);
   time_sec = now_sec;
 
