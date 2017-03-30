@@ -1,3 +1,6 @@
+install:
+  - git submodule update --init
+
 environment:
   SDL2_ZIP: SDL2-devel-2.0.5-VC.zip
   SDL2_DOWNLOAD_DIR: c:\sdl2
