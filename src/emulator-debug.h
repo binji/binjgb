@@ -37,7 +37,19 @@ typedef enum LogLevel {
   LOG_LEVEL_VERBOSE = 3,
 } LogLevel;
 
+typedef enum PaletteType {
+  PALETTE_TYPE_BGP,
+  PALETTE_TYPE_OBP0,
+  PALETTE_TYPE_OBP1,
+} PaletteType;
+
 struct Emulator;
+
+#define TILE_DATA_TEXTURE_WIDTH 128
+#define TILE_DATA_TEXTURE_HEIGHT 192
+#define TILE_DATA_TEXTURE_SIZE \
+  (TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT)
+typedef RGBA TileDataBuffer[TILE_DATA_TEXTURE_SIZE];
 
 #if 0
 typedef struct EmulatorHookContext {
@@ -57,6 +69,9 @@ void emulator_set_log_level(LogSystem, LogLevel);
 void emulator_set_trace(Bool trace);
 const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
+
+Palette emulator_get_palette(struct Emulator*, PaletteType);
+void emulator_get_tile_data_buffer(struct Emulator*, Palette, TileDataBuffer);
 
 #ifdef __cplusplus
 }

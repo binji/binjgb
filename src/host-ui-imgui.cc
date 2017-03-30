@@ -34,7 +34,6 @@ struct HostUI {
   f32 mouse_wheel;
   f32 mouse_pressed[3];
   f32 proj_matrix[9];
-  GLuint emulator_texture;
   GLuint font_texture;
   GLuint vao;
   GLuint vbo;
@@ -54,7 +53,6 @@ HostUI::HostUI(SDL_Window* window)
     : window(window),
       time_sec(0),
       mouse_wheel(0),
-      emulator_texture(0),
       font_texture(0),
       vao(0),
       vbo(0),
@@ -130,14 +128,6 @@ Result HostUI::init_gl() {
 
   glGenBuffers(1, &vbo);
   glGenBuffers(1, &ebo);
-
-  glGenTextures(1, &emulator_texture);
-  glBindTexture(GL_TEXTURE_2D, emulator_texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HOST_FRAME_BUFFER_TEXTURE_WIDTH,
-               HOST_FRAME_BUFFER_TEXTURE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               NULL);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   GLuint vs, fs;
   if (!SUCCESS(host_gl_shader(GL_VERTEX_SHADER, s_vertex_shader, &vs)) ||
@@ -239,12 +229,6 @@ void HostUI::event(union SDL_Event* event) {
       break;
     }
   }
-}
-
-void HostUI::upload_frame_buffer(FrameBuffer* frame_buffer) {
-  glBindTexture(GL_TEXTURE_2D, emulator_texture);
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA,
-                  GL_UNSIGNED_BYTE, frame_buffer);
 }
 
 void HostUI::begin_frame() {
@@ -382,18 +366,10 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   ui->event(event);
 }
 
-void host_ui_upload_frame_buffer(struct HostUI* ui, FrameBuffer* frame_buffer) {
-  ui->upload_frame_buffer(frame_buffer);
-}
-
-void host_ui_begin_frame(HostUI* ui) {
+void host_ui_begin_frame(HostUI* ui, HostTexture* fb_texture) {
   ui->begin_frame();
 }
 
 void host_ui_end_frame(HostUI* ui) {
   ui->end_frame();
-}
-
-intptr_t host_ui_get_frame_buffer_texture(struct HostUI* ui) {
-  return ui->emulator_texture;
 }

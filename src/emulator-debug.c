@@ -298,3 +298,50 @@ LogLevel emulator_get_log_level(LogSystem system) {
   assert(system < NUM_LOG_SYSTEMS);
   return s_log_level[system];
 }
+
+Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
+  switch (type) {
+    case PALETTE_TYPE_BGP:
+      return e->state.ppu.BGP;
+    case PALETTE_TYPE_OBP0:
+      return e->state.ppu.OBP[0];
+    case PALETTE_TYPE_OBP1:
+      return e->state.ppu.OBP[1];
+    default: {
+      Palette palette;
+      palette.color[0] = COLOR_WHITE;
+      palette.color[1] = COLOR_LIGHT_GRAY;
+      palette.color[2] = COLOR_DARK_GRAY;
+      palette.color[3] = COLOR_BLACK;
+      return palette;
+    }
+  }
+}
+
+void emulator_get_tile_data_buffer(struct Emulator* e, Palette palette,
+                                   TileDataBuffer out_buffer) {
+  assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
+  assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
+  const int tw = TILE_DATA_TEXTURE_WIDTH / TILE_WIDTH;
+  const int th = TILE_DATA_TEXTURE_HEIGHT / TILE_HEIGHT;
+  int tx, ty, mx, my;
+  MaskedAddress addr = 0;
+  for (ty = 0; ty < th; ++ty) {
+    for (tx = 0; tx < tw; ++tx) {
+      int offset =
+          (ty * TILE_WIDTH) * TILE_DATA_TEXTURE_WIDTH + (tx * TILE_HEIGHT);
+      for (my = 0; my < TILE_HEIGHT; ++my) {
+        for (mx = 0; mx < TILE_WIDTH; ++mx) {
+          u8 lo = e->state.vram[addr];
+          u8 hi = e->state.vram[addr + 1];
+          u8 shift = 7 - (mx & 7);
+          u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
+          Color color = palette.color[palette_index];
+          out_buffer[offset + mx] = s_color_to_rgba[color];
+        }
+        addr += TILE_ROW_BYTES;
+        offset += TILE_DATA_TEXTURE_WIDTH;
+      }
+    }
+  }
+}

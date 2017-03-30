@@ -46,6 +46,8 @@ if (NOT EMSCRIPTEN)
       src/host-ui-imgui.cc
       src/debugger.cc
     )
+    set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)
+    set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD_REQUIRED ON)
 
     if (NOT MSVC)
       # Disable warnings in stb_truetype.h.

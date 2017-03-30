@@ -19,7 +19,6 @@ typedef struct HostUI {
   SDL_Window* window;
   GLuint vao;
   GLuint vbo;
-  GLuint texture;
   GLuint program;
   GLint uSampler;
 } HostUI;
@@ -54,14 +53,6 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   glBindBuffer(GL_ARRAY_BUFFER, ui->vbo);
   glBufferData(GL_ARRAY_BUFFER, sizeof(s_vertex_buffer), s_vertex_buffer,
                GL_STATIC_DRAW);
-
-  glGenTextures(1, &ui->texture);
-  glBindTexture(GL_TEXTURE_2D, ui->texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HOST_FRAME_BUFFER_TEXTURE_WIDTH,
-               HOST_FRAME_BUFFER_TEXTURE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               NULL);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   GLuint vs, fs;
   CHECK(SUCCESS(host_gl_shader(GL_VERTEX_SHADER, s_vertex_shader, &vs)));
@@ -112,25 +103,16 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   }
 }
 
-void host_ui_upload_frame_buffer(struct HostUI* ui, FrameBuffer* frame_buffer) {
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGBA,
-                  GL_UNSIGNED_BYTE, frame_buffer);
-}
-
-void host_ui_begin_frame(struct HostUI* ui) {
+void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture) {
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   glUseProgram(ui->program);
   glUniform1i(ui->uSampler, 0);
   glBindVertexArray(ui->vao);
-  glBindTexture(GL_TEXTURE_2D, ui->texture);
+  glBindTexture(GL_TEXTURE_2D, fb_texture->handle);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 void host_ui_end_frame(struct HostUI* ui) {
   SDL_GL_SwapWindow(ui->window);
-}
-
-intptr_t host_ui_get_frame_buffer_texture(struct HostUI* ui) {
-  return ui->texture;
 }

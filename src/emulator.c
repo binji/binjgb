@@ -26,7 +26,6 @@
 #define OBJ_COUNT 40
 #define OBJ_PER_LINE_COUNT 10
 #define OBJ_PALETTE_COUNT 2
-#define PALETTE_COLOR_COUNT 4
 
 /* Addresses are relative to IO_START_ADDR (0xff00). */
 #define FOREACH_IO_REG(V)                     \
@@ -324,13 +323,6 @@ typedef enum {
 } ObjSize;
 
 typedef enum {
-  COLOR_WHITE = 0,
-  COLOR_LIGHT_GRAY = 1,
-  COLOR_DARK_GRAY = 2,
-  COLOR_BLACK = 3,
-} Color;
-
-typedef enum {
   OBJ_PRIORITY_ABOVE_BG = 0,
   OBJ_PRIORITY_BEHIND_BG = 1,
 } ObjPriority;
@@ -410,8 +402,6 @@ typedef struct {
   u16 PC;
   struct { Bool Z, N, H, C; } F;
 } Registers;
-
-typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
 typedef struct {
   u8 y;
@@ -719,6 +709,7 @@ typedef struct Emulator {
 #define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
 
 /* Video */
+#define TILE_WIDTH 8
 #define TILE_HEIGHT 8
 #define TILE_ROW_BYTES 2
 #define TILE_MAP_WIDTH 32

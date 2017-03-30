@@ -58,6 +58,7 @@ typedef struct Host {
   u64 start_counter;
   u64 performance_frequency;
   struct HostUI* ui;
+  HostTexture* fb_texture;
 } Host;
 
 Result host_init_video(Host* host) {
@@ -78,6 +79,7 @@ Result host_init_video(Host* host) {
   host_gl_init_procs();
 
   host->ui = host_ui_new(host->window);
+  host->fb_texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT);
   return OK;
 error:
   SDL_Quit();
@@ -159,13 +161,8 @@ Bool host_poll_events(Host* host) {
   return running;
 }
 
-static void host_upload_video(Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
-  host_ui_upload_frame_buffer(host->ui, emulator_get_frame_buffer(e));
-}
-
 void host_begin_video(Host* host) {
-  host_ui_begin_frame(host->ui);
+  host_ui_begin_frame(host->ui, host->fb_texture);
 }
 
 void host_end_video(Host* host) {
@@ -243,7 +240,8 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
   while (1) {
     EmulatorEvent event = emulator_run_until(e, until_cycles);
     if (event & EMULATOR_EVENT_NEW_FRAME) {
-      host_upload_video(host);
+      host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
+                          *emulator_get_frame_buffer(e));
     }
     if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
       host_render_audio(host);
@@ -275,6 +273,7 @@ error:
 }
 
 void host_delete(Host* host) {
+  host_destroy_texture(host, host->fb_texture);
   SDL_GL_DeleteContext(host->gl_context);
   SDL_DestroyWindow(host->window);
   SDL_Quit();
@@ -316,6 +315,47 @@ f64 host_get_monitor_refresh_ms(struct Host* host) {
   return 1000.0 / refresh_rate_hz;
 }
 
-intptr_t host_get_frame_buffer_texture(struct Host* host) {
-  return host_ui_get_frame_buffer_texture(host->ui);
+static u32 next_power_of_two(u32 n) {
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
+}
+
+HostTexture* host_get_frame_buffer_texture(struct Host* host) {
+  return host->fb_texture;
+}
+
+HostTexture* host_create_texture(struct Host* host, int w, int h) {
+  HostTexture* texture = malloc(sizeof(HostTexture));
+  texture->width = next_power_of_two(w);
+  texture->height = next_power_of_two(h);
+
+  GLuint handle;
+  glGenTextures(1, &handle);
+  glBindTexture(GL_TEXTURE_2D, handle);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture->width, texture->height, 0,
+               GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+  texture->handle = handle;
+  return texture;
+}
+
+void host_upload_texture(struct Host* host, HostTexture* texture, int w, int h,
+                         RGBA* data) {
+  assert(w <= texture->width);
+  assert(h <= texture->height);
+  glBindTexture(GL_TEXTURE_2D, texture->handle);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE,
+                  data);
+}
+
+void host_destroy_texture(struct Host* host, HostTexture* texture) {
+  GLuint tex = texture->handle;
+  glDeleteTextures(1, &tex);
+  free(texture);
 }

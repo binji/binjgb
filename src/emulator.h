@@ -24,6 +24,7 @@ extern "C" {
 #define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
 
 #define SOUND_OUTPUT_COUNT 2
+#define PALETTE_COLOR_COUNT 4
 
 struct Emulator;
 
@@ -43,6 +44,15 @@ typedef struct JoypadButtons {
 typedef void (*JoypadCallback)(struct JoypadButtons* joyp, void* user_data);
 
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
+
+typedef enum Color {
+  COLOR_WHITE = 0,
+  COLOR_LIGHT_GRAY = 1,
+  COLOR_DARK_GRAY = 2,
+  COLOR_BLACK = 3,
+} Color;
+
+typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
 typedef struct AudioBuffer {
   u32 frequency;    /* Sample frequency, as N samples per second */
