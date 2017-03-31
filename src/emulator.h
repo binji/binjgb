@@ -25,6 +25,10 @@ extern "C" {
 
 #define SOUND_OUTPUT_COUNT 2
 #define PALETTE_COLOR_COUNT 4
+#define OBJ_COUNT 40
+
+#define OBJ_X_OFFSET 8
+#define OBJ_Y_OFFSET 16
 
 struct Emulator;
 
@@ -51,6 +55,27 @@ typedef enum Color {
   COLOR_DARK_GRAY = 2,
   COLOR_BLACK = 3,
 } Color;
+
+typedef enum {
+  OBJ_SIZE_8X8 = 0,
+  OBJ_SIZE_8X16 = 1,
+} ObjSize;
+
+typedef enum ObjPriority {
+  OBJ_PRIORITY_ABOVE_BG = 0,
+  OBJ_PRIORITY_BEHIND_BG = 1,
+} ObjPriority;
+
+typedef struct Obj {
+  u8 y;
+  u8 x;
+  u8 tile;
+  u8 byte3;
+  ObjPriority priority;
+  Bool yflip;
+  Bool xflip;
+  u8 palette;
+} Obj;
 
 typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 

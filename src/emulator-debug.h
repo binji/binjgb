@@ -73,6 +73,10 @@ LogLevel emulator_get_log_level(LogSystem);
 Palette emulator_get_palette(struct Emulator*, PaletteType);
 void emulator_get_tile_data_buffer(struct Emulator*, Palette, TileDataBuffer);
 
+ObjSize emulator_get_obj_size(struct Emulator*);
+Obj emulator_get_obj(struct Emulator*, int index);
+Bool obj_is_visible(const Obj* obj);
+
 #ifdef __cplusplus
 }
 #endif

@@ -345,3 +345,22 @@ void emulator_get_tile_data_buffer(struct Emulator* e, Palette palette,
     }
   }
 }
+
+ObjSize emulator_get_obj_size(struct Emulator* e) {
+  return e->state.ppu.LCDC.obj_size;
+}
+
+Obj emulator_get_obj(struct Emulator* e, int index) {
+  if (index >= 0 && index < OBJ_COUNT) {
+    return e->state.oam[index];
+  }
+  static Obj s_dummy_obj;
+  return s_dummy_obj;
+}
+
+Bool obj_is_visible(const Obj* obj) {
+  u8 obj_x = obj->x + OBJ_X_OFFSET - 1;
+  u8 obj_y = obj->y + OBJ_Y_OFFSET - 1;
+  return obj_x < SCREEN_WIDTH + OBJ_X_OFFSET &&
+         obj_y < SCREEN_HEIGHT + OBJ_Y_OFFSET;
+}

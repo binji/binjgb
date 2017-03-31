@@ -8,6 +8,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include <algorithm>
+
 #include "emulator-debug.h"
 #include "options.h"
 #include "host.h"
@@ -160,40 +162,76 @@ bool CheckboxNot(const char* label, Bool* v) {
   return result;
 }
 
-void Image(HostTexture* texture, const ImVec2& dst_size,
-           const ImVec2& src_size) {
-  ImVec2 uv0(0, 0);
-  ImVec2 uv1(src_size.x / texture->width, src_size.y / texture->height);
-  ImGui::Image((ImTextureID)texture->handle, dst_size, uv0, uv1);
-}
-
 }  // namespace ImGui
 
-template <typename T>
-struct Deleter {
-  typedef void (*DeleteFunc)(T*);
-  Deleter(T* object, DeleteFunc func) : object(object), func(func) {}
-  ~Deleter() {
-    func(object);
-  }
+ImVec2 operator +(const ImVec2& lhs, const ImVec2& rhs) {
+  return ImVec2(lhs.x + rhs.x, lhs.y + rhs.y);
+}
 
-  T* object;
-  DeleteFunc func;
-};
+ImVec2 operator -(const ImVec2& lhs, const ImVec2& rhs) {
+  return ImVec2(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+ImVec2 operator *(const ImVec2& lhs, f32 s) {
+  return ImVec2(lhs.x * s, lhs.y * s);
+}
+
+ImVec2 operator *(const ImVec2& lhs, const ImVec2& rhs) {
+  return ImVec2(lhs.x * rhs.x, lhs.y * rhs.y);
+}
 
 static f32 dist_squared(const ImVec2& v1, const ImVec2& v2) {
   return (v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y);
 }
 
-static void keep_aspect(ImGuiSizeConstraintCallbackData* data) {
-  f32 w = data->DesiredSize.x, h = data->DesiredSize.y;
-  f32 aspect = w / h;
-  f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
-  ImVec2 size1(w, w / want_aspect);
-  ImVec2 size2(h * want_aspect, h);
-  f32 dist1_squared = dist_squared(size1, data->DesiredSize);
-  f32 dist2_squared = dist_squared(size2, data->DesiredSize);
-  data->DesiredSize = dist1_squared < dist2_squared ? size1 : size2;
+static const ImVec2 kTileSize(8, 8);
+static const ImVec2 k8x16SpriteSize(8, 16);
+
+class TileImage {
+ public:
+  TileImage();
+
+  void Init(Host* host);
+  void Upload(Emulator*, const Palette&);
+  void DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+                f32 scale, bool xflip, bool yflip);
+
+ private:
+  Host* host;
+  TileDataBuffer buffer;
+  HostTexture* texture;
+};
+
+TileImage::TileImage() : host(nullptr), texture(nullptr) {}
+
+void TileImage::Init(Host* host) {
+  texture = host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
+                                TILE_DATA_TEXTURE_HEIGHT);
+}
+
+void TileImage::Upload(Emulator* e, const Palette& palette) {
+  emulator_get_tile_data_buffer(e, palette, buffer);
+  host_upload_texture(host, texture, TILE_DATA_TEXTURE_WIDTH,
+                      TILE_DATA_TEXTURE_HEIGHT, buffer);
+}
+
+void TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+                         f32 scale, bool xflip = false, bool yflip = false) {
+  const int width = TILE_DATA_TEXTURE_WIDTH / 8;
+  ImVec2 src(index % width, index / width);
+  ImVec2 duv =
+      kTileSize * ImVec2(1.0f / texture->width, 1.0f / texture->height);
+  ImVec2 br_pos = ul_pos + kTileSize * scale;
+  ImVec2 ul_uv = src * duv;
+  ImVec2 br_uv = ul_uv + duv;
+  if (xflip) {
+    std::swap(ul_uv.x, br_uv.x);
+  }
+  if (yflip) {
+    std::swap(ul_uv.y, br_uv.y);
+  }
+  draw_list->AddImage((ImTextureID)texture->handle, ul_pos, br_pos, ul_uv,
+                      br_uv);
 }
 
 class Debugger {
@@ -215,32 +253,44 @@ class Debugger {
   void EmulatorWindow();
   void AudioWindow();
   void TiledataWindow();
+  void ObjWindow();
+
+  void DrawTile(ImDrawList* draw_list, int index, const ImVec2& pos, int scale,
+                bool xflip = false, bool yflip = false);
 
   EmulatorInit emulator_init;
   HostInit host_init;
   Emulator* e;
   Host* host;
-  TileDataBuffer tiledata_buffer;
-  HostTexture* tiledata_texture;
-
   const char* save_filename;
+
+  TileImage tiledata_image;
+  TileImage obj_image;
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
 
+  bool highlight_obj;
+  int highlight_obj_index;
+
   bool emulator_window_open;
   bool audio_window_open;
   bool tiledata_window_open;
+  bool obj_window_open;
 };
 
 Debugger::Debugger()
     : e(nullptr),
       host(nullptr),
-      tiledata_texture(nullptr),
       save_filename(nullptr),
+      tiledata_image(),
+      obj_image(),
+      highlight_obj(false),
+      highlight_obj_index(0),
       emulator_window_open(true),
       audio_window_open(true),
-      tiledata_window_open(true) {
+      tiledata_window_open(true),
+      obj_window_open(true) {
   ZERO_MEMORY(audio_data);
 }
 
@@ -276,8 +326,9 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     return false;
   }
 
-  tiledata_texture = host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
-                                         TILE_DATA_TEXTURE_HEIGHT);
+  tiledata_image.Init(host);
+  obj_image.Init(host);
+
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
   return true;
@@ -295,6 +346,7 @@ void Debugger::Run() {
     EmulatorWindow();
     AudioWindow();
     TiledataWindow();
+    ObjWindow();
 
     host_end_video(host);
   }
@@ -325,6 +377,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Binjgb", NULL, &emulator_window_open);
       ImGui::MenuItem("Audio", NULL, &audio_window_open);
       ImGui::MenuItem("TileData", NULL, &tiledata_window_open);
+      ImGui::MenuItem("Obj", NULL, &obj_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
@@ -336,13 +389,49 @@ void Debugger::EmulatorWindow() {
   ImGui::SetNextWindowSize(ImVec2(SCREEN_WIDTH * host_init.render_scale,
                                   SCREEN_HEIGHT * host_init.render_scale),
                            ImGuiSetCond_FirstUseEver);
-  ImGui::SetNextWindowSizeConstraints(ImVec2(32, 32), ImVec2(4000, 4000),
-                                      keep_aspect);
   if (emulator_window_open) {
     if (ImGui::Begin("Binjgb", &emulator_window_open)) {
+      ImVec2 cursor = ImGui::GetCursorScreenPos();
       HostTexture* fb_texture = host_get_frame_buffer_texture(host);
-      ImVec2 image_size = ImGui::GetContentRegionAvail();
-      ImGui::Image(fb_texture, image_size, ImVec2(SCREEN_WIDTH, SCREEN_HEIGHT));
+      ImVec2 avail_size = ImGui::GetContentRegionAvail();
+      f32 w = avail_size.x, h = avail_size.y;
+      f32 aspect = w / h;
+      f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+      ImVec2 image_size(aspect < want_aspect ? w : h * want_aspect,
+                        aspect < want_aspect ? w / want_aspect : h);
+
+      ImDrawList* draw_list = ImGui::GetWindowDrawList();
+      ImVec2 image_ul = cursor + (avail_size - image_size) * 0.5f;
+      ImVec2 image_br = image_ul + image_size;
+      draw_list->PushClipRect(image_ul, image_br);
+
+      ImVec2 ul_uv(0, 0);
+      ImVec2 br_uv((f32)SCREEN_WIDTH / fb_texture->width,
+                   (f32)SCREEN_HEIGHT / fb_texture->height);
+      draw_list->AddImage((ImTextureID)fb_texture->handle, image_ul, image_br,
+                          ul_uv, br_uv);
+
+      if (highlight_obj) {
+        f32 scale = image_size.x / SCREEN_WIDTH;
+        ObjSize obj_size = emulator_get_obj_size(e);
+        Obj obj = emulator_get_obj(e, highlight_obj_index);
+
+        // The OBJ position is already offset so it draws from the top-left,
+        // but this means that the coordinates are sometimes positive when they
+        // should be negative (e.g. 255 should be drawn as -1). This code adds
+        // the offset back in, wrapped to 255, and draws from the bottom-right
+        // instead.
+        ImVec2 obj_pos(static_cast<u8>(obj.x + OBJ_X_OFFSET),
+                       static_cast<u8>(obj.y + OBJ_Y_OFFSET));
+        ImVec2 br = image_ul + obj_pos * scale;
+        ImVec2 ul = br - k8x16SpriteSize * scale;
+        if (obj_size == OBJ_SIZE_8X8) {
+          br.y -= kTileSize.y * scale;
+        }
+        draw_list->AddRectFilled(ul, br, IM_COL32(0, 255, 0, 192));
+      }
+
+      draw_list->PopClipRect();
     }
     ImGui::End();
   }
@@ -410,10 +499,7 @@ void Debugger::TiledataWindow() {
         palette = emulator_get_palette(e, (PaletteType)palette_type);
       }
 
-      emulator_get_tile_data_buffer(e, palette, tiledata_buffer);
-      ImVec2 size(TILE_DATA_TEXTURE_WIDTH, TILE_DATA_TEXTURE_HEIGHT);
-      host_upload_texture(host, tiledata_texture, size.x, size.y,
-                          tiledata_buffer);
+      tiledata_image.Upload(e, palette);
 
       static int tw = 16;
       static bool size8x16 = false;
@@ -424,12 +510,11 @@ void Debugger::TiledataWindow() {
       int th = (384 + tw - 1) / tw;
       ImDrawList* draw_list = ImGui::GetWindowDrawList();
       ImVec2 cursor = ImGui::GetCursorScreenPos();
-      ImVec2 duv(8 / (f32)(tiledata_texture->width),
-                 8 / (f32)(tiledata_texture->height));
-      int width = TILE_DATA_TEXTURE_WIDTH / 8;
+      int width = TILE_DATA_TEXTURE_WIDTH / kTileSize.x;
       if (size8x16) {
         th = (th + 1) & ~1;
       }
+      ImVec2 scaled_tile_size = kTileSize * scale;
       for (int ty = 0; ty < th; ++ty) {
         for (int tx = 0; tx < tw; ++tx) {
           int i;
@@ -441,21 +526,98 @@ void Debugger::TiledataWindow() {
           } else {
             i = ty * tw + tx;
           }
-          int x = i % width;
-          int y = i / width;
-          ImVec2 ul_pos(cursor.x + tx * scale * 8, cursor.y + ty * scale * 8);
-          ImVec2 br_pos(ul_pos.x + scale * 8, ul_pos.y + scale * 8);
-          ImVec2 ul_uv(x * duv.x, y * duv.y);
-          ImVec2 br_uv(ul_uv.x + duv.x, ul_uv.y + duv.y);
-          draw_list->AddImage((ImTextureID)tiledata_texture->handle, ul_pos,
-                              br_pos, ul_uv, br_uv);
+          ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
+          ImVec2 br_pos = ul_pos + scaled_tile_size;
+          tiledata_image.DrawTile(draw_list, i, ul_pos, scale);
           if (ImGui::IsMouseHoveringRect(ul_pos, br_pos)) {
             ImGui::SetTooltip("tile: %u (0x%04x)", i, 0x8000 + i * 16);
           }
         }
       }
-      ImGui::Dummy(ImVec2(tw * scale * 8, th * scale * 8));
+      ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
       ImGui::EndChild();
+    }
+    ImGui::End();
+  }
+}
+
+void Debugger::ObjWindow() {
+  if (obj_window_open) {
+    ImGui::SetNextWindowPos(ImVec2(660, 860), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 516), ImGuiSetCond_FirstUseEver);
+    if (ImGui::Begin("Obj", &obj_window_open)) {
+      static const int kScale = 5;
+      static const ImVec2 kScaledTileSize = kTileSize * kScale;
+      static int obj_index = 0;
+
+      for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 10; ++x) {
+          int button_index = y * 10 + x;
+          Obj obj = emulator_get_obj(e, button_index);
+          bool visible = static_cast<bool>(obj_is_visible(&obj));
+
+          char label[16];
+          snprintf(label, sizeof(label), "%2d", button_index);
+          if (x > 0) {
+            ImGui::SameLine();
+          }
+
+          if (!visible) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
+          }
+          if (ImGui::SmallButton(label)) {
+            highlight_obj_index = obj_index = button_index;
+          }
+          if (obj_index == button_index) {
+            ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
+                                                ImGui::GetItemRectMax(),
+                                                IM_COL32_WHITE);
+          }
+          if (!visible) {
+            ImGui::PopStyleColor();
+          }
+        }
+      }
+
+      ImGui::Checkbox("Highlight OBJ", &highlight_obj);
+      ImGui::Separator();
+
+      Obj obj = emulator_get_obj(e, obj_index);
+
+      ImGui::LabelText("Index", "%d", obj_index);
+      ImGui::LabelText("Tile", "%d", obj.tile);
+      ImGui::LabelText("Pos", "%d, %d", obj.x, obj.y);
+      ImGui::LabelText("Priority", "%s", obj.priority == OBJ_PRIORITY_ABOVE_BG
+                                             ? "Above BG"
+                                             : "Behind BG");
+      ImGui::LabelText("Flip", "%c%c", obj.xflip ? 'X' : '_',
+                       obj.yflip ? 'Y' : '_');
+      ImGui::LabelText("Palette", "OBP%d", obj.palette);
+
+      Palette palette = emulator_get_palette(
+          e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
+      obj_image.Upload(e, palette);
+
+      ObjSize size = emulator_get_obj_size(e);
+      ImDrawList* draw_list = ImGui::GetWindowDrawList();
+      ImVec2 cursor = ImGui::GetCursorScreenPos();
+      if (size == OBJ_SIZE_8X16) {
+        int tile_top = obj.tile & ~1;
+        int tile_bottom = obj.tile | 1;
+        if (obj.yflip) {
+          std::swap(tile_top, tile_bottom);
+        }
+        obj_image.DrawTile(draw_list, tile_top, cursor, kScale, obj.xflip,
+                           obj.yflip);
+        obj_image.DrawTile(draw_list, tile_bottom,
+                           cursor + ImVec2(0, kScaledTileSize.y), kScale,
+                           obj.xflip, obj.yflip);
+        ImGui::Dummy(k8x16SpriteSize * kScale);
+      } else {
+        obj_image.DrawTile(draw_list, obj.tile, cursor, kScale, obj.xflip,
+                           obj.yflip);
+        ImGui::Dummy(kScaledTileSize);
+      }
     }
     ImGui::End();
   }

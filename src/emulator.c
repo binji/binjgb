@@ -23,7 +23,6 @@
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
 
-#define OBJ_COUNT 40
 #define OBJ_PER_LINE_COUNT 10
 #define OBJ_PALETTE_COUNT 2
 
@@ -318,16 +317,6 @@ typedef enum {
 } TileDataSelect;
 
 typedef enum {
-  OBJ_SIZE_8X8 = 0,
-  OBJ_SIZE_8X16 = 1,
-} ObjSize;
-
-typedef enum {
-  OBJ_PRIORITY_ABOVE_BG = 0,
-  OBJ_PRIORITY_BEHIND_BG = 1,
-} ObjPriority;
-
-typedef enum {
   DMA_INACTIVE = 0,
   DMA_TRIGGERED = 1,
   DMA_ACTIVE = 2,
@@ -402,17 +391,6 @@ typedef struct {
   u16 PC;
   struct { Bool Z, N, H, C; } F;
 } Registers;
-
-typedef struct {
-  u8 y;
-  u8 x;
-  u8 tile;
-  u8 byte3;
-  ObjPriority priority;
-  Bool yflip;
-  Bool xflip;
-  u8 palette;
-} Obj;
 
 typedef struct {
   JoypadButtons buttons;
@@ -715,8 +693,6 @@ typedef struct Emulator {
 #define TILE_MAP_WIDTH 32
 #define WINDOW_MAX_X 166
 #define WINDOW_X_OFFSET 7
-#define OBJ_Y_OFFSET 16
-#define OBJ_X_OFFSET 8
 
 /* Audio */
 #define NRX1_MAX_LENGTH 64
