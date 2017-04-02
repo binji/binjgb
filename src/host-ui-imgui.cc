@@ -10,6 +10,9 @@
 #include "host-gl.h"
 #include "imgui.h"
 
+/* This seems to be defined by MSVC. */
+#undef ERROR
+
 /* Much cribbed from imgui_impl_sdl_gl3.cpp. */
 
 struct HostUI {
@@ -292,12 +295,10 @@ void HostUI::render_draw_lists(ImDrawData* draw_data) {
   draw_data->ScaleClipRects(io.DisplayFramebufferScale);
 
   glEnable(GL_BLEND);
-  glBlendEquation(GL_FUNC_ADD);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDisable(GL_CULL_FACE);
   glDisable(GL_DEPTH_TEST);
   glEnable(GL_SCISSOR_TEST);
-  glActiveTexture(GL_TEXTURE0);
 
   glUseProgram(program);
   glUniform1i(uSampler, 0);
