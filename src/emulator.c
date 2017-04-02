@@ -307,16 +307,6 @@ typedef enum {
 } LFSRWidth;
 
 typedef enum {
-  TILE_MAP_9800_9BFF = 0,
-  TILE_MAP_9C00_9FFF = 1,
-} TileMapSelect;
-
-typedef enum {
-  TILE_DATA_8800_97FF = 0,
-  TILE_DATA_8000_8FFF = 1,
-} TileDataSelect;
-
-typedef enum {
   DMA_INACTIVE = 0,
   DMA_TRIGGERED = 1,
   DMA_ACTIVE = 2,

@@ -299,6 +299,22 @@ LogLevel emulator_get_log_level(LogSystem system) {
   return s_log_level[system];
 }
 
+TileDataSelect emulator_get_tile_data_select(struct Emulator* e) {
+  return e->state.ppu.LCDC.bg_tile_data_select;
+}
+
+TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
+                                           LayerType layer_type) {
+  switch (layer_type) {
+    case LAYER_TYPE_BG:
+      return e->state.ppu.LCDC.bg_tile_map_select;
+    case LAYER_TYPE_WINDOW:
+      return e->state.ppu.LCDC.window_tile_map_select;
+    default:
+      return TILE_MAP_9800_9BFF;
+  }
+}
+
 Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   switch (type) {
     case PALETTE_TYPE_BGP:
@@ -318,8 +334,8 @@ Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   }
 }
 
-void emulator_get_tile_data_buffer(struct Emulator* e, Palette palette,
-                                   TileDataBuffer out_buffer) {
+void emulator_get_tile_data(struct Emulator* e, Palette palette,
+                                   TileData out_tile_data) {
   assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
   assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
   const int tw = TILE_DATA_TEXTURE_WIDTH / TILE_WIDTH;
@@ -337,13 +353,45 @@ void emulator_get_tile_data_buffer(struct Emulator* e, Palette palette,
           u8 shift = 7 - (mx & 7);
           u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
           Color color = palette.color[palette_index];
-          out_buffer[offset + mx] = s_color_to_rgba[color];
+          out_tile_data[offset + mx] = s_color_to_rgba[color];
         }
         addr += TILE_ROW_BYTES;
         offset += TILE_DATA_TEXTURE_WIDTH;
       }
     }
   }
+}
+
+void emulator_get_tile_map(struct Emulator* e, TileMapSelect map_select,
+                           TileMap out_tile_map) {
+  size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
+  memcpy(out_tile_map, &e->state.vram[offset], TILE_MAP_SIZE);
+}
+
+void emulator_get_bg_scroll(struct Emulator* e, u8* x, u8* y) {
+  *x = e->state.ppu.SCX;
+  *y = e->state.ppu.SCY;
+}
+
+void emulator_get_window_scroll(struct Emulator* e, u8* x, u8* y) {
+  *x = e->state.ppu.WX - WINDOW_X_OFFSET;
+  *y = e->state.ppu.WY;
+}
+
+Bool emulator_get_display(struct Emulator* e) {
+  return e->state.ppu.LCDC.display;
+}
+
+Bool emulator_get_bg_display(struct Emulator* e) {
+  return e->state.ppu.LCDC.bg_display;
+}
+
+Bool emulator_get_window_display(struct Emulator* e) {
+  return e->state.ppu.LCDC.window_display;
+}
+
+Bool emulator_get_obj_display(struct Emulator* e) {
+  return e->state.ppu.LCDC.obj_display;
 }
 
 ObjSize emulator_get_obj_size(struct Emulator* e) {
@@ -361,6 +409,6 @@ Obj emulator_get_obj(struct Emulator* e, int index) {
 Bool obj_is_visible(const Obj* obj) {
   u8 obj_x = obj->x + OBJ_X_OFFSET - 1;
   u8 obj_y = obj->y + OBJ_Y_OFFSET - 1;
-  return obj_x < SCREEN_WIDTH + OBJ_X_OFFSET &&
-         obj_y < SCREEN_HEIGHT + OBJ_Y_OFFSET;
+  return obj_x < SCREEN_WIDTH + OBJ_X_OFFSET - 1 &&
+         obj_y < SCREEN_HEIGHT + OBJ_Y_OFFSET - 1;
 }

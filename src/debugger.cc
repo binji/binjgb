@@ -186,6 +186,9 @@ static f32 dist_squared(const ImVec2& v1, const ImVec2& v2) {
 
 static const ImVec2 kTileSize(8, 8);
 static const ImVec2 k8x16SpriteSize(8, 16);
+static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
+static const ImColor kHighlightColor(IM_COL32(0, 255, 0, 192));
 
 class TileImage {
  public:
@@ -193,12 +196,13 @@ class TileImage {
 
   void Init(Host* host);
   void Upload(Emulator*, const Palette&);
-  void DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+  // Return true if hovering on the tile.
+  bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
                 f32 scale, bool xflip, bool yflip);
 
  private:
   Host* host;
-  TileDataBuffer buffer;
+  TileData tile_data;
   HostTexture* texture;
 };
 
@@ -210,12 +214,12 @@ void TileImage::Init(Host* host) {
 }
 
 void TileImage::Upload(Emulator* e, const Palette& palette) {
-  emulator_get_tile_data_buffer(e, palette, buffer);
+  emulator_get_tile_data(e, palette, tile_data);
   host_upload_texture(host, texture, TILE_DATA_TEXTURE_WIDTH,
-                      TILE_DATA_TEXTURE_HEIGHT, buffer);
+                      TILE_DATA_TEXTURE_HEIGHT, tile_data);
 }
 
-void TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
                          f32 scale, bool xflip = false, bool yflip = false) {
   const int width = TILE_DATA_TEXTURE_WIDTH / 8;
   ImVec2 src(index % width, index / width);
@@ -232,6 +236,7 @@ void TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
   }
   draw_list->AddImage((ImTextureID)texture->handle, ul_pos, br_pos, ul_uv,
                       br_uv);
+  return ImGui::IsMouseHoveringRect(ul_pos, br_pos);
 }
 
 class Debugger {
@@ -254,6 +259,7 @@ class Debugger {
   void AudioWindow();
   void TiledataWindow();
   void ObjWindow();
+  void MapWindow();
 
   void DrawTile(ImDrawList* draw_list, int index, const ImVec2& pos, int scale,
                 bool xflip = false, bool yflip = false);
@@ -266,31 +272,36 @@ class Debugger {
 
   TileImage tiledata_image;
   TileImage obj_image;
+  TileImage map_image;
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
 
   bool highlight_obj;
   int highlight_obj_index;
+  bool highlight_tile;
+  int highlight_tile_index;
 
   bool emulator_window_open;
   bool audio_window_open;
   bool tiledata_window_open;
   bool obj_window_open;
+  bool map_window_open;
 };
 
 Debugger::Debugger()
     : e(nullptr),
       host(nullptr),
       save_filename(nullptr),
-      tiledata_image(),
-      obj_image(),
       highlight_obj(false),
       highlight_obj_index(0),
+      highlight_tile(false),
+      highlight_tile_index(0),
       emulator_window_open(true),
       audio_window_open(true),
       tiledata_window_open(true),
-      obj_window_open(true) {
+      obj_window_open(true),
+      map_window_open(true) {
   ZERO_MEMORY(audio_data);
 }
 
@@ -328,6 +339,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
 
   tiledata_image.Init(host);
   obj_image.Init(host);
+  map_image.Init(host);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
@@ -347,6 +359,7 @@ void Debugger::Run() {
     AudioWindow();
     TiledataWindow();
     ObjWindow();
+    MapWindow();
 
     host_end_video(host);
   }
@@ -378,6 +391,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Audio", NULL, &audio_window_open);
       ImGui::MenuItem("TileData", NULL, &tiledata_window_open);
       ImGui::MenuItem("Obj", NULL, &obj_window_open);
+      ImGui::MenuItem("Map", NULL, &map_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
@@ -386,8 +400,7 @@ void Debugger::MainMenuBar() {
 
 void Debugger::EmulatorWindow() {
   ImGui::SetNextWindowPos(ImVec2(16, 48), ImGuiSetCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(SCREEN_WIDTH * host_init.render_scale,
-                                  SCREEN_HEIGHT * host_init.render_scale),
+  ImGui::SetNextWindowSize(kScreenSize * host_init.render_scale,
                            ImGuiSetCond_FirstUseEver);
   if (emulator_window_open) {
     if (ImGui::Begin("Binjgb", &emulator_window_open)) {
@@ -423,12 +436,12 @@ void Debugger::EmulatorWindow() {
         // instead.
         ImVec2 obj_pos(static_cast<u8>(obj.x + OBJ_X_OFFSET),
                        static_cast<u8>(obj.y + OBJ_Y_OFFSET));
-        ImVec2 br = image_ul + obj_pos * scale;
-        ImVec2 ul = br - k8x16SpriteSize * scale;
+        ImVec2 br_pos = image_ul + obj_pos * scale;
+        ImVec2 ul_pos = br_pos - k8x16SpriteSize * scale;
         if (obj_size == OBJ_SIZE_8X8) {
-          br.y -= kTileSize.y * scale;
+          br_pos.y -= kTileSize.y * scale;
         }
-        draw_list->AddRectFilled(ul, br, IM_COL32(0, 255, 0, 192));
+        draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
       }
 
       draw_list->PopClipRect();
@@ -517,23 +530,30 @@ void Debugger::TiledataWindow() {
       ImVec2 scaled_tile_size = kTileSize * scale;
       for (int ty = 0; ty < th; ++ty) {
         for (int tx = 0; tx < tw; ++tx) {
-          int i;
+          int tile_index;
           if (size8x16) {
-            i = (ty & ~1) * tw + (tx * 2);
+            tile_index = (ty & ~1) * tw + (tx * 2);
             if ((ty & 1) == 1) {
-              i++;
+              tile_index++;
             }
           } else {
-            i = ty * tw + tx;
+            tile_index = ty * tw + tx;
           }
           ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
           ImVec2 br_pos = ul_pos + scaled_tile_size;
-          tiledata_image.DrawTile(draw_list, i, ul_pos, scale);
-          if (ImGui::IsMouseHoveringRect(ul_pos, br_pos)) {
-            ImGui::SetTooltip("tile: %u (0x%04x)", i, 0x8000 + i * 16);
+          bool is_hovering =
+              tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale);
+          if (highlight_tile && highlight_tile_index == tile_index) {
+            ImGui::Text("highlight: %d\n", highlight_tile_index);
+            draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
+          }
+          if (is_hovering) {
+            ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
+                              0x8000 + tile_index * 16);
           }
         }
       }
+      highlight_tile = false;
       ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
       ImGui::EndChild();
     }
@@ -607,17 +627,125 @@ void Debugger::ObjWindow() {
         if (obj.yflip) {
           std::swap(tile_top, tile_bottom);
         }
-        obj_image.DrawTile(draw_list, tile_top, cursor, kScale, obj.xflip,
-                           obj.yflip);
-        obj_image.DrawTile(draw_list, tile_bottom,
+
+        if (obj_image.DrawTile(draw_list, tile_top, cursor, kScale, obj.xflip,
+                           obj.yflip)) {
+          highlight_tile = true;
+          highlight_tile_index = tile_top;
+        }
+
+        if (obj_image.DrawTile(draw_list, tile_bottom,
                            cursor + ImVec2(0, kScaledTileSize.y), kScale,
-                           obj.xflip, obj.yflip);
+                           obj.xflip, obj.yflip)) {
+          highlight_tile = true;
+          highlight_tile_index = tile_bottom;
+        }
+
         ImGui::Dummy(k8x16SpriteSize * kScale);
       } else {
-        obj_image.DrawTile(draw_list, obj.tile, cursor, kScale, obj.xflip,
-                           obj.yflip);
+        if (obj_image.DrawTile(draw_list, obj.tile, cursor, kScale, obj.xflip,
+                           obj.yflip)) {
+          highlight_tile = true;
+          highlight_tile_index = obj.tile;
+        }
+
         ImGui::Dummy(kScaledTileSize);
       }
+    }
+    ImGui::End();
+  }
+}
+
+void Debugger::MapWindow() {
+  if (map_window_open) {
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 516), ImGuiSetCond_FirstUseEver);
+    if (ImGui::Begin("Map", &map_window_open)) {
+      static int scale = 3;
+      static const char* layer_names[] = {
+          "BG", "Window",
+      };
+      static LayerType layer_type = LAYER_TYPE_BG;
+      static bool highlight = true;
+
+      ImGui::SliderInt("Scale", &scale, 1, 5);
+      ImGui::Combo("Layer", &layer_type, layer_names, 2);
+      ImGui::Checkbox("Highlight", &highlight);
+      ImGui::Separator();
+
+      bool display;
+      u8 scroll_x, scroll_y;
+      switch (layer_type) {
+        case LAYER_TYPE_BG:
+          display = emulator_get_bg_display(e);
+          emulator_get_bg_scroll(e, &scroll_x, &scroll_y);
+          break;
+        case LAYER_TYPE_WINDOW:
+          display = emulator_get_window_display(e);
+          emulator_get_window_scroll(e, &scroll_x, &scroll_y);
+          break;
+      }
+
+      ImGui::LabelText("Display", "%s", display ? "On" : "Off");
+      ImGui::LabelText("Scroll", "%d, %d", scroll_x, scroll_y);
+
+      TileMapSelect map_select = emulator_get_tile_map_select(e, layer_type);
+      TileDataSelect data_select = emulator_get_tile_data_select(e);
+      TileMap tile_map;
+      emulator_get_tile_map(e, map_select, tile_map);
+
+      map_image.Upload(e, emulator_get_palette(e, PALETTE_TYPE_BGP));
+
+      const ImVec2 scaled_tile_size = kTileSize * scale;
+      const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
+      ImGui::BeginChild("Tiles", scaled_tile_map_size, false,
+                        ImGuiWindowFlags_HorizontalScrollbar);
+      ImDrawList* draw_list = ImGui::GetWindowDrawList();
+      ImVec2 cursor = ImGui::GetCursorScreenPos();
+      for (int ty = 0; ty < TILE_MAP_HEIGHT; ++ty) {
+        for (int tx = 0; tx < TILE_MAP_WIDTH; ++tx) {
+          ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
+          int tile_index = tile_map[ty * TILE_MAP_WIDTH + tx];
+          if (data_select == TILE_DATA_8800_97FF) {
+            tile_index = 256 + (s8)tile_index;
+          }
+          if (map_image.DrawTile(draw_list, tile_index, ul_pos, scale)) {
+            ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
+                              0x8000 + tile_index * 16);
+            highlight_tile = true;
+            highlight_tile_index = tile_index;
+          }
+        }
+      }
+
+      if (display && highlight) {
+        // The BG layer wraps, but the window layer doesn't. Also, the window
+        // layer always displays the lower-right corner of its map.
+        switch (layer_type) {
+          case LAYER_TYPE_BG: {
+            ImVec2 ul_pos = cursor + ImVec2(scroll_x, scroll_y) * scale;
+            ImVec2 br_pos = ul_pos + kScreenSize * scale;
+            for (int y = -1; y <= 0; ++y) {
+              for (int x = -1; x <= 0; ++x) {
+                ImVec2 offset = ImVec2(x, y) * scaled_tile_map_size;
+                draw_list->AddRect(ul_pos + offset, br_pos + offset,
+                                   kHighlightColor, 0, ~0, 4.0f);
+              }
+            }
+            break;
+          }
+          case LAYER_TYPE_WINDOW: {
+            ImVec2 ul_pos = cursor;
+            ImVec2 br_pos =
+                ul_pos + (kScreenSize - ImVec2(scroll_x, scroll_y)) * scale;
+            draw_list->AddRect(ul_pos, br_pos, kHighlightColor, 0, ~0, 4.0f);
+            break;
+          }
+        }
+      }
+
+      ImGui::Dummy(scaled_tile_map_size);
+      ImGui::EndChild();
     }
     ImGui::End();
   }

@@ -57,6 +57,16 @@ typedef enum Color {
 } Color;
 
 typedef enum {
+  TILE_DATA_8800_97FF = 0,
+  TILE_DATA_8000_8FFF = 1,
+} TileDataSelect;
+
+typedef enum TileMapSelect {
+  TILE_MAP_9800_9BFF = 0,
+  TILE_MAP_9C00_9FFF = 1,
+} TileMapSelect;
+
+typedef enum {
   OBJ_SIZE_8X8 = 0,
   OBJ_SIZE_8X16 = 1,
 } ObjSize;

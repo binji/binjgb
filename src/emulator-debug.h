@@ -43,13 +43,21 @@ typedef enum PaletteType {
   PALETTE_TYPE_OBP1,
 } PaletteType;
 
+typedef enum LayerType {
+  LAYER_TYPE_BG,
+  LAYER_TYPE_WINDOW,
+} LayerType;
+
 struct Emulator;
 
 #define TILE_DATA_TEXTURE_WIDTH 128
 #define TILE_DATA_TEXTURE_HEIGHT 192
-#define TILE_DATA_TEXTURE_SIZE \
-  (TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT)
-typedef RGBA TileDataBuffer[TILE_DATA_TEXTURE_SIZE];
+typedef RGBA TileData[TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT];
+
+#define TILE_MAP_WIDTH 32
+#define TILE_MAP_HEIGHT 32
+#define TILE_MAP_SIZE (TILE_MAP_WIDTH * TILE_MAP_HEIGHT)
+typedef u8 TileMap[TILE_MAP_SIZE];
 
 #if 0
 typedef struct EmulatorHookContext {
@@ -70,8 +78,18 @@ void emulator_set_trace(Bool trace);
 const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 
+TileDataSelect emulator_get_tile_data_select(struct Emulator*);
+TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
 Palette emulator_get_palette(struct Emulator*, PaletteType);
-void emulator_get_tile_data_buffer(struct Emulator*, Palette, TileDataBuffer);
+void emulator_get_tile_data(struct Emulator*, Palette, TileData);
+void emulator_get_tile_map(struct Emulator*, TileMapSelect, TileMap);
+void emulator_get_bg_scroll(struct Emulator*, u8* x, u8* y);
+void emulator_get_window_scroll(struct Emulator*, u8* x, u8* y);
+
+Bool emulator_get_display(struct Emulator*);
+Bool emulator_get_bg_display(struct Emulator*);
+Bool emulator_get_window_display(struct Emulator*);
+Bool emulator_get_obj_display(struct Emulator*);
 
 ObjSize emulator_get_obj_size(struct Emulator*);
 Obj emulator_get_obj(struct Emulator*, int index);
