@@ -14,6 +14,7 @@ A simple GB emulator.
 * Disable/enable each audio channel
 * Disable/enable BG, Window and Sprite layers
 * Convenient Python test harness using hashes to validate
+* (WIP) Debugger with various visualizations (see below)
 
 ## Screenshots
 
@@ -27,10 +28,17 @@ A simple GB emulator.
 ![Game Boy Wars](/images/wars.png)
 ![Is That a Demo in Your Pocket?](/images/pocket.png)
 
+## Debugger Screenshots
+
+![OBJ](/images/obj-window.png)
+![Map](/images/map-window.png)
+![Tile Data](/images/tiledata-window.png)
+
 ## Building
 
 Requires [CMake](https://cmake.org) and
-[SDL2](http://libsdl.org/download-2.0.php).
+[SDL2](http://libsdl.org/download-2.0.php). Debugger uses
+[dear imgui,][https://github.com/ocornut/imgui] (included as a git submodule).
 
 ### Building (Linux/Mac)
 
