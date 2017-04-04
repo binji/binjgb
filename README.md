@@ -38,7 +38,7 @@ A simple GB emulator.
 
 Requires [CMake](https://cmake.org) and
 [SDL2](http://libsdl.org/download-2.0.php). Debugger uses
-[dear imgui,][https://github.com/ocornut/imgui] (included as a git submodule).
+[dear imgui,](https://github.com/ocornut/imgui) (included as a git submodule).
 
 ### Building (Linux/Mac)
 
