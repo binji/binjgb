@@ -82,25 +82,25 @@ Keys:
 
 | Action | Key |
 | --- | --- |
-| DPAD-UP | up |
-| DPAD-DOWN | down |
-| DPAD-LEFT | left |
-| DPAD-RIGHT | right |
-| B | z |
-| A | x |
-| START | enter |
-| SELECT | backspace |
-| Quit | escape |
-| Save state | F6 |
-| Load state | F9 |
-| Toggle fullscreen | F11 |
-| Disable audio channel 1-4 | 1-4 |
-| Disable BG layer | b |
-| Disable Window layer | w |
-| Disable OBJ (sprites) | o |
-| Fast-forward | tab |
-| Pause | space |
-| Step one frame | n |
+| DPAD-UP | <kbd>↑</kbd> |
+| DPAD-DOWN | <kbd>↓</kbd> |
+| DPAD-LEFT | <kbd>←</kbd> |
+| DPAD-RIGHT | <kbd>→</kbd> |
+| B | <kbd>Z</kbd> |
+| A | <kbd>X</kbd> |
+| START | <kbd>Enter</kbd> |
+| SELECT | <kbd>Backspace</kbd> |
+| Quit | <kbd>Esc</kbd> |
+| Save state | <kbd>F6</kbd> |
+| Load state | <kbd>F9</kbd> |
+| Toggle fullscreen | <kbd>F11</kbd> |
+| Disable audio channel 1-4 | <kbd>1</kbd>-<kbd>4</kbd> |
+| Disable BG layer | <kbd>B</kbd> |
+| Disable Window layer | <kbd>W</kbd> |
+| Disable OBJ (sprites) | <kbd>O</kbd> |
+| Fast-forward | <kbd>Tab</kbd> |
+| Pause | <kbd>Space</kbd> |
+| Step one frame | <kbd>N</kbd> |
 
 ## Running tests
 
