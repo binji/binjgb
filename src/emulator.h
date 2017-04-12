@@ -76,6 +76,23 @@ typedef enum ObjPriority {
   OBJ_PRIORITY_BEHIND_BG = 1,
 } ObjPriority;
 
+/* TODO(binji): endianness */
+#define REGISTER_PAIR(X, Y) \
+  union {                   \
+    struct { u8 Y; u8 X; }; \
+    u16 X##Y;               \
+  }
+
+typedef struct {
+  u8 A;
+  REGISTER_PAIR(B, C);
+  REGISTER_PAIR(D, E);
+  REGISTER_PAIR(H, L);
+  u16 SP;
+  u16 PC;
+  struct { Bool Z, N, H, C; } F;
+} Registers;
+
 typedef struct Obj {
   u8 y;
   u8 x;

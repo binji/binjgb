@@ -102,7 +102,7 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(M, I, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, I, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
-static void HOOK_print_emulator_info(struct Emulator* e, const char* func_name);
+static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
@@ -203,8 +203,16 @@ static void sprint_hex(char* buffer, u8 val) {
   buffer[1] = hex_digits[val & 0xf];
 }
 
-static void print_instruction(Emulator* e, Address addr) {
-  char buffer[64];
+int emulator_opcode_bytes(struct Emulator* e, Address addr) {
+  u8 opcode = read_u8(e, addr);
+  int num_bytes = s_opcode_bytes[opcode];
+  /* Always return at least 1, we typically don't care about detecting the
+   * invalid opcodes. */
+  return num_bytes ? num_bytes : 1;
+}
+
+int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
+  char temp[64];
   char bytes[][3] = {"  ", "  "};
   const char* mnemonic = "*INVALID*";
 
@@ -219,8 +227,8 @@ static void print_instruction(Emulator* e, Address addr) {
       if (opcode == 0xcb) {
         mnemonic = s_cb_opcode_mnemonic[byte];
       } else {
-        snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode], byte);
-        mnemonic = buffer;
+        snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode], byte);
+        mnemonic = temp;
       }
       break;
     }
@@ -229,9 +237,9 @@ static void print_instruction(Emulator* e, Address addr) {
       u8 byte2 = read_u8(e, addr + 2);
       sprint_hex(bytes[0], byte1);
       sprint_hex(bytes[1], byte2);
-      snprintf(buffer, sizeof(buffer), s_opcode_mnemonic[opcode],
+      snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode],
                (byte2 << 8) | byte1);
-      mnemonic = buffer;
+      mnemonic = temp;
       break;
     }
     default: assert(!"invalid opcode byte length.\n"); break;
@@ -243,35 +251,14 @@ static void print_instruction(Emulator* e, Address addr) {
     sprint_hex(bank, e->state.memory_map_state.rom1_base >> ROM_BANK_SHIFT);
   }
 
-  printf("[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode, bytes[0], bytes[1],
-         mnemonic);
+  snprintf(buffer, size, "[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode,
+           bytes[0], bytes[1], mnemonic);
+  return num_bytes ? num_bytes : 1;
 }
 
-void HOOK_print_emulator_info(Emulator* e, const char* func_name) {
-  if (s_trace && !e->state.interrupt.halt) {
-    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
-           e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
-           e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
-           e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
-           e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
-    printf(" (cy: %u)", e->state.cycles);
-    if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
-      printf(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
-             e->state.ppu.STAT.mode);
-    }
-    if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
-      printf(" LY:%u", e->state.ppu.LY);
-    }
-    printf(" |");
-    print_instruction(e, e->state.reg.PC);
-    printf("\n");
-    if (s_trace_counter > 0) {
-      if (--s_trace_counter == 0) {
-        s_trace = FALSE;
-      }
-    }
-  }
-}
+Registers emulator_get_registers(struct Emulator* e) { return e->state.reg; }
+
+void HOOK_emulator_step(Emulator* e, const char* func_name) {}
 
 void emulator_set_log_level(LogSystem system, LogLevel level) {
   assert(system < NUM_LOG_SYSTEMS);

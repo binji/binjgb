@@ -189,6 +189,7 @@ static const ImVec2 k8x16SpriteSize(8, 16);
 static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
 static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
 static const ImColor kHighlightColor(IM_COL32(0, 255, 0, 192));
+static const ImColor kPCColor(IM_COL32(0, 255, 0, 192));
 
 class TileImage {
  public:
@@ -260,6 +261,7 @@ class Debugger {
   void TiledataWindow();
   void ObjWindow();
   void MapWindow();
+  void DisassemblyWindow();
 
   void DrawTile(ImDrawList* draw_list, int index, const ImVec2& pos, int scale,
                 bool xflip = false, bool yflip = false);
@@ -287,6 +289,7 @@ class Debugger {
   bool tiledata_window_open;
   bool obj_window_open;
   bool map_window_open;
+  bool disassembly_window_open;
 };
 
 Debugger::Debugger()
@@ -301,7 +304,8 @@ Debugger::Debugger()
       audio_window_open(true),
       tiledata_window_open(true),
       obj_window_open(true),
-      map_window_open(true) {
+      map_window_open(true),
+      disassembly_window_open(true) {
   ZERO_MEMORY(audio_data);
 }
 
@@ -360,6 +364,7 @@ void Debugger::Run() {
     TiledataWindow();
     ObjWindow();
     MapWindow();
+    DisassemblyWindow();
 
     host_end_video(host);
   }
@@ -392,6 +397,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("TileData", NULL, &tiledata_window_open);
       ImGui::MenuItem("Obj", NULL, &obj_window_open);
       ImGui::MenuItem("Map", NULL, &map_window_open);
+      ImGui::MenuItem("Disassembly", NULL, &disassembly_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
@@ -658,8 +664,8 @@ void Debugger::ObjWindow() {
 
 void Debugger::MapWindow() {
   if (map_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(440, 516), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(1719, 50), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(800, 1014), ImGuiSetCond_FirstUseEver);
     if (ImGui::Begin("Map", &map_window_open)) {
       static int scale = 3;
       static const char* layer_names[] = {
@@ -746,6 +752,96 @@ void Debugger::MapWindow() {
 
       ImGui::Dummy(scaled_tile_map_size);
       ImGui::EndChild();
+    }
+    ImGui::End();
+  }
+}
+
+static Address step_forward_by_instruction(Emulator* e, Address from_addr) {
+  return std::min(from_addr + emulator_opcode_bytes(e, from_addr), 0xffff);
+}
+
+static Address step_backward_by_instruction(Emulator* e, Address from_addr) {
+  // Iterate from |from_addr| - MAX to |from_addr| - 1, adding up the number of
+  // paths that lead to each instruction. Finally, choose the instruction whose
+  // next instruction is |from_addr| and has the most paths leading up to it.
+  // Since instructions are 1, 2, or 3 bytes, we only have to inspect counts
+  // 1..3.
+  const int MAX = 16;
+  int count[MAX];
+  ZERO_MEMORY(count);
+  for (int i = std::min<int>(from_addr, MAX) - 1; i > 0; --i) {
+    Address next = step_forward_by_instruction(e, from_addr - i);
+    if (next <= from_addr) {
+      // Give a "bonus" to instructions whose next is |from_addr|.
+      count[i] += (next == from_addr ? MAX : 1);
+      count[from_addr - next] += count[i];
+    }
+  }
+  int* best = std::max_element(count + 1, count + 4);
+  return std::max<int>(from_addr - (best - count), 0);
+}
+
+void Debugger::DisassemblyWindow() {
+  if (disassembly_window_open) {
+    ImGui::SetNextWindowPos(ImVec2(1113, 51), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(590, 1326), ImGuiSetCond_FirstUseEver);
+    if (ImGui::Begin("Disassembly", &disassembly_window_open)) {
+      static bool track_pc = false;
+      static Address addr = 0;
+
+      Registers regs = emulator_get_registers(e);
+      ImGui::Text("A: %02X", regs.A);
+      ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
+      ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);
+      ImGui::Text("H: %02X L: %02X HL: %04X", regs.H, regs.L, regs.HL);
+      ImGui::Text("SP: %04X", regs.SP);
+      ImGui::Text("PC: %04X", regs.PC);
+      ImGui::Text("%c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
+                  regs.F.H ? 'H' : '_', regs.F.C ? 'C' : '_');
+      ImGui::Separator();
+
+      ImGui::PushButtonRepeat(true);
+      if (ImGui::Button("-1")) {
+        addr = std::max(addr - 1, 0);
+        track_pc = false;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("+1")) {
+        addr = std::min(addr + 1, 0xffff);
+        track_pc = false;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("-I")) {
+        addr = step_backward_by_instruction(e, addr);
+        track_pc = false;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("+I")) {
+        addr = step_forward_by_instruction(e, addr);
+        track_pc = false;
+      }
+      ImGui::PopButtonRepeat();
+      ImGui::SameLine();
+      ImGui::Checkbox("Track PC", &track_pc);
+      ImGui::Separator();
+
+      if (track_pc) {
+        addr = regs.PC;
+      }
+
+      float height = ImGui::GetTextLineHeightWithSpacing();
+      Address i = addr;
+      while (ImGui::GetContentRegionAvail().y >= height) {
+        char buffer[64];
+        bool is_pc = i == regs.PC;
+        i += emulator_disassemble(e, i, buffer, sizeof(buffer));
+        if (is_pc) {
+          ImGui::TextColored(kPCColor, buffer);
+        } else {
+          ImGui::Text(buffer);
+        }
+      }
     }
     ImGui::End();
   }

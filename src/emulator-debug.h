@@ -78,6 +78,10 @@ void emulator_set_trace(Bool trace);
 const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 
+int emulator_opcode_bytes(struct Emulator*, Address);
+int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
+Registers emulator_get_registers(struct Emulator*);
+
 TileDataSelect emulator_get_tile_data_select(struct Emulator*);
 TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
 Palette emulator_get_palette(struct Emulator*, PaletteType);

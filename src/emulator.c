@@ -365,23 +365,6 @@ typedef struct {
   MaskedAddress addr;
 } MemoryTypeAddressPair;
 
-/* TODO(binji): endianness */
-#define REGISTER_PAIR(X, Y) \
-  union {                   \
-    struct { u8 Y; u8 X; }; \
-    u16 X##Y;               \
-  }
-
-typedef struct {
-  u8 A;
-  REGISTER_PAIR(B, C);
-  REGISTER_PAIR(D, E);
-  REGISTER_PAIR(H, L);
-  u16 SP;
-  u16 PC;
-  struct { Bool Z, N, H, C; } F;
-} Registers;
-
 typedef struct {
   JoypadButtons buttons;
   JoypadSelect joypad_select;
@@ -3376,7 +3359,7 @@ static void handle_interrupts(Emulator* e) {
 }
 
 void emulator_step(Emulator* e) {
-  HOOK0(print_emulator_info);
+  HOOK0(emulator_step);
   execute_instruction(e);
   handle_interrupts(e);
 }
