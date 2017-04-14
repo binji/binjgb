@@ -144,25 +144,12 @@ error:
   exit(1);
 }
 
-namespace ImGui {
-
-template <typename T>
-bool Combo(const char* label, T* value, const char* const* names,
-           int name_count) {
-  int int_value = static_cast<int>(*value);
-  bool result = Combo(label, &int_value, names, name_count);
-  *value = static_cast<T>(int_value);
-  return result;
-}
-
-bool CheckboxNot(const char* label, Bool* v) {
-  bool bv = !*v;
-  bool result = Checkbox(label, &bv);
-  *v = static_cast<Bool>(!bv);
-  return result;
-}
-
-}  // namespace ImGui
+static const ImVec2 kTileSize(8, 8);
+static const ImVec2 k8x16OBJSize(8, 16);
+static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
+static const ImColor kHighlightColor(IM_COL32(0, 255, 0, 192));
+static const ImColor kPCColor(IM_COL32(0, 255, 0, 192));
 
 ImVec2 operator +(const ImVec2& lhs, const ImVec2& rhs) {
   return ImVec2(lhs.x + rhs.x, lhs.y + rhs.y);
@@ -184,12 +171,33 @@ static f32 dist_squared(const ImVec2& v1, const ImVec2& v2) {
   return (v1.x - v2.x) * (v1.x - v2.x) + (v1.y - v2.y) * (v1.y - v2.y);
 }
 
-static const ImVec2 kTileSize(8, 8);
-static const ImVec2 k8x16SpriteSize(8, 16);
-static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
-static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
-static const ImColor kHighlightColor(IM_COL32(0, 255, 0, 192));
-static const ImColor kPCColor(IM_COL32(0, 255, 0, 192));
+ImVec2 get_obj_size_vec2(ObjSize obj_size, f32 scale) {
+  if (obj_size == OBJ_SIZE_8X16) {
+    return ImVec2(k8x16OBJSize * scale);
+  } else {
+    return ImVec2(kTileSize * scale);
+  }
+}
+
+namespace ImGui {
+
+template <typename T>
+bool Combo(const char* label, T* value, const char* const* names,
+           int name_count) {
+  int int_value = static_cast<int>(*value);
+  bool result = Combo(label, &int_value, names, name_count);
+  *value = static_cast<T>(int_value);
+  return result;
+}
+
+bool CheckboxNot(const char* label, Bool* v) {
+  bool bv = !*v;
+  bool result = Checkbox(label, &bv);
+  *v = static_cast<Bool>(!bv);
+  return result;
+}
+
+}  // namespace ImGui
 
 class TileImage {
  public:
@@ -200,6 +208,9 @@ class TileImage {
   // Return true if hovering on the tile.
   bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
                 f32 scale, bool xflip, bool yflip);
+  // Return -1 if not hovering, or tile index if hovering.
+  int DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int index,
+              const ImVec2& ul_pos, f32 scale, bool xflip, bool yflip);
 
  private:
   Host* host;
@@ -240,6 +251,34 @@ bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
   return ImGui::IsMouseHoveringRect(ul_pos, br_pos);
 }
 
+int TileImage::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
+                       const ImVec2& ul_pos, f32 scale, bool xflip,
+                       bool yflip) {
+  const ImVec2 kScaledTileSize = kTileSize * scale;
+  int result = -1;
+  if (obj_size == OBJ_SIZE_8X16) {
+    int tile_top = tile & ~1;
+    int tile_bottom = tile | 1;
+    if (yflip) {
+      std::swap(tile_top, tile_bottom);
+    }
+
+    if (DrawTile(draw_list, tile_top, ul_pos, scale, xflip, yflip)) {
+      result = tile_top;
+    }
+
+    if (DrawTile(draw_list, tile_bottom, ul_pos + ImVec2(0, kScaledTileSize.y),
+                 scale, xflip, yflip)) {
+      result = tile_bottom;
+    }
+  } else {
+    if (DrawTile(draw_list, tile, ul_pos, scale, xflip, yflip)) {
+      result = tile;
+    }
+  }
+  return result;
+}
+
 class Debugger {
  public:
   Debugger();
@@ -273,7 +312,7 @@ class Debugger {
   const char* save_filename;
 
   TileImage tiledata_image;
-  TileImage obj_image;
+  TileImage obj_image[2];  // Palette 0 or 1.
   TileImage map_image;
 
   static const int kAudioDataSamples = 1000;
@@ -342,7 +381,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   }
 
   tiledata_image.Init(host);
-  obj_image.Init(host);
+  obj_image[0].Init(host);
+  obj_image[1].Init(host);
   map_image.Init(host);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
@@ -443,7 +483,7 @@ void Debugger::EmulatorWindow() {
         ImVec2 obj_pos(static_cast<u8>(obj.x + OBJ_X_OFFSET),
                        static_cast<u8>(obj.y + OBJ_Y_OFFSET));
         ImVec2 br_pos = image_ul + obj_pos * scale;
-        ImVec2 ul_pos = br_pos - k8x16SpriteSize * scale;
+        ImVec2 ul_pos = br_pos - k8x16OBJSize * scale;
         if (obj_size == OBJ_SIZE_8X8) {
           br_pos.y -= kTileSize.y * scale;
         }
@@ -572,9 +612,14 @@ void Debugger::ObjWindow() {
     ImGui::SetNextWindowPos(ImVec2(660, 860), ImGuiSetCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(440, 516), ImGuiSetCond_FirstUseEver);
     if (ImGui::Begin("Obj", &obj_window_open)) {
-      static const int kScale = 5;
-      static const ImVec2 kScaledTileSize = kTileSize * kScale;
+      static int scale = 4;
       static int obj_index = 0;
+
+      obj_image[0].Upload(e, emulator_get_palette(e, PALETTE_TYPE_OBP0));
+      obj_image[1].Upload(e, emulator_get_palette(e, PALETTE_TYPE_OBP1));
+
+      ObjSize obj_size = emulator_get_obj_size(e);
+      ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
       for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 10; ++x) {
@@ -588,19 +633,25 @@ void Debugger::ObjWindow() {
             ImGui::SameLine();
           }
 
-          if (!visible) {
+          ImVec2 button_size = get_obj_size_vec2(obj_size, scale);
+          bool clicked;
+          if (visible) {
+            obj_image[obj.palette].DrawOBJ(draw_list, obj_size, obj.tile,
+                                           ImGui::GetCursorScreenPos(), scale,
+                                           obj.xflip, obj.yflip);
+            clicked = ImGui::InvisibleButton(label, button_size);
+          } else {
             ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
+            clicked = ImGui::Button(label, button_size);
+            ImGui::PopStyleColor();
           }
-          if (ImGui::SmallButton(label)) {
+          if (clicked) {
             highlight_obj_index = obj_index = button_index;
           }
           if (obj_index == button_index) {
             ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
                                                 ImGui::GetItemRectMax(),
                                                 IM_COL32_WHITE);
-          }
-          if (!visible) {
-            ImGui::PopStyleColor();
           }
         }
       }
@@ -620,43 +671,6 @@ void Debugger::ObjWindow() {
                        obj.yflip ? 'Y' : '_');
       ImGui::LabelText("Palette", "OBP%d", obj.palette);
 
-      Palette palette = emulator_get_palette(
-          e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
-      obj_image.Upload(e, palette);
-
-      ObjSize size = emulator_get_obj_size(e);
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
-      ImVec2 cursor = ImGui::GetCursorScreenPos();
-      if (size == OBJ_SIZE_8X16) {
-        int tile_top = obj.tile & ~1;
-        int tile_bottom = obj.tile | 1;
-        if (obj.yflip) {
-          std::swap(tile_top, tile_bottom);
-        }
-
-        if (obj_image.DrawTile(draw_list, tile_top, cursor, kScale, obj.xflip,
-                           obj.yflip)) {
-          highlight_tile = true;
-          highlight_tile_index = tile_top;
-        }
-
-        if (obj_image.DrawTile(draw_list, tile_bottom,
-                           cursor + ImVec2(0, kScaledTileSize.y), kScale,
-                           obj.xflip, obj.yflip)) {
-          highlight_tile = true;
-          highlight_tile_index = tile_bottom;
-        }
-
-        ImGui::Dummy(k8x16SpriteSize * kScale);
-      } else {
-        if (obj_image.DrawTile(draw_list, obj.tile, cursor, kScale, obj.xflip,
-                           obj.yflip)) {
-          highlight_tile = true;
-          highlight_tile_index = obj.tile;
-        }
-
-        ImGui::Dummy(kScaledTileSize);
-      }
     }
     ImGui::End();
   }
@@ -679,7 +693,7 @@ void Debugger::MapWindow() {
       ImGui::Checkbox("Highlight", &highlight);
       ImGui::Separator();
 
-      bool display;
+      bool display = false;
       u8 scroll_x, scroll_y;
       switch (layer_type) {
         case LAYER_TYPE_BG:
@@ -704,10 +718,11 @@ void Debugger::MapWindow() {
 
       const ImVec2 scaled_tile_size = kTileSize * scale;
       const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
-      ImGui::BeginChild("Tiles", scaled_tile_map_size, false,
+      ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
                         ImGuiWindowFlags_HorizontalScrollbar);
       ImDrawList* draw_list = ImGui::GetWindowDrawList();
       ImVec2 cursor = ImGui::GetCursorScreenPos();
+      ImGui::PushClipRect(cursor, cursor + scaled_tile_map_size, true);
       for (int ty = 0; ty < TILE_MAP_HEIGHT; ++ty) {
         for (int tx = 0; tx < TILE_MAP_WIDTH; ++tx) {
           ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
@@ -750,6 +765,7 @@ void Debugger::MapWindow() {
         }
       }
 
+      ImGui::PopClipRect();
       ImGui::Dummy(scaled_tile_map_size);
       ImGui::EndChild();
     }
