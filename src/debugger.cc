@@ -310,6 +310,7 @@ class Debugger {
   Emulator* e;
   Host* host;
   const char* save_filename;
+  bool running;
 
   TileImage tiledata_image;
   TileImage obj_image[2];  // Palette 0 or 1.
@@ -335,6 +336,7 @@ Debugger::Debugger()
     : e(nullptr),
       host(nullptr),
       save_filename(nullptr),
+      running(true),
       highlight_obj(false),
       highlight_obj_index(0),
       highlight_tile(false),
@@ -394,7 +396,7 @@ void Debugger::Run() {
   emulator_read_ext_ram_from_file(e, save_filename);
 
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
-  while (host_poll_events(host)) {
+  while (running && host_poll_events(host)) {
     host_begin_video(host);
     host_run_ms(host, refresh_ms);
 
@@ -431,7 +433,25 @@ void Debugger::OnAudioBufferFull() {
 
 void Debugger::MainMenuBar() {
   if (ImGui::BeginMainMenuBar()) {
+    if (ImGui::BeginMenu("File")) {
+      if (ImGui::MenuItem("Exit")) {
+        running = false;
+      }
+      ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("Window")) {
+      for (int scale = 1; scale <= 4; ++scale) {
+        char label[3];
+        snprintf(label, sizeof(label), "%dx", scale);
+        if (ImGui::MenuItem(label)) {
+          // This is pretty cheesy, seems like there must be a better way.
+          ImGuiStyle& style = ImGui::GetStyle();
+          ImVec2 size = kScreenSize * scale + style.WindowPadding * 2;
+          size.y += ImGui::GetFontSize() + style.FramePadding.y * 2;
+          ImGui::SetWindowSize("Binjgb", size);
+        }
+      }
+      ImGui::Separator();
       ImGui::MenuItem("Binjgb", NULL, &emulator_window_open);
       ImGui::MenuItem("Audio", NULL, &audio_window_open);
       ImGui::MenuItem("TileData", NULL, &tiledata_window_open);
@@ -636,9 +656,13 @@ void Debugger::ObjWindow() {
           ImVec2 button_size = get_obj_size_vec2(obj_size, scale);
           bool clicked;
           if (visible) {
-            obj_image[obj.palette].DrawOBJ(draw_list, obj_size, obj.tile,
-                                           ImGui::GetCursorScreenPos(), scale,
-                                           obj.xflip, obj.yflip);
+            int tile_index = obj_image[obj.palette].DrawOBJ(
+                draw_list, obj_size, obj.tile, ImGui::GetCursorScreenPos(),
+                scale, obj.xflip, obj.yflip);
+            if (tile_index >= 0) {
+              highlight_tile = true;
+              highlight_tile_index = tile_index;
+            }
             clicked = ImGui::InvisibleButton(label, button_size);
           } else {
             ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
@@ -870,7 +894,10 @@ int main(int argc, char** argv) {
   parse_arguments(argc, argv);
 
   Debugger debugger;
-  debugger.Init(s_rom_filename, audio_frequency, audio_frames, s_font_scale);
+  if (!debugger.Init(s_rom_filename, audio_frequency, audio_frames,
+                     s_font_scale)) {
+    return 1;
+  }
   debugger.Run();
   return 0;
 }

@@ -273,12 +273,14 @@ error:
 }
 
 void host_delete(Host* host) {
-  host_destroy_texture(host, host->fb_texture);
-  SDL_GL_DeleteContext(host->gl_context);
-  SDL_DestroyWindow(host->window);
-  SDL_Quit();
-  free(host->audio.buffer);
-  free(host);
+  if (host) {
+    host_destroy_texture(host, host->fb_texture);
+    SDL_GL_DeleteContext(host->gl_context);
+    SDL_DestroyWindow(host->window);
+    SDL_Quit();
+    free(host->audio.buffer);
+    free(host);
+  }
 }
 
 void host_set_config(struct Host* host, const HostConfig* new_config) {

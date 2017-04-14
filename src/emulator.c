@@ -3643,13 +3643,14 @@ Emulator* emulator_new(const EmulatorInit* init) {
       SUCCESS(init_audio_buffer(e, init->audio_frequency, init->audio_frames)));
   return e;
 error:
-  free(e->audio_buffer.data);
-  free(e);
+  emulator_delete(e);
   return NULL;
 }
 
 void emulator_delete(Emulator* e) {
-  free(e->audio_buffer.data);
-  free(e);
+  if (e) {
+    free(e->audio_buffer.data);
+    free(e);
+  }
 }
 
