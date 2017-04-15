@@ -1,2 +1,3 @@
 * text=auto
 src/emscripten/binjgb.js binary
+src/emscripten/binjgb.wasm binary

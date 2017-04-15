@@ -72,10 +72,24 @@ When building on Windows, you'll probably have to set the SDL2 directory:
 Then load this solution into Visual Studio and build it. Make sure to build the
 `INSTALL` target, so the exectuables are built to the `bin` directory.
 
+### Building WebAssembly
+
+You can build binjgb as a WebAssembly module. You'll need an incoming build of
+emscripten. See https://github.com/kripken/emscripten/wiki/WebAssembly and
+http://kripken.github.io/emscripten-site/docs/building_from_source/index.html#installing-from-source.
+
+Put a symlink to Emscripten in the `emscripten` directory, then run make.
+
+```
+$ ln -s ${PATH_TO_EMSCRIPTEN} emscripten
+$ make wasm
+```
+
 ## Running
 
 ```
 $ bin/binjgb <filename>
+$ bin/binjgb-debugger <filename>
 ```
 
 Keys:

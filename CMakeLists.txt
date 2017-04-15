@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 2.8)
 project(binjgb)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
+option(WASM "Build for WebAssembly" OFF)
+
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install directory" FORCE)
 endif ()
@@ -87,9 +89,15 @@ else (EMSCRIPTEN)
     --pre-js ${PRE_JS}
     --memory-init-file 0
     -s EXPORTED_FUNCTIONS=\"@${EXPORTED_JSON}\"
-    -s RESERVED_FUNCTION_POINTERS=10
     -s NO_EXIT_RUNTIME=1
   )
+  if (WASM)
+    set(LINK_FLAGS ${LINK_FLAGS}
+      -s WASM=1
+      -s \"BINARYEN_TRAP_MODE='allow'\"
+    )
+  endif ()
+
   string(REPLACE ";" " " LINK_FLAGS_STR "${LINK_FLAGS}")
 
   set_target_properties(binjgb
