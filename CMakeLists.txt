@@ -81,12 +81,10 @@ if (NOT EMSCRIPTEN)
   install(TARGETS binjgb-tester DESTINATION bin)
 else (EMSCRIPTEN)
   add_executable(binjgb src/emulator.c src/emscripten/wrapper.c)
-  set(PRE_JS ${PROJECT_SOURCE_DIR}/src/emscripten/pre.js)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)
   target_include_directories(binjgb PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
   set(LINK_FLAGS
-    --pre-js ${PRE_JS}
     --memory-init-file 0
     -s EXPORTED_FUNCTIONS=\"@${EXPORTED_JSON}\"
     -s NO_EXIT_RUNTIME=1
@@ -103,6 +101,6 @@ else (EMSCRIPTEN)
   set_target_properties(binjgb
     PROPERTIES
     LINK_FLAGS "${LINK_FLAGS_STR}"
-    LINK_DEPENDS "${PRE_JS};${EXPORTED_JSON}"
+    LINK_DEPENDS "${EXPORTED_JSON}"
   )
 endif ()
