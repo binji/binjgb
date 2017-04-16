@@ -1,16 +1,55 @@
 <!DOCTYPE html>
-<body>
+<head>
   <style>
+    body {
+      display: flex;
+      position: absolute;
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
     canvas {
+      width: 480px;
+      height: 432px;
       border: 1px solid gray;
+      margin: auto;
+    }
+    #status-wrap {
+      width: 100%;
+      border-top: 1px solid gray;
+      padding: 8px 0;
+    }
+    #status {
+      display: flex;
+      width: 800px;
+      margin: auto;
+      flex-direction: row;
+    }
+    .left {
+      margin-right: auto;
     }
   </style>
-  <div>
-    <button id="stop">stop</button>
-    <span id="fps">0</span> FPS
-    <input id="file" type="file">
-  </div>
+</head>
+<body>
   <canvas width="160" height="144"></canvas>
+  <div id="status-wrap">
+    <div id="status">
+      <div class="left">
+        <button id="_1x">1x</button>
+        <button id="_2x">2x</button>
+        <button id="_3x">3x</button>
+        <button id="_4x">4x</button>
+        <button id="stop">stop</button>
+        <input id="file" type="file">
+      </div>
+      <div>
+        <span id="fps">0</span> FPS
+      </div>
+    </div>
+  </div>
   <script src="binjgb.js"></script>
   <script src="demo.js"></script>
 </body>

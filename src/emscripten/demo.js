@@ -20,6 +20,16 @@ var $ = document.querySelector.bind(document);
 var canvasEl = $('canvas');
 var emulator = null;
 
+function setScale(scale) {
+  canvasEl.style.width = canvasEl.width * scale + 'px';
+  canvasEl.style.height = canvasEl.height * scale + 'px';
+}
+
+$('#_1x').addEventListener('click', function(event) { setScale(1); });
+$('#_2x').addEventListener('click', function(event) { setScale(2); });
+$('#_3x').addEventListener('click', function(event) { setScale(3); });
+$('#_4x').addEventListener('click', function(event) { setScale(4); });
+
 $('#file').addEventListener('change', function(event) {
   var reader = new FileReader();
   reader.onloadend = function() { startEmulator(reader.result); }
@@ -40,8 +50,8 @@ function startEmulator(romArrayBuffer) {
 
 function Emulator(romArrayBuffer) {
   this.cleanupFuncs = [];
-  this.renderer = new WebGLRenderer(canvasEl, 3);
-  // this.renderer = new Canvas2DRenderer(canvasEl, 3);
+  this.renderer = new WebGLRenderer(canvasEl);
+  // this.renderer = new Canvas2DRenderer(canvasEl);
   this.audio = new AudioContext();
   this.defer(function() { this.audio.close(); });
 
@@ -193,11 +203,9 @@ Emulator.prototype.renderVideo = function(startMs) {
 };
 
 
-function Canvas2DRenderer(el, scale) {
+function Canvas2DRenderer(el) {
   this.ctx = el.getContext('2d');
-  this.imageData = this.ctx.createImageData(canvasEl.width, canvasEl.height);
-  el.style.transform = 'scale(' + scale + ')';
-  el.style.transformOrigin = 'top left';
+  this.imageData = this.ctx.createImageData(el.width, el.height);
 }
 
 Canvas2DRenderer.prototype.renderTexture = function() {
@@ -208,9 +216,7 @@ Canvas2DRenderer.prototype.uploadTexture = function(buffer) {
   this.imageData.data.set(buffer);
 };
 
-function WebGLRenderer(el, scale) {
-  el.width = SCREEN_WIDTH * scale;
-  el.height = SCREEN_HEIGHT * scale;
+function WebGLRenderer(el) {
   var gl = this.gl = el.getContext('webgl');
 
   var w = SCREEN_WIDTH / 256;
