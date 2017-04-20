@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "emulator-debug.h"
 #include "options.h"
@@ -199,18 +200,43 @@ bool CheckboxNot(const char* label, Bool* v) {
 
 }  // namespace ImGui
 
+void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
+                         const PaletteRGBA& palette) {
+  using Context = std::pair<Host*, PaletteRGBA>;
+  auto func = [](const ImDrawList*, const ImDrawCmd* cmd) {
+    Context* ctx = static_cast<Context*>(cmd->UserCallbackData);
+    Host* host = ctx->first;
+    host_set_palette(host, ctx->second.color);
+    host_enable_palette(host, TRUE);
+    delete ctx;
+  };
+
+  draw_list->AddCallback(func, new Context(host, palette));
+}
+
+void DisablePalette(Host* host, ImDrawList* draw_list) {
+  auto func = [](const ImDrawList*, const ImDrawCmd* cmd) {
+    Host* host = static_cast<Host*>(cmd->UserCallbackData);
+    host_enable_palette(host, FALSE);
+  };
+
+  draw_list->AddCallback(func, host);
+}
+
 class TileImage {
  public:
   TileImage();
 
   void Init(Host* host);
-  void Upload(Emulator*, const Palette&);
+  void Upload(Emulator*);
   // Return true if hovering on the tile.
   bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
-                f32 scale, bool xflip, bool yflip);
+                f32 scale, PaletteRGBA palette, bool xflip = false,
+                bool yflip = false);
   // Return -1 if not hovering, or tile index if hovering.
   int DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int index,
-              const ImVec2& ul_pos, f32 scale, bool xflip, bool yflip);
+              const ImVec2& ul_pos, f32 scale, PaletteRGBA palette, bool xflip,
+              bool yflip);
 
  private:
   Host* host;
@@ -220,19 +246,22 @@ class TileImage {
 
 TileImage::TileImage() : host(nullptr), texture(nullptr) {}
 
-void TileImage::Init(Host* host) {
-  texture = host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
-                                TILE_DATA_TEXTURE_HEIGHT);
+void TileImage::Init(Host* h) {
+  host = h;
+  texture =
+      host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
+                          TILE_DATA_TEXTURE_HEIGHT, HOST_TEXTURE_FORMAT_U8);
 }
 
-void TileImage::Upload(Emulator* e, const Palette& palette) {
-  emulator_get_tile_data(e, palette, tile_data);
+void TileImage::Upload(Emulator* e) {
+  emulator_get_tile_data(e, tile_data);
   host_upload_texture(host, texture, TILE_DATA_TEXTURE_WIDTH,
                       TILE_DATA_TEXTURE_HEIGHT, tile_data);
 }
 
 bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
-                         f32 scale, bool xflip = false, bool yflip = false) {
+                         f32 scale, PaletteRGBA palette, bool xflip,
+                         bool yflip) {
   const int width = TILE_DATA_TEXTURE_WIDTH / 8;
   ImVec2 src(index % width, index / width);
   ImVec2 duv =
@@ -246,14 +275,16 @@ bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
   if (yflip) {
     std::swap(ul_uv.y, br_uv.y);
   }
+  SetPaletteAndEnable(host, draw_list, palette);
   draw_list->AddImage((ImTextureID)texture->handle, ul_pos, br_pos, ul_uv,
                       br_uv);
+  DisablePalette(host, draw_list);
   return ImGui::IsMouseHoveringRect(ul_pos, br_pos);
 }
 
 int TileImage::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
-                       const ImVec2& ul_pos, f32 scale, bool xflip,
-                       bool yflip) {
+                       const ImVec2& ul_pos, f32 scale, PaletteRGBA palette,
+                       bool xflip, bool yflip) {
   const ImVec2 kScaledTileSize = kTileSize * scale;
   int result = -1;
   if (obj_size == OBJ_SIZE_8X16) {
@@ -263,16 +294,16 @@ int TileImage::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
       std::swap(tile_top, tile_bottom);
     }
 
-    if (DrawTile(draw_list, tile_top, ul_pos, scale, xflip, yflip)) {
+    if (DrawTile(draw_list, tile_top, ul_pos, scale, palette, xflip, yflip)) {
       result = tile_top;
     }
 
     if (DrawTile(draw_list, tile_bottom, ul_pos + ImVec2(0, kScaledTileSize.y),
-                 scale, xflip, yflip)) {
+                 scale, palette, xflip, yflip)) {
       result = tile_bottom;
     }
   } else {
-    if (DrawTile(draw_list, tile, ul_pos, scale, xflip, yflip)) {
+    if (DrawTile(draw_list, tile, ul_pos, scale, palette, xflip, yflip)) {
       result = tile;
     }
   }
@@ -302,9 +333,6 @@ class Debugger {
   void MapWindow();
   void DisassemblyWindow();
 
-  void DrawTile(ImDrawList* draw_list, int index, const ImVec2& pos, int scale,
-                bool xflip = false, bool yflip = false);
-
   EmulatorInit emulator_init;
   HostInit host_init;
   Emulator* e;
@@ -313,8 +341,6 @@ class Debugger {
   bool running;
 
   TileImage tiledata_image;
-  TileImage obj_image[2];  // Palette 0 or 1.
-  TileImage map_image;
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
@@ -383,9 +409,6 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   }
 
   tiledata_image.Init(host);
-  obj_image[0].Init(host);
-  obj_image[1].Init(host);
-  map_image.Init(host);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
@@ -399,6 +422,8 @@ void Debugger::Run() {
   while (running && host_poll_events(host)) {
     host_begin_video(host);
     host_run_ms(host, refresh_ms);
+
+    tiledata_image.Upload(e);
 
     MainMenuBar();
     EmulatorWindow();
@@ -487,6 +512,7 @@ void Debugger::EmulatorWindow() {
       ImVec2 ul_uv(0, 0);
       ImVec2 br_uv((f32)SCREEN_WIDTH / fb_texture->width,
                    (f32)SCREEN_HEIGHT / fb_texture->height);
+
       draw_list->AddImage((ImTextureID)fb_texture->handle, image_ul, image_br,
                           ul_uv, br_uv);
 
@@ -552,7 +578,8 @@ void Debugger::TiledataWindow() {
 
       ImGui::SliderInt("Scale", &scale, 1, 5);
       ImGui::Combo("Palette", &palette_type, palette_names, 4);
-      Palette palette;
+      PaletteRGBA palette_rgba;
+
       if (palette_type == kPaletteCustom) {
         static Palette custom_palette = {
             {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
@@ -573,12 +600,10 @@ void Debugger::TiledataWindow() {
         ImGui::Combo("Color 1", &custom_palette.color[1], color_names, 4);
         ImGui::Combo("Color 2", &custom_palette.color[2], color_names, 4);
         ImGui::Combo("Color 3", &custom_palette.color[3], color_names, 4);
-        palette = custom_palette;
+        palette_rgba = palette_to_palette_rgba(custom_palette);
       } else {
-        palette = emulator_get_palette(e, (PaletteType)palette_type);
+        palette_rgba = emulator_get_palette_rgba(e, (PaletteType)palette_type);
       }
-
-      tiledata_image.Upload(e, palette);
 
       static int tw = 16;
       static bool size8x16 = false;
@@ -587,7 +612,9 @@ void Debugger::TiledataWindow() {
       ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
                         ImGuiWindowFlags_HorizontalScrollbar);
       int th = (384 + tw - 1) / tw;
+
       ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
       ImVec2 cursor = ImGui::GetCursorScreenPos();
       int width = TILE_DATA_TEXTURE_WIDTH / kTileSize.x;
       if (size8x16) {
@@ -607,10 +634,9 @@ void Debugger::TiledataWindow() {
           }
           ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
           ImVec2 br_pos = ul_pos + scaled_tile_size;
-          bool is_hovering =
-              tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale);
+          bool is_hovering = tiledata_image.DrawTile(
+              draw_list, tile_index, ul_pos, scale, palette_rgba);
           if (highlight_tile && highlight_tile_index == tile_index) {
-            ImGui::Text("highlight: %d\n", highlight_tile_index);
             draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
           }
           if (is_hovering) {
@@ -635,9 +661,6 @@ void Debugger::ObjWindow() {
       static int scale = 4;
       static int obj_index = 0;
 
-      obj_image[0].Upload(e, emulator_get_palette(e, PALETTE_TYPE_OBP0));
-      obj_image[1].Upload(e, emulator_get_palette(e, PALETTE_TYPE_OBP1));
-
       ObjSize obj_size = emulator_get_obj_size(e);
       ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
@@ -656,9 +679,13 @@ void Debugger::ObjWindow() {
           ImVec2 button_size = get_obj_size_vec2(obj_size, scale);
           bool clicked;
           if (visible) {
-            int tile_index = obj_image[obj.palette].DrawOBJ(
+            PaletteRGBA palette_rgba = emulator_get_palette_rgba(
+                e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
+
+            int tile_index = tiledata_image.DrawOBJ(
                 draw_list, obj_size, obj.tile, ImGui::GetCursorScreenPos(),
-                scale, obj.xflip, obj.yflip);
+                scale, palette_rgba, obj.xflip, obj.yflip);
+
             if (tile_index >= 0) {
               highlight_tile = true;
               highlight_tile_index = tile_index;
@@ -737,8 +764,7 @@ void Debugger::MapWindow() {
       TileDataSelect data_select = emulator_get_tile_data_select(e);
       TileMap tile_map;
       emulator_get_tile_map(e, map_select, tile_map);
-
-      map_image.Upload(e, emulator_get_palette(e, PALETTE_TYPE_BGP));
+      PaletteRGBA palette_rgba = emulator_get_palette_rgba(e, PALETTE_TYPE_BGP);
 
       const ImVec2 scaled_tile_size = kTileSize * scale;
       const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
@@ -754,7 +780,8 @@ void Debugger::MapWindow() {
           if (data_select == TILE_DATA_8800_97FF) {
             tile_index = 256 + (s8)tile_index;
           }
-          if (map_image.DrawTile(draw_list, tile_index, ul_pos, scale)) {
+          if (tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale,
+                                      palette_rgba)) {
             ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
                               0x8000 + tile_index * 16);
             highlight_tile = true;

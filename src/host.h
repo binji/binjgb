@@ -47,7 +47,13 @@ typedef struct HostConfig {
   Bool fullscreen;
 } HostConfig;
 
+typedef enum HostTextureFormat {
+  HOST_TEXTURE_FORMAT_RGBA,
+  HOST_TEXTURE_FORMAT_U8,
+} HostTextureFormat;
+
 typedef struct HostTexture {
+  HostTextureFormat format;
   int width;
   int height;
   intptr_t handle;
@@ -64,10 +70,13 @@ void host_set_config(struct Host*, const HostConfig*);
 HostConfig host_get_config(struct Host*);
 void host_begin_video(struct Host*);
 void host_end_video(struct Host*);
+void host_set_palette(struct Host*, RGBA palette[4]);
+void host_enable_palette(struct Host*, Bool enabled);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);
-HostTexture* host_create_texture(struct Host*, int w, int h);
-void host_upload_texture(struct Host*, HostTexture*, int w, int h, RGBA* data);
+HostTexture* host_create_texture(struct Host*, int w, int h, HostTextureFormat);
+void host_upload_texture(struct Host*, HostTexture*, int w, int h,
+                         const void* data);
 void host_destroy_texture(struct Host*, HostTexture*);
 
 #ifdef __cplusplus

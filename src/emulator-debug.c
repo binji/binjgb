@@ -321,8 +321,11 @@ Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   }
 }
 
-void emulator_get_tile_data(struct Emulator* e, Palette palette,
-                                   TileData out_tile_data) {
+PaletteRGBA emulator_get_palette_rgba(struct Emulator* e, PaletteType type) {
+  return palette_to_palette_rgba(emulator_get_palette(e, type));
+}
+
+void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
   assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
   assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
   const int tw = TILE_DATA_TEXTURE_WIDTH / TILE_WIDTH;
@@ -339,8 +342,7 @@ void emulator_get_tile_data(struct Emulator* e, Palette palette,
           u8 hi = e->state.vram[addr + 1];
           u8 shift = 7 - (mx & 7);
           u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
-          Color color = palette.color[palette_index];
-          out_tile_data[offset + mx] = s_color_to_rgba[color];
+          out_tile_data[offset + mx] = palette_index;
         }
         addr += TILE_ROW_BYTES;
         offset += TILE_DATA_TEXTURE_WIDTH;
@@ -398,4 +400,18 @@ Bool obj_is_visible(const Obj* obj) {
   u8 obj_y = obj->y + OBJ_Y_OFFSET - 1;
   return obj_x < SCREEN_WIDTH + OBJ_X_OFFSET - 1 &&
          obj_y < SCREEN_HEIGHT + OBJ_Y_OFFSET - 1;
+}
+
+RGBA color_to_rgba(Color color) {
+  assert(color >= COLOR_WHITE && color <= COLOR_BLACK);
+  return s_color_to_rgba[color];
+}
+
+PaletteRGBA palette_to_palette_rgba(Palette palette) {
+  PaletteRGBA result;
+  int i;
+  for (i = 0; i < PALETTE_COLOR_COUNT; ++i) {
+    result.color[i] = s_color_to_rgba[palette.color[i]];
+  }
+  return result;
 }

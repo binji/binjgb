@@ -59,6 +59,8 @@ typedef RGBA TileData[TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT];
 #define TILE_MAP_SIZE (TILE_MAP_WIDTH * TILE_MAP_HEIGHT)
 typedef u8 TileMap[TILE_MAP_SIZE];
 
+typedef struct PaletteRGBA { RGBA color[PALETTE_COLOR_COUNT]; } PaletteRGBA;
+
 #if 0
 typedef struct EmulatorHookContext {
   struct Emulator* e;
@@ -85,7 +87,8 @@ Registers emulator_get_registers(struct Emulator*);
 TileDataSelect emulator_get_tile_data_select(struct Emulator*);
 TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
 Palette emulator_get_palette(struct Emulator*, PaletteType);
-void emulator_get_tile_data(struct Emulator*, Palette, TileData);
+PaletteRGBA emulator_get_palette_rgba(struct Emulator*, PaletteType);
+void emulator_get_tile_data(struct Emulator*, TileData);
 void emulator_get_tile_map(struct Emulator*, TileMapSelect, TileMap);
 void emulator_get_bg_scroll(struct Emulator*, u8* x, u8* y);
 void emulator_get_window_scroll(struct Emulator*, u8* x, u8* y);
@@ -98,6 +101,9 @@ Bool emulator_get_obj_display(struct Emulator*);
 ObjSize emulator_get_obj_size(struct Emulator*);
 Obj emulator_get_obj(struct Emulator*, int index);
 Bool obj_is_visible(const Obj* obj);
+
+RGBA color_to_rgba(Color color);
+PaletteRGBA palette_to_palette_rgba(Palette palette);
 
 #ifdef __cplusplus
 }

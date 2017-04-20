@@ -79,7 +79,8 @@ Result host_init_video(Host* host) {
   host_gl_init_procs();
 
   host->ui = host_ui_new(host->window);
-  host->fb_texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT);
+  host->fb_texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT,
+                                         HOST_TEXTURE_FORMAT_RGBA);
   return OK;
 error:
   SDL_Quit();
@@ -317,6 +318,14 @@ f64 host_get_monitor_refresh_ms(struct Host* host) {
   return 1000.0 / refresh_rate_hz;
 }
 
+void host_set_palette(struct Host* host, RGBA palette[4]) {
+  host_ui_set_palette(host->ui, palette);
+}
+
+void host_enable_palette(struct Host* host, Bool enabled) {
+  host_ui_enable_palette(host->ui, enabled);
+}
+
 static u32 next_power_of_two(u32 n) {
   n |= n >> 1;
   n |= n >> 2;
@@ -330,25 +339,34 @@ HostTexture* host_get_frame_buffer_texture(struct Host* host) {
   return host->fb_texture;
 }
 
-HostTexture* host_create_texture(struct Host* host, int w, int h) {
+static GLenum host_get_gl_internal_texture_format(HostTextureFormat format) {
+  assert(format == HOST_TEXTURE_FORMAT_RGBA ||
+         format == HOST_TEXTURE_FORMAT_U8);
+  return format == HOST_TEXTURE_FORMAT_RGBA ? 4 : 1;
+}
+
+HostTexture* host_create_texture(struct Host* host, int w, int h,
+                                 HostTextureFormat format) {
   HostTexture* texture = malloc(sizeof(HostTexture));
   texture->width = next_power_of_two(w);
   texture->height = next_power_of_two(h);
 
+  GLenum internal_format = host_get_gl_internal_texture_format(format);
   GLuint handle;
   glGenTextures(1, &handle);
   glBindTexture(GL_TEXTURE_2D, handle);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture->width, texture->height, 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, internal_format, texture->width,
+               texture->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
   texture->handle = handle;
+  texture->format = format;
   return texture;
 }
 
 void host_upload_texture(struct Host* host, HostTexture* texture, int w, int h,
-                         RGBA* data) {
+                         const void* data) {
   assert(w <= texture->width);
   assert(h <= texture->height);
   glBindTexture(GL_TEXTURE_2D, texture->handle);

@@ -26,6 +26,8 @@ void host_ui_upload_frame_buffer(struct HostUI*, FrameBuffer*);
 void host_ui_begin_frame(struct HostUI*, struct HostTexture* fb_texture);
 void host_ui_end_frame(struct HostUI*);
 intptr_t host_ui_get_frame_buffer_texture(struct HostUI*);
+void host_ui_set_palette(struct HostUI*, RGBA palette[4]);
+void host_ui_enable_palette(struct HostUI*, Bool enabled);
 
 #ifdef __cplusplus
 }

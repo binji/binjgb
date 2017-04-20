@@ -37,6 +37,7 @@ extern "C" {
   V(glLinkProgram, PFNGLLINKPROGRAMPROC)                         \
   V(glShaderSource, PFNGLSHADERSOURCEPROC)                       \
   V(glUniform1i, PFNGLUNIFORM1IPROC)                             \
+  V(glUniform4fv, PFNGLUNIFORM4FVPROC)                           \
   V(glUniformMatrix3fv, PFNGLUNIFORMMATRIX3FVPROC)               \
   V(glUseProgram, PFNGLUSEPROGRAMPROC)                           \
   V(glVertexAttribPointer, PFNGLVERTEXATTRIBPOINTERPROC)

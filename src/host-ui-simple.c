@@ -21,6 +21,8 @@ typedef struct HostUI {
   GLuint vbo;
   GLuint program;
   GLint uSampler;
+  GLint uUsePalette;
+  GLint uPalette;
 } HostUI;
 
 static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
@@ -42,9 +44,15 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
 
   static const char* s_fragment_shader =
       "varying vec2 vTexCoord;\n"
+      "uniform int uUsePalette;\n"
+      "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
       "void main(void) {\n"
-      "  gl_FragColor = texture2D(uSampler, vTexCoord);\n"
+      "  vec4 color = texture2D(uSampler, vTexCoord);\n"
+      "  if (uUsePalette != 0) {\n"
+      "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
+      "  }\n"
+      "  gl_FragColor = color;\n"
       "}\n";
 
   ui->window = window;
@@ -62,6 +70,8 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   GLint aPos = glGetAttribLocation(ui->program, "aPos");
   GLint aTexCoord = glGetAttribLocation(ui->program, "aTexCoord");
   ui->uSampler = glGetUniformLocation(ui->program, "uSampler");
+  ui->uUsePalette = glGetUniformLocation(ui->program, "uUsePalette");
+  ui->uPalette = glGetUniformLocation(ui->program, "uPalette[0]");
 
   glGenVertexArrays(1, &ui->vao);
   glBindVertexArray(ui->vao);
@@ -115,4 +125,22 @@ void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture) {
 
 void host_ui_end_frame(struct HostUI* ui) {
   SDL_GL_SwapWindow(ui->window);
+}
+
+void host_ui_set_palette(struct HostUI* ui, RGBA palette[4]) {
+  float p[16];
+  int i;
+  for (i = 0; i < 4; ++i) {
+    p[i * 4 + 0] = ((palette[i] >> 0) & 255) / 255.0f;
+    p[i * 4 + 1] = ((palette[i] >> 8) & 255) / 255.0f;
+    p[i * 4 + 2] = ((palette[i] >> 16) & 255) / 255.0f;
+    p[i * 4 + 3] = 1.0f;
+  }
+  glUseProgram(ui->program);
+  glUniform4fv(ui->uPalette, 4, p);
+}
+
+void host_ui_enable_palette(struct HostUI* ui, Bool enabled) {
+  glUseProgram(ui->program);
+  glUniform1i(ui->uUsePalette, enabled ? 1 : 0);
 }

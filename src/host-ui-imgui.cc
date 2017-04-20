@@ -27,6 +27,8 @@ struct HostUI {
   void render_draw_lists(ImDrawData*);
   void begin_frame();
   void end_frame();
+  void set_palette(RGBA palette[4]);
+  void enable_palette(bool enabled);
 
   static void render_draw_lists_thunk(ImDrawData*);
   static void set_clipboard_text(void* user_data, const char* text);
@@ -44,6 +46,8 @@ struct HostUI {
   GLuint program;
   GLint uProjMatrix;
   GLint uSampler;
+  GLint uUsePalette;
+  GLint uPalette;
 
   // Global so it can be accessed by render_draw_lists callback, which has no
   // user_data pointer.
@@ -124,9 +128,15 @@ Result HostUI::init_gl() {
   static const char* s_fragment_shader =
       "varying vec2 vUV;\n"
       "varying vec4 vColor;\n"
+      "uniform int uUsePalette;\n"
+      "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
       "void main(void) {\n"
-      "  gl_FragColor = vColor * texture2D(uSampler, vUV);\n"
+      "  vec4 color = vColor * texture2D(uSampler, vUV);\n"
+      "  if (uUsePalette != 0) {\n"
+      "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
+      "  }\n"
+      "  gl_FragColor = color;\n"
       "}\n";
 
   glGenBuffers(1, &vbo);
@@ -144,6 +154,8 @@ Result HostUI::init_gl() {
   GLint aColor = glGetAttribLocation(program, "aColor");
   uProjMatrix = glGetUniformLocation(program, "uProjMatrix");
   uSampler = glGetUniformLocation(program, "uSampler");
+  uUsePalette = glGetUniformLocation(program, "uUsePalette");
+  uPalette = glGetUniformLocation(program, "uPalette[0]");
 
   glGenVertexArrays(1, &vao);
   glBindVertexArray(vao);
@@ -280,6 +292,23 @@ void HostUI::end_frame() {
   SDL_GL_SwapWindow(window);
 }
 
+void HostUI::set_palette(RGBA palette[4]) {
+  GLfloat p[16];
+  for (int i = 0; i < 4; ++i) {
+    p[i * 4 + 0] = ((palette[i] >> 0) & 255) / 255.0f;
+    p[i * 4 + 1] = ((palette[i] >> 8) & 255) / 255.0f;
+    p[i * 4 + 2] = ((palette[i] >> 16) & 255) / 255.0f;
+    p[i * 4 + 3] = 1.0f;
+  }
+  glUseProgram(program);
+  glUniform4fv(uPalette, 4, p);
+}
+
+void HostUI::enable_palette(bool enabled) {
+  glUseProgram(program);
+  glUniform1i(uUsePalette, enabled ? 1 : 0);
+}
+
 void HostUI::render_draw_lists_thunk(ImDrawData* draw_data) {
   s_ui->render_draw_lists(draw_data);
 }
@@ -373,4 +402,12 @@ void host_ui_begin_frame(HostUI* ui, HostTexture* fb_texture) {
 
 void host_ui_end_frame(HostUI* ui) {
   ui->end_frame();
+}
+
+void host_ui_set_palette(struct HostUI* ui, RGBA palette[4]) {
+  ui->set_palette(palette);
+}
+
+void host_ui_enable_palette(struct HostUI* ui, Bool enabled) {
+  ui->enable_palette(enabled);
 }
