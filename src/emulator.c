@@ -3358,7 +3358,7 @@ static void handle_interrupts(Emulator* e) {
   e->state.interrupt.halt = e->state.interrupt.stop = FALSE;
 }
 
-void emulator_step(Emulator* e) {
+static void emulator_step_internal(Emulator* e) {
   HOOK0(emulator_step);
   execute_instruction(e);
   handle_interrupts(e);
@@ -3380,7 +3380,7 @@ EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
       (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
   while (event == 0) {
-    emulator_step(e);
+    emulator_step_internal(e);
     if (e->state.ppu.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
@@ -3393,6 +3393,10 @@ EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
   }
   apu_synchronize(e);
   return e->last_event = event;
+}
+
+EmulatorEvent emulator_step(Emulator* e) {
+  return emulator_run_until(e, e->state.cycles + 1);
 }
 
 static Result validate_header_checksum(CartInfo* cart_info) {

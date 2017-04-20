@@ -43,7 +43,7 @@ typedef struct HostInit {
 typedef struct HostConfig {
   Bool no_sync;
   Bool paused;
-  Bool step;
+  Bool step_frame;
   Bool fullscreen;
 } HostConfig;
 
@@ -63,6 +63,7 @@ struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
 void host_run_ms(struct Host*, f64 delta_ms);
+void host_step(struct Host*);
 void host_render_audio(struct Host*);
 f64 host_get_monitor_refresh_ms(struct Host*);
 f64 host_get_time_ms(struct Host*);

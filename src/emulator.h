@@ -161,7 +161,7 @@ Result emulator_write_state_to_file(struct Emulator*, const char* filename);
 Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
-void emulator_step(struct Emulator*);
+EmulatorEvent emulator_step(struct Emulator*);
 EmulatorEvent emulator_run_until(struct Emulator*, u32 until_cycles);
 
 #ifdef __cplusplus

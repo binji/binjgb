@@ -136,7 +136,7 @@ Bool host_poll_events(Host* host) {
           case SDL_SCANCODE_F6: HOOK0(write_state); break;
           case SDL_SCANCODE_F9: HOOK0(read_state); break;
           case SDL_SCANCODE_N:
-            host_config.step = 1;
+            host_config.step_frame = 1;
             host_config.paused = 0;
             break;
           case SDL_SCANCODE_SPACE: host_config.paused ^= 1; break;
@@ -230,6 +230,18 @@ Result host_init(Host* host, struct Emulator* e) {
   ON_ERROR_RETURN;
 }
 
+static void host_handle_event(struct Host* host, EmulatorEvent event) {
+  struct Emulator* e = host->hook_ctx.e;
+  if (event & EMULATOR_EVENT_NEW_FRAME) {
+    host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
+                        *emulator_get_frame_buffer(e));
+  }
+  if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+    host_render_audio(host);
+    HOOK0(audio_buffer_full);
+  }
+}
+
 void host_run_ms(struct Host* host, f64 delta_ms) {
   if (host->config.paused) {
     return;
@@ -240,24 +252,23 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
   u32 until_cycles = emulator_get_cycles(e) + delta_cycles;
   while (1) {
     EmulatorEvent event = emulator_run_until(e, until_cycles);
-    if (event & EMULATOR_EVENT_NEW_FRAME) {
-      host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
-                          *emulator_get_frame_buffer(e));
-    }
-    if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-      host_render_audio(host);
-      HOOK0(audio_buffer_full);
-    }
+    host_handle_event(host, event);
     if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
       break;
     }
   }
   HostConfig config = host_get_config(host);
-  if (config.step) {
+  if (config.step_frame) {
     config.paused = TRUE;
-    config.step = FALSE;
+    config.step_frame = FALSE;
     host_set_config(host, &config);
   }
+}
+
+void host_step(struct Host* host) {
+  struct Emulator* e = host->hook_ctx.e;
+  EmulatorEvent event = emulator_step(e);
+  host_handle_event(host, event);
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {
