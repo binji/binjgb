@@ -854,8 +854,8 @@ void Debugger::DisassemblyWindow() {
     ImGui::SetNextWindowPos(ImVec2(1113, 51), ImGuiSetCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(590, 1326), ImGuiSetCond_FirstUseEver);
     if (ImGui::Begin("Disassembly", &disassembly_window_open)) {
-      static bool track_pc = false;
-      static Address addr = 0;
+      static bool track_pc = true;
+      static Address start_addr = 0;
 
       Registers regs = emulator_get_registers(e);
       ImGui::Text("A: %02X", regs.A);
@@ -864,28 +864,28 @@ void Debugger::DisassemblyWindow() {
       ImGui::Text("H: %02X L: %02X HL: %04X", regs.H, regs.L, regs.HL);
       ImGui::Text("SP: %04X", regs.SP);
       ImGui::Text("PC: %04X", regs.PC);
-      ImGui::Text("%c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
+      ImGui::Text("F: %c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
                   regs.F.H ? 'H' : '_', regs.F.C ? 'C' : '_');
       ImGui::Separator();
 
       ImGui::PushButtonRepeat(true);
       if (ImGui::Button("-1")) {
-        addr = std::max(addr - 1, 0);
+        start_addr = std::max(start_addr - 1, 0);
         track_pc = false;
       }
       ImGui::SameLine();
       if (ImGui::Button("+1")) {
-        addr = std::min(addr + 1, 0xffff);
+        start_addr = std::min(start_addr + 1, 0xffff);
         track_pc = false;
       }
       ImGui::SameLine();
       if (ImGui::Button("-I")) {
-        addr = step_backward_by_instruction(e, addr);
+        start_addr = step_backward_by_instruction(e, start_addr);
         track_pc = false;
       }
       ImGui::SameLine();
       if (ImGui::Button("+I")) {
-        addr = step_forward_by_instruction(e, addr);
+        start_addr = step_forward_by_instruction(e, start_addr);
         track_pc = false;
       }
       ImGui::PopButtonRepeat();
@@ -893,16 +893,30 @@ void Debugger::DisassemblyWindow() {
       ImGui::Checkbox("Track PC", &track_pc);
       ImGui::Separator();
 
+      f32 height = ImGui::GetTextLineHeightWithSpacing();
+      int lines = static_cast<int>(ImGui::GetContentRegionAvail().y / height);
+
+      // When tracking the PC, determine whether PC is in currently visible
+      // range; if it's not, adjust the view so it is.
       if (track_pc) {
-        addr = regs.PC;
+        Address addr = start_addr;
+        for (int i = 0; i < lines; ++i) {
+          addr += emulator_opcode_bytes(e, addr);
+        }
+        if (regs.PC < start_addr || regs.PC > addr) {
+          start_addr = regs.PC;
+          // Step backward by half the height to center the instruction at PC.
+          for (int j = 0; j < lines / 2 - 1; ++j) {
+            start_addr = step_backward_by_instruction(e, start_addr);
+          }
+        }
       }
 
-      float height = ImGui::GetTextLineHeightWithSpacing();
-      Address i = addr;
-      while (ImGui::GetContentRegionAvail().y >= height) {
+      Address addr = start_addr;
+      for (int i = 0; i < lines; ++i) {
         char buffer[64];
-        bool is_pc = i == regs.PC;
-        i += emulator_disassemble(e, i, buffer, sizeof(buffer));
+        bool is_pc = addr == regs.PC;
+        addr += emulator_disassemble(e, addr, buffer, sizeof(buffer));
         if (is_pc) {
           ImGui::TextColored(kPCColor, buffer);
         } else {
