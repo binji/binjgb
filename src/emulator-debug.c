@@ -74,14 +74,14 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(H, D, render_present_f, "@@@ %.1f: render present")                        \
   X(H, D, sync_wait_ffff, "... %.1f: waiting %.1fms [gb=%.1fms real=%.1fms]")  \
   X(P, D, disable_display_v, "Disabling display")                              \
-  X(P, I, read_io_ignored_as, "(%#04x [%s]) ignored")                          \
+  X(P, D, read_io_ignored_as, "(%#04x [%s]) ignored")                          \
   X(P, D, read_oam_in_use_a, "(%#04x): returning 0xff because in use")         \
   X(P, D, read_vram_in_use_a, "(%#04x): returning 0xff because in use")        \
   X(P, V, trigger_stat_from_write_cccii,                                       \
     "STAT from write [%c%c%c] [LY: %u] [cy: %u]")                              \
   X(P, D, trigger_timer_i, ">> trigger TIMER [cy: %u]")                        \
   X(P, V, trigger_y_compare_ii, ">> trigger Y compare [LY: %u] [cy: %u]")      \
-  X(P, I, write_oam_in_use_ab, "(%#04x, %#02x): ignored because in use")       \
+  X(P, D, write_oam_in_use_ab, "(%#04x, %#02x): ignored because in use")       \
   X(P, D, write_vram_in_use_ab, "(%#04x, %#02x) ignored, using vram")          \
   X(I, D, enable_display_v, "Enabling display")                                \
   X(I, V, read_io_asb, "(%#04x [%s]) = %#02x")                                 \
@@ -94,13 +94,13 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(N, D, timer_interrupt_v, ">> TIMER interrupt")                             \
   X(N, D, trigger_stat_ii, ">> trigger STAT [LY: %u] [cy: %u]")                \
   X(N, D, vblank_interrupt_i, ">> VBLANK interrupt [frame = %u]")              \
-  X(M, I, read_during_dma_a, "(%#04x) during DMA")                             \
-  X(M, I, read_ram_disabled_a, "(%#04x) ignored, ram disabled")                \
+  X(M, D, read_during_dma_a, "(%#04x) during DMA")                             \
+  X(M, D, read_ram_disabled_a, "(%#04x) ignored, ram disabled")                \
   X(M, D, set_ext_ram_bank_bi, "(%d) = %#06x")                                 \
   X(M, D, set_rom1_bank_hi, "(bank: %d) = %#06x")                              \
-  X(M, I, write_during_dma_ab, "(%#04x, %#02x) during DMA")                    \
-  X(M, I, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
-  X(M, I, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
+  X(M, D, write_during_dma_ab, "(%#04x, %#02x) during DMA")                    \
+  X(M, D, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
+  X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
 static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
 
