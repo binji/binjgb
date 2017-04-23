@@ -18,6 +18,7 @@
 #include "imgui.h"
 
 #define SAVE_EXTENSION ".sav"
+#define SAVE_STATE_EXTENSION ".state"
 
 static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
@@ -324,6 +325,8 @@ class Debugger {
 
  private:
   static void OnAudioBufferFullThunk(HostHookContext* ctx);
+  static void OnWriteStateThunk(HostHookContext* ctx);
+  static void OnReadStateThunk(HostHookContext* ctx);
   void OnAudioBufferFull();
   void MainMenuBar();
   void EmulatorWindow();
@@ -338,6 +341,7 @@ class Debugger {
   Emulator* e;
   Host* host;
   const char* save_filename;
+  const char* save_state_filename;
   bool running;
 
   TileImage tiledata_image;
@@ -362,6 +366,7 @@ Debugger::Debugger()
     : e(nullptr),
       host(nullptr),
       save_filename(nullptr),
+      save_state_filename(nullptr),
       running(true),
       highlight_obj(false),
       highlight_obj_index(0),
@@ -403,6 +408,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   host_init.audio_frames = audio_frames;
   host_init.hooks.user_data = this;
   host_init.hooks.audio_buffer_full = OnAudioBufferFullThunk;
+  host_init.hooks.write_state = OnWriteStateThunk;
+  host_init.hooks.read_state = OnReadStateThunk;
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -411,6 +418,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   tiledata_image.Init(host);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
+  save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
   return true;
 }
@@ -454,6 +462,18 @@ void Debugger::OnAudioBufferFull() {
     audio_data[0][i] = audio_buffer->data[index];
     audio_data[1][i] = audio_buffer->data[index + 1];
   }
+}
+
+// static
+void Debugger::OnWriteStateThunk(HostHookContext* ctx) {
+  Debugger* this_ = static_cast<Debugger*>(ctx->user_data);
+  emulator_write_state_to_file(this_->e, this_->save_state_filename);
+}
+
+// static
+void Debugger::OnReadStateThunk(HostHookContext* ctx) {
+  Debugger* this_ = static_cast<Debugger*>(ctx->user_data);
+  emulator_read_state_from_file(this_->e, this_->save_state_filename);
 }
 
 void Debugger::MainMenuBar() {
