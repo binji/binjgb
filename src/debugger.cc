@@ -878,6 +878,7 @@ void Debugger::DisassemblyWindow() {
       static Address start_addr = 0;
 
       Registers regs = emulator_get_registers(e);
+      ImGui::Text("Cycles: %u", emulator_get_cycles(e));
       ImGui::Text("A: %02X", regs.A);
       ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
       ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);
@@ -912,6 +913,12 @@ void Debugger::DisassemblyWindow() {
       ImGui::SameLine();
       ImGui::Checkbox("Track PC", &track_pc);
       ImGui::Separator();
+
+      ImGui::PushButtonRepeat(true);
+      if (ImGui::Button("step")) {
+        host_step(host);
+      }
+      ImGui::PopButtonRepeat();
 
       f32 height = ImGui::GetTextLineHeightWithSpacing();
       int lines = static_cast<int>(ImGui::GetContentRegionAvail().y / height);
