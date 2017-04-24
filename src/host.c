@@ -115,50 +115,41 @@ static Result host_init_audio(Host* host) {
   ON_ERROR_RETURN;
 }
 
+static HostKeycode scancode_to_keycode(SDL_Scancode scancode) {
+  static HostKeycode s_map[SDL_NUM_SCANCODES] = {
+#define V(NAME) [SDL_SCANCODE_##NAME] = HOST_KEYCODE_##NAME,
+    FOREACH_HOST_KEYCODE(V)
+#undef V
+  };
+  assert(scancode < SDL_NUM_SCANCODES);
+  return s_map[scancode];
+}
+
 Bool host_poll_events(Host* host) {
   struct Emulator* e = host->hook_ctx.e;
   Bool running = TRUE;
   SDL_Event event;
-  EmulatorConfig emu_config = emulator_get_config(e);
-  HostConfig host_config = host_get_config(host);
   while (SDL_PollEvent(&event)) {
     host_ui_event(host->ui, &event);
+
     switch (event.type) {
       case SDL_KEYDOWN:
-        switch (event.key.keysym.scancode) {
-          case SDL_SCANCODE_1: emu_config.disable_sound[CHANNEL1] ^= 1; break;
-          case SDL_SCANCODE_2: emu_config.disable_sound[CHANNEL2] ^= 1; break;
-          case SDL_SCANCODE_3: emu_config.disable_sound[CHANNEL3] ^= 1; break;
-          case SDL_SCANCODE_4: emu_config.disable_sound[CHANNEL4] ^= 1; break;
-          case SDL_SCANCODE_B: emu_config.disable_bg ^= 1; break;
-          case SDL_SCANCODE_W: emu_config.disable_window ^= 1; break;
-          case SDL_SCANCODE_O: emu_config.disable_obj ^= 1; break;
-          case SDL_SCANCODE_F6: HOOK0(write_state); break;
-          case SDL_SCANCODE_F9: HOOK0(read_state); break;
-          case SDL_SCANCODE_N:
-            host_config.step_frame = 1;
-            host_config.paused = 0;
-            break;
-          case SDL_SCANCODE_SPACE: host_config.paused ^= 1; break;
-          case SDL_SCANCODE_ESCAPE: running = FALSE; break;
-          default: break;
-        }
-        /* fall through */
       case SDL_KEYUP: {
-        Bool down = event.type == SDL_KEYDOWN;
-        switch (event.key.keysym.scancode) {
-          case SDL_SCANCODE_TAB: host_config.no_sync = down; break;
-          case SDL_SCANCODE_F11: if (!down) host_config.fullscreen ^= 1; break;
-          default: break;
+        HostKeycode keycode = scancode_to_keycode(event.key.keysym.scancode);
+        if (event.type == SDL_KEYDOWN) {
+          HOOK(key_down, keycode);
+        } else {
+          HOOK(key_up, keycode);
         }
         break;
       }
-      case SDL_QUIT: running = FALSE; break;
+      case SDL_QUIT:
+        running = FALSE;
+        break;
       default: break;
     }
   }
-  emulator_set_config(e, &emu_config);
-  host_set_config(host, &host_config);
+
   return running;
 }
 
@@ -170,7 +161,7 @@ void host_end_video(Host* host) {
   host_ui_end_frame(host->ui);
 }
 
-static void host_reset_audio(Host* host) {
+void host_reset_audio(Host* host) {
   host->audio.ready = FALSE;
   SDL_ClearQueuedAudio(host->audio.dev);
   SDL_PauseAudioDevice(host->audio.dev, 1);
@@ -243,10 +234,6 @@ static void host_handle_event(struct Host* host, EmulatorEvent event) {
 }
 
 void host_run_ms(struct Host* host, f64 delta_ms) {
-  if (host->config.paused) {
-    return;
-  }
-
   struct Emulator* e = host->hook_ctx.e;
   u32 delta_cycles = (u32)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   u32 until_cycles = emulator_get_cycles(e) + delta_cycles;
@@ -256,12 +243,6 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
     if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
       break;
     }
-  }
-  HostConfig config = host_get_config(host);
-  if (config.step_frame) {
-    config.paused = TRUE;
-    config.step_frame = FALSE;
-    host_set_config(host, &config);
   }
 }
 
@@ -298,10 +279,6 @@ void host_delete(Host* host) {
 void host_set_config(struct Host* host, const HostConfig* new_config) {
   if (host->config.no_sync != new_config->no_sync) {
     SDL_GL_SetSwapInterval(new_config->no_sync ? 0 : 1);
-    host_reset_audio(host);
-  }
-
-  if (host->config.paused != new_config->paused) {
     host_reset_audio(host);
   }
 

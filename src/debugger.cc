@@ -324,10 +324,13 @@ class Debugger {
   void Run();
 
  private:
-  static void OnAudioBufferFullThunk(HostHookContext* ctx);
-  static void OnWriteStateThunk(HostHookContext* ctx);
-  static void OnReadStateThunk(HostHookContext* ctx);
   void OnAudioBufferFull();
+  void OnKeyDown(HostKeycode);
+  void OnKeyUp(HostKeycode);
+
+  void WriteStateToFile();
+  void ReadStateFromFile();
+
   void MainMenuBar();
   void EmulatorWindow();
   void AudioWindow();
@@ -343,6 +346,8 @@ class Debugger {
   const char* save_filename;
   const char* save_state_filename;
   bool running;
+  bool paused;
+  bool step_frame;
 
   TileImage tiledata_image;
 
@@ -407,9 +412,15 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
   host_init.hooks.user_data = this;
-  host_init.hooks.audio_buffer_full = OnAudioBufferFullThunk;
-  host_init.hooks.write_state = OnWriteStateThunk;
-  host_init.hooks.read_state = OnReadStateThunk;
+  host_init.hooks.audio_buffer_full = [](HostHookContext* ctx) {
+    static_cast<Debugger*>(ctx->user_data)->OnAudioBufferFull();
+  };
+  host_init.hooks.key_down = [](HostHookContext* ctx, HostKeycode code) {
+    static_cast<Debugger*>(ctx->user_data)->OnKeyDown(code);
+  };
+  host_init.hooks.key_up = [](HostHookContext* ctx, HostKeycode code) {
+    static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
+  };
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -429,7 +440,14 @@ void Debugger::Run() {
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
   while (running && host_poll_events(host)) {
     host_begin_video(host);
-    host_run_ms(host, refresh_ms);
+    if (!paused) {
+      host_run_ms(host, refresh_ms);
+      if (step_frame) {
+        host_reset_audio(host);
+        step_frame = false;
+        paused = true;
+      }
+    }
 
     tiledata_image.Upload(e);
 
@@ -447,12 +465,6 @@ void Debugger::Run() {
   emulator_write_ext_ram_to_file(e, save_filename);
 }
 
-// static
-void Debugger::OnAudioBufferFullThunk(HostHookContext* ctx) {
-  Debugger* debugger = static_cast<Debugger*>(ctx->user_data);
-  debugger->OnAudioBufferFull();
-}
-
 void Debugger::OnAudioBufferFull() {
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
   int size = audio_buffer->position - audio_buffer->data;
@@ -464,16 +476,52 @@ void Debugger::OnAudioBufferFull() {
   }
 }
 
-// static
-void Debugger::OnWriteStateThunk(HostHookContext* ctx) {
-  Debugger* this_ = static_cast<Debugger*>(ctx->user_data);
-  emulator_write_state_to_file(this_->e, this_->save_state_filename);
+static void Toggle(Bool& value) { value = static_cast<Bool>(!value); }
+static void Toggle(bool& value) { value = !value; }
+
+void Debugger::OnKeyDown(HostKeycode code) {
+  EmulatorConfig emu_config = emulator_get_config(e);
+  HostConfig host_config = host_get_config(host);
+
+  switch (code) {
+    case HOST_KEYCODE_1: Toggle(emu_config.disable_sound[CHANNEL1]); break;
+    case HOST_KEYCODE_2: Toggle(emu_config.disable_sound[CHANNEL2]); break;
+    case HOST_KEYCODE_3: Toggle(emu_config.disable_sound[CHANNEL3]); break;
+    case HOST_KEYCODE_4: Toggle(emu_config.disable_sound[CHANNEL4]); break;
+    case HOST_KEYCODE_B: Toggle(emu_config.disable_bg); break;
+    case HOST_KEYCODE_W: Toggle(emu_config.disable_window); break;
+    case HOST_KEYCODE_O: Toggle(emu_config.disable_obj); break;
+    case HOST_KEYCODE_F6: WriteStateToFile(); break;
+    case HOST_KEYCODE_F9: ReadStateFromFile(); break;
+    case HOST_KEYCODE_N: step_frame = true; paused = false; break;
+    case HOST_KEYCODE_SPACE: Toggle(paused); break;
+    case HOST_KEYCODE_ESCAPE: running = false; break;
+    case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
+    default: return;
+  }
+
+  emulator_set_config(e, &emu_config);
+  host_set_config(host, &host_config);
 }
 
-// static
-void Debugger::OnReadStateThunk(HostHookContext* ctx) {
-  Debugger* this_ = static_cast<Debugger*>(ctx->user_data);
-  emulator_read_state_from_file(this_->e, this_->save_state_filename);
+void Debugger::OnKeyUp(HostKeycode code) {
+  HostConfig host_config = host_get_config(host);
+
+  switch (code) {
+    case HOST_KEYCODE_TAB: host_config.no_sync = FALSE; break;
+    case HOST_KEYCODE_F11: Toggle(host_config.fullscreen); break;
+    default: return;
+  }
+
+  host_set_config(host, &host_config);
+}
+
+void Debugger::WriteStateToFile() {
+  emulator_write_state_to_file(e, save_state_filename);
+}
+
+void Debugger::ReadStateFromFile() {
+  emulator_read_state_from_file(e, save_state_filename);
 }
 
 void Debugger::MainMenuBar() {
@@ -917,6 +965,7 @@ void Debugger::DisassemblyWindow() {
       ImGui::PushButtonRepeat(true);
       if (ImGui::Button("step")) {
         host_step(host);
+        paused = true;
       }
       ImGui::PopButtonRepeat();
 

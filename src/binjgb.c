@@ -12,19 +12,50 @@
 #define SAVE_STATE_EXTENSION ".state"
 
 static const char* s_save_state_filename;
+static Bool s_running = TRUE;
+static Bool s_step_frame = FALSE;
+static Bool s_paused = FALSE;
 
-static void write_state(HostHookContext* ctx) {
-  emulator_write_state_to_file(ctx->e, s_save_state_filename);
+static void key_down(HostHookContext* ctx, HostKeycode code) {
+  EmulatorConfig emu_config = emulator_get_config(ctx->e);
+  HostConfig host_config = host_get_config(ctx->host);
+
+  switch (code) {
+    case HOST_KEYCODE_1: emu_config.disable_sound[CHANNEL1] ^= 1; break;
+    case HOST_KEYCODE_2: emu_config.disable_sound[CHANNEL2] ^= 1; break;
+    case HOST_KEYCODE_3: emu_config.disable_sound[CHANNEL3] ^= 1; break;
+    case HOST_KEYCODE_4: emu_config.disable_sound[CHANNEL4] ^= 1; break;
+    case HOST_KEYCODE_B: emu_config.disable_bg ^= 1; break;
+    case HOST_KEYCODE_W: emu_config.disable_window ^= 1; break;
+    case HOST_KEYCODE_O: emu_config.disable_obj ^= 1; break;
+    case HOST_KEYCODE_F6:
+      emulator_write_state_to_file(ctx->e, s_save_state_filename);
+      break;
+    case HOST_KEYCODE_F9:
+      emulator_read_state_from_file(ctx->e, s_save_state_filename);
+      break;
+    case HOST_KEYCODE_N: s_step_frame = TRUE; s_paused = FALSE; break;
+    case HOST_KEYCODE_SPACE: s_paused ^= 1; break;
+    case HOST_KEYCODE_ESCAPE: s_running = FALSE; break;
+    case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
+    default: return;
+  }
+
+  emulator_set_config(ctx->e, &emu_config);
+  host_set_config(ctx->host, &host_config);
 }
 
-static void read_state(HostHookContext* ctx) {
-  emulator_read_state_from_file(ctx->e, s_save_state_filename);
-}
+static void key_up(HostHookContext* ctx, HostKeycode code) {
+  HostConfig host_config = host_get_config(ctx->host);
 
-HostHooks s_hooks = {
-  .write_state = write_state,
-  .read_state = read_state,
-};
+  switch (code) {
+    case HOST_KEYCODE_TAB: host_config.no_sync = FALSE; break;
+    case HOST_KEYCODE_F11: host_config.fullscreen ^= 1; break;
+    default: return;
+  }
+
+  host_set_config(ctx->host, &host_config);
+}
 
 int main(int argc, char** argv) {
   const int audio_frequency = 44100;
@@ -51,7 +82,8 @@ int main(int argc, char** argv) {
 
   HostInit host_init;
   ZERO_MEMORY(host_init);
-  host_init.hooks = s_hooks;
+  host_init.hooks.key_down = key_down;
+  host_init.hooks.key_up = key_up;
   host_init.render_scale = 4;
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
@@ -63,8 +95,15 @@ int main(int argc, char** argv) {
   emulator_read_ext_ram_from_file(e, save_filename);
 
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
-  while (host_poll_events(host)) {
-    host_run_ms(host, refresh_ms);
+  while (s_running && host_poll_events(host)) {
+    if (!s_paused) {
+      host_run_ms(host, refresh_ms);
+      if (s_step_frame) {
+        host_reset_audio(host);
+        s_paused = TRUE;
+        s_step_frame = FALSE;
+      }
+    }
     host_begin_video(host);
     host_end_video(host);
   }

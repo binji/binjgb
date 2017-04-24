@@ -13,6 +13,87 @@
 extern "C" {
 #endif
 
+#define FOREACH_HOST_KEYCODE(_) \
+  _(A)                          \
+  _(B)                          \
+  _(C)                          \
+  _(D)                          \
+  _(E)                          \
+  _(F)                          \
+  _(G)                          \
+  _(H)                          \
+  _(I)                          \
+  _(J)                          \
+  _(K)                          \
+  _(L)                          \
+  _(M)                          \
+  _(N)                          \
+  _(O)                          \
+  _(P)                          \
+  _(Q)                          \
+  _(R)                          \
+  _(S)                          \
+  _(T)                          \
+  _(U)                          \
+  _(V)                          \
+  _(W)                          \
+  _(X)                          \
+  _(Y)                          \
+  _(Z)                          \
+  _(1)                          \
+  _(2)                          \
+  _(3)                          \
+  _(4)                          \
+  _(5)                          \
+  _(6)                          \
+  _(7)                          \
+  _(8)                          \
+  _(9)                          \
+  _(0)                          \
+  _(RETURN)                     \
+  _(ESCAPE)                     \
+  _(BACKSPACE)                  \
+  _(TAB)                        \
+  _(SPACE)                      \
+  _(MINUS)                      \
+  _(EQUALS)                     \
+  _(LEFTBRACKET)                \
+  _(RIGHTBRACKET)               \
+  _(BACKSLASH)                  \
+  _(SEMICOLON)                  \
+  _(APOSTROPHE)                 \
+  _(COMMA)                      \
+  _(PERIOD)                     \
+  _(SLASH)                      \
+  _(F1)                         \
+  _(F2)                         \
+  _(F3)                         \
+  _(F4)                         \
+  _(F5)                         \
+  _(F6)                         \
+  _(F7)                         \
+  _(F8)                         \
+  _(F9)                         \
+  _(F10)                        \
+  _(F11)                        \
+  _(F12)                        \
+  _(HOME)                       \
+  _(PAGEUP)                     \
+  _(DELETE)                     \
+  _(END)                        \
+  _(PAGEDOWN)                   \
+  _(RIGHT)                      \
+  _(LEFT)                       \
+  _(DOWN)                       \
+  _(UP)
+
+typedef enum HostKeycode {
+  HOST_KEYCODE_UNKNOWN,
+#define HOST_KEYCODE_ENUM(NAME) HOST_KEYCODE_##NAME,
+  FOREACH_HOST_KEYCODE(HOST_KEYCODE_ENUM)
+#undef HOST_KEYCODE_ENUM
+} HostKeycode;
+
 struct Emulator;
 struct Host;
 typedef u32 EmulatorEvent;
@@ -29,8 +110,8 @@ typedef struct HostHooks {
                            int new_available);
   void (*audio_buffer_ready)(HostHookContext*, int new_available);
   void (*audio_buffer_full)(HostHookContext*);
-  void (*write_state)(HostHookContext*);
-  void (*read_state)(HostHookContext*);
+  void (*key_down)(HostHookContext*, HostKeycode key);
+  void (*key_up)(HostHookContext*, HostKeycode key);
 } HostHooks;
 
 typedef struct HostInit {
@@ -42,8 +123,6 @@ typedef struct HostInit {
 
 typedef struct HostConfig {
   Bool no_sync;
-  Bool paused;
-  Bool step_frame;
   Bool fullscreen;
 } HostConfig;
 
@@ -65,6 +144,7 @@ Bool host_poll_events(struct Host*);
 void host_run_ms(struct Host*, f64 delta_ms);
 void host_step(struct Host*);
 void host_render_audio(struct Host*);
+void host_reset_audio(struct Host*);
 f64 host_get_monitor_refresh_ms(struct Host*);
 f64 host_get_time_ms(struct Host*);
 void host_set_config(struct Host*, const HostConfig*);
