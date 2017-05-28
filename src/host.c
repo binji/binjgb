@@ -212,7 +212,7 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
 }
 
 Result host_init(Host* host, struct Emulator* e) {
-  CHECK_MSG(SDL_Init(SDL_INIT_EVERYTHING) == 0, "SDL_init failed.\n");
+  CHECK_MSG(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0, "SDL_init failed.\n");
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
