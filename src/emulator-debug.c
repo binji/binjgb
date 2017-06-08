@@ -256,9 +256,39 @@ int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
   return num_bytes ? num_bytes : 1;
 }
 
+static void print_instruction(Emulator* e, Address addr) {
+  char temp[64];
+  emulator_disassemble(e, addr, temp, sizeof(temp));
+  printf("%s", temp);
+}
+
 Registers emulator_get_registers(struct Emulator* e) { return e->state.reg; }
 
-void HOOK_emulator_step(Emulator* e, const char* func_name) {}
+void HOOK_emulator_step(Emulator* e, const char* func_name) {
+  if (s_trace && !e->state.interrupt.halt) {
+    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
+           e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
+           e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
+           e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
+           e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
+    printf(" (cy: %u)", e->state.cycles);
+    if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
+      printf(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
+             e->state.ppu.STAT.mode);
+    }
+    if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
+      printf(" LY:%u", e->state.ppu.LY);
+    }
+    printf(" |");
+    print_instruction(e, e->state.reg.PC);
+    printf("\n");
+    if (s_trace_counter > 0) {
+      if (--s_trace_counter == 0) {
+        s_trace = FALSE;
+      }
+    }
+  }
+}
 
 void emulator_set_log_level(LogSystem system, LogLevel level) {
   assert(system < NUM_LOG_SYSTEMS);
