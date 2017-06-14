@@ -137,6 +137,8 @@ enum {
   EMULATOR_EVENT_UNTIL_CYCLES = 0x4,
 };
 
+extern const size_t s_emulator_state_size;
+
 struct Emulator* emulator_new(const EmulatorInit*);
 void emulator_delete(struct Emulator*);
 

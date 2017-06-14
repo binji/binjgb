@@ -557,6 +557,8 @@ typedef struct {
   Bool is_cgb;
 } EmulatorState;
 
+const size_t s_emulator_state_size = sizeof(EmulatorState);
+
 typedef struct Emulator {
   EmulatorConfig config;
   FileData file_data;
@@ -3547,10 +3549,8 @@ Result emulator_read_state(Emulator* e, const FileData* file_data) {
 }
 
 Result emulator_write_state(Emulator* e, FileData* file_data) {
+  CHECK(file_data->size >= sizeof(EmulatorState));
   e->state.header = SAVE_STATE_HEADER;
-  file_data->size = sizeof(EmulatorState);
-  file_data->data = malloc(file_data->size);
-  CHECK_MSG(file_data->data != NULL, "EmulatorState allocation failed.\n");
   memcpy(file_data->data, &e->state, file_data->size);
   return OK;
   ON_ERROR_RETURN;
@@ -3572,9 +3572,7 @@ Result emulator_write_ext_ram(Emulator* e, FileData* file_data) {
   if (e->state.ext_ram.battery_type != BATTERY_TYPE_WITH_BATTERY)
     return OK;
 
-  file_data->size = e->state.ext_ram.size;
-  file_data->data = malloc(file_data->size);
-  CHECK_MSG(file_data->data != NULL, "ExtRam allocation failed.\n");
+  CHECK(file_data->size >= e->state.ext_ram.size);
   memcpy(file_data->data, e->state.ext_ram.data, file_data->size);
   return OK;
   ON_ERROR_RETURN;
@@ -3602,7 +3600,8 @@ Result emulator_write_ext_ram_to_file(struct Emulator* e,
 
   Result result = ERROR;
   FileData file_data;
-  ZERO_MEMORY(file_data);
+  file_data.size = e->state.ext_ram.size;
+  file_data.data = malloc(file_data.size);
   CHECK(SUCCESS(emulator_write_ext_ram(e, &file_data)));
   CHECK(SUCCESS(file_write(filename, &file_data)));
   result = OK;
@@ -3626,7 +3625,8 @@ error:
 Result emulator_write_state_to_file(struct Emulator* e, const char* filename) {
   Result result = ERROR;
   FileData file_data;
-  ZERO_MEMORY(file_data);
+  file_data.size = sizeof(EmulatorState);
+  file_data.data = malloc(file_data.size);
   CHECK(SUCCESS(emulator_write_state(e, &file_data)));
   CHECK(SUCCESS(file_write(filename, &file_data)));
   result = OK;
