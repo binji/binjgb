@@ -40,6 +40,20 @@
 typedef u16 HostAudioSample;
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
+#define JOYPAD_BUFFER_DEFAULT_CAPACITY 4096
+
+typedef struct {
+  Cycles cycles;
+  u8 buttons;
+  u8 padding[3];
+} HostJoypadState;
+
+typedef struct HostJoypadBuffer {
+  HostJoypadState* data;
+  size_t size;
+  size_t capacity;
+  struct HostJoypadBuffer *next, *prev;
+} HostJoypadBuffer;
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -59,6 +73,8 @@ typedef struct Host {
   u64 performance_frequency;
   struct HostUI* ui;
   HostTexture* fb_texture;
+  HostJoypadBuffer joypad_buffer_sentinel;
+  JoypadButtons last_joypad_buttons;
 } Host;
 
 Result host_init_video(Host* host) {
@@ -198,8 +214,58 @@ void host_render_audio(Host* host) {
   }
 }
 
+static void init_joypad_buffer(HostJoypadBuffer* buffer, size_t capacity) {
+  ZERO_MEMORY(*buffer);
+  buffer->data = malloc(capacity * sizeof(HostJoypadState));
+  buffer->capacity = capacity;
+}
+
+static HostJoypadBuffer* alloc_joypad_buffer(size_t capacity) {
+  HostJoypadBuffer* buffer = malloc(sizeof(HostJoypadBuffer));
+  init_joypad_buffer(buffer, capacity);
+  return buffer;
+}
+
+static HostJoypadState* host_alloc_joypad_state(Host* host) {
+  HostJoypadBuffer* tail = host->joypad_buffer_sentinel.prev;
+  if (tail->size >= tail->capacity) {
+    HostJoypadBuffer* new_buffer =
+        alloc_joypad_buffer(JOYPAD_BUFFER_DEFAULT_CAPACITY);
+    new_buffer->next = &host->joypad_buffer_sentinel;
+    new_buffer->prev = tail;
+    host->joypad_buffer_sentinel.prev = tail->next = new_buffer;
+    tail = new_buffer;
+  }
+  return  &tail->data[tail->size++];
+}
+
+static u8 pack_buttons(JoypadButtons* buttons) {
+  return (buttons->down << 7) | (buttons->up << 6) | (buttons->left << 5) |
+         (buttons->right << 4) | (buttons->start << 3) |
+         (buttons->select << 2) | (buttons->B << 1) | (buttons->A << 0);
+}
+
+static Bool joypad_buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
+  return lhs->down == rhs->down && lhs->up == rhs->up &&
+         lhs->left == rhs->left && lhs->right == rhs->right &&
+         lhs->start == rhs->start && lhs->select == rhs->select &&
+         lhs->B == rhs->B && lhs->A == rhs->A;
+}
+
+static void host_store_joypad(Host* host, Cycles cycles,
+                              JoypadButtons* buttons) {
+  if (joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
+    return;
+  }
+
+  HostJoypadState* state = host_alloc_joypad_state(host);
+  state->cycles = cycles;
+  state->buttons = pack_buttons(buttons);
+  host->last_joypad_buttons = *buttons;
+}
+
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
-  Host* sdl = user_data;
+  Host* host = user_data;
   const u8* state = SDL_GetKeyboardState(NULL);
   joyp->up = state[SDL_SCANCODE_UP];
   joyp->down = state[SDL_SCANCODE_DOWN];
@@ -209,14 +275,19 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->A = state[SDL_SCANCODE_X];
   joyp->start = state[SDL_SCANCODE_RETURN];
   joyp->select = state[SDL_SCANCODE_BACKSPACE];
+
+  host_store_joypad(host, emulator_get_cycles(host->hook_ctx.e), joyp);
 }
 
 Result host_init(Host* host, struct Emulator* e) {
-  CHECK_MSG(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0, "SDL_init failed.\n");
+  CHECK_MSG(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0,
+            "SDL_init failed.\n");
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
   emulator_set_joypad_callback(e, joypad_callback, host);
+  host->joypad_buffer_sentinel.next = host->joypad_buffer_sentinel.prev =
+      &host->joypad_buffer_sentinel;
   return OK;
   ON_ERROR_RETURN;
 }
