@@ -555,6 +555,7 @@ typedef struct {
   u8 hram[HIGH_RAM_SIZE];
   Cycles cycles;
   Bool is_cgb;
+  EmulatorEvent last_event;
 } EmulatorState;
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
@@ -571,7 +572,6 @@ typedef struct Emulator {
   AudioBuffer audio_buffer;
   JoypadCallback joypad_callback;
   void* joypad_callback_user_data;
-  EmulatorEvent last_event;
 } Emulator;
 
 
@@ -3365,10 +3365,10 @@ static void emulator_step_internal(Emulator* e) {
 
 EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
   AudioBuffer* ab = &e->audio_buffer;
-  if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
+  if (e->state.last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
   }
-  if (e->last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+  if (e->state.last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     ab->position = ab->data;
   }
   check_joyp_intr(e);
@@ -3391,7 +3391,7 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
     }
   }
   apu_synchronize(e);
-  return e->last_event = event;
+  return e->state.last_event = event;
 }
 
 EmulatorEvent emulator_step(Emulator* e) {
