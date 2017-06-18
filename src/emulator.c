@@ -11,12 +11,12 @@
 
 #include "emulator.h"
 
-#define MAXIMUM_ROM_SIZE 8388608
-#define MINIMUM_ROM_SIZE 32768
+#define MAXIMUM_ROM_SIZE MEGABYTES(8)
+#define MINIMUM_ROM_SIZE KILOBYTES(32)
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
-#define VIDEO_RAM_SIZE 8192
-#define WORK_RAM_SIZE 8192
-#define EXT_RAM_MAX_SIZE 32768
+#define VIDEO_RAM_SIZE KILOBYTES(8)
+#define WORK_RAM_SIZE KILOBYTES(8)
+#define EXT_RAM_MAX_SIZE KILOBYTES(32)
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
 
@@ -126,13 +126,13 @@
   V(ROM_SIZE_4M, 7, 256)    \
   V(ROM_SIZE_8M, 8, 512)
 
-#define FOREACH_EXT_RAM_SIZE(V)   \
-  V(EXT_RAM_SIZE_NONE, 0, 0)      \
-  V(EXT_RAM_SIZE_2K, 1, 2048)     \
-  V(EXT_RAM_SIZE_8K, 2, 8192)     \
-  V(EXT_RAM_SIZE_32K, 3, 32768)   \
-  V(EXT_RAM_SIZE_128K, 4, 131072) \
-  V(EXT_RAM_SIZE_64K, 5, 65536)
+#define FOREACH_EXT_RAM_SIZE(V)           \
+  V(EXT_RAM_SIZE_NONE, 0, 0)              \
+  V(EXT_RAM_SIZE_2K, 1, KILOBYTES(2))     \
+  V(EXT_RAM_SIZE_8K, 2, KILOBYTES(8))     \
+  V(EXT_RAM_SIZE_32K, 3, KILOBYTES(32))   \
+  V(EXT_RAM_SIZE_128K, 4, KILOBYTES(128)) \
+  V(EXT_RAM_SIZE_64K, 5, KILOBYTES(64))
 
 #define FOREACH_PPU_MODE(V) \
   V(PPU_MODE_HBLANK, 0)     \
@@ -3527,8 +3527,8 @@ u32 audio_buffer_get_frames(AudioBuffer* audio_buffer) {
 
 static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
   CHECK_MSG(file_data->size >= MINIMUM_ROM_SIZE,
-            "size (%ld) < minimum rom size (%u).\n", (long)file_data->size,
-            MINIMUM_ROM_SIZE);
+            "size (%ld) < minimum rom size (%lu).\n", (long)file_data->size,
+            (long)MINIMUM_ROM_SIZE);
   e->file_data = *file_data;
   return OK;
   ON_ERROR_RETURN;

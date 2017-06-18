@@ -20,6 +20,8 @@ extern "C" {
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define NEXT_MODULO(value, mod) ((mod) - (value) % (mod))
+#define KILOBYTES(x) ((size_t)(x) * 1024)
+#define MEGABYTES(x) ((size_t)(x) * 1024 * 1024)
 
 #define SUCCESS(x) ((x) == OK)
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
