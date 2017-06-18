@@ -46,14 +46,14 @@ typedef struct {
   Cycles cycles;
   u8 buttons;
   u8 padding[3];
-} HostJoypadState;
+} JoypadState;
 
-typedef struct HostJoypadBuffer {
-  HostJoypadState* data;
+typedef struct JoypadBuffer {
+  JoypadState* data;
   size_t size;
   size_t capacity;
-  struct HostJoypadBuffer *next, *prev;
-} HostJoypadBuffer;
+  struct JoypadBuffer *next, *prev;
+} JoypadBuffer;
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -73,9 +73,13 @@ typedef struct Host {
   u64 performance_frequency;
   struct HostUI* ui;
   HostTexture* fb_texture;
-  HostJoypadBuffer joypad_buffer_sentinel;
+  JoypadBuffer joypad_buffer_sentinel;
   JoypadButtons last_joypad_buttons;
 } Host;
+
+static struct Emulator* host_get_emulator(Host* host) {
+  return host->hook_ctx.e;
+}
 
 Result host_init_video(Host* host) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -214,22 +218,18 @@ void host_render_audio(Host* host) {
   }
 }
 
-static void init_joypad_buffer(HostJoypadBuffer* buffer, size_t capacity) {
+static JoypadBuffer* alloc_joypad_buffer(size_t capacity) {
+  JoypadBuffer* buffer = malloc(sizeof(JoypadBuffer));
   ZERO_MEMORY(*buffer);
-  buffer->data = malloc(capacity * sizeof(HostJoypadState));
+  buffer->data = malloc(capacity * sizeof(JoypadState));
   buffer->capacity = capacity;
-}
-
-static HostJoypadBuffer* alloc_joypad_buffer(size_t capacity) {
-  HostJoypadBuffer* buffer = malloc(sizeof(HostJoypadBuffer));
-  init_joypad_buffer(buffer, capacity);
   return buffer;
 }
 
-static HostJoypadState* host_alloc_joypad_state(Host* host) {
-  HostJoypadBuffer* tail = host->joypad_buffer_sentinel.prev;
+static JoypadState* host_alloc_joypad_state(Host* host) {
+  JoypadBuffer* tail = host->joypad_buffer_sentinel.prev;
   if (tail->size >= tail->capacity) {
-    HostJoypadBuffer* new_buffer =
+    JoypadBuffer* new_buffer =
         alloc_joypad_buffer(JOYPAD_BUFFER_DEFAULT_CAPACITY);
     new_buffer->next = &host->joypad_buffer_sentinel;
     new_buffer->prev = tail;
@@ -252,16 +252,17 @@ static Bool joypad_buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
          lhs->B == rhs->B && lhs->A == rhs->A;
 }
 
-static void host_store_joypad(Host* host, Cycles cycles,
-                              JoypadButtons* buttons) {
-  if (joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
-    return;
-  }
-
-  HostJoypadState* state = host_alloc_joypad_state(host);
-  state->cycles = cycles;
+static void host_store_joypad(Host* host, JoypadButtons* buttons) {
+  JoypadState* state = host_alloc_joypad_state(host);
+  state->cycles = emulator_get_cycles(host_get_emulator(host));
   state->buttons = pack_buttons(buttons);
   host->last_joypad_buttons = *buttons;
+}
+
+static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
+  if (!joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
+    host_store_joypad(host, buttons);
+  }
 }
 
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
@@ -276,7 +277,15 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->start = state[SDL_SCANCODE_RETURN];
   joyp->select = state[SDL_SCANCODE_BACKSPACE];
 
-  host_store_joypad(host, emulator_get_cycles(host->hook_ctx.e), joyp);
+  host_store_joypad_if_new(host, joyp);
+}
+
+static void host_init_joypad(Host* host, struct Emulator* e) {
+  emulator_set_joypad_callback(e, joypad_callback, host);
+  host->joypad_buffer_sentinel.next = host->joypad_buffer_sentinel.prev =
+      &host->joypad_buffer_sentinel;
+  ZERO_MEMORY(host->last_joypad_buttons);
+  host_store_joypad(host, &host->last_joypad_buttons);
 }
 
 Result host_init(Host* host, struct Emulator* e) {
@@ -285,9 +294,7 @@ Result host_init(Host* host, struct Emulator* e) {
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
-  emulator_set_joypad_callback(e, joypad_callback, host);
-  host->joypad_buffer_sentinel.next = host->joypad_buffer_sentinel.prev =
-      &host->joypad_buffer_sentinel;
+  host_init_joypad(host, e);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -336,12 +343,23 @@ error:
   return NULL;
 }
 
+static void host_destroy_joypad(Host* host) {
+  JoypadBuffer* current = host->joypad_buffer_sentinel.next;
+  while (current != &host->joypad_buffer_sentinel) {
+    JoypadBuffer* next = current->next;
+    free(current->data);
+    free(current);
+    current = next;
+  }
+}
+
 void host_delete(Host* host) {
   if (host) {
     host_destroy_texture(host, host->fb_texture);
     SDL_GL_DeleteContext(host->gl_context);
     SDL_DestroyWindow(host->window);
     SDL_Quit();
+    host_destroy_joypad(host);
     free(host->audio.buffer);
     free(host);
   }

@@ -47,6 +47,11 @@ typedef struct JoypadButtons {
 
 typedef void (*JoypadCallback)(struct JoypadButtons* joyp, void* user_data);
 
+typedef struct JoypadCallbackInfo {
+  JoypadCallback callback;
+  void* user_data;
+} JoypadCallbackInfo;
+
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 
 typedef enum Color {
@@ -145,6 +150,7 @@ void emulator_delete(struct Emulator*);
 void emulator_set_joypad_buttons(struct Emulator*, JoypadButtons*);
 void emulator_set_joypad_callback(struct Emulator*, JoypadCallback,
                                   void* user_data);
+JoypadCallbackInfo emulator_get_joypad_callback(struct Emulator*);
 void emulator_set_config(struct Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(struct Emulator*);
 FrameBuffer* emulator_get_frame_buffer(struct Emulator*);

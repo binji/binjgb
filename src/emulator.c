@@ -570,8 +570,7 @@ typedef struct Emulator {
   EmulatorState state;
   FrameBuffer frame_buffer;
   AudioBuffer audio_buffer;
-  JoypadCallback joypad_callback;
-  void* joypad_callback_user_data;
+  JoypadCallbackInfo joypad_info;
 } Emulator;
 
 
@@ -1284,9 +1283,9 @@ static u8 read_joyp_p10_p13(Emulator* e) {
 static u8 read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR:
-      if (e->joypad_callback) {
-        e->joypad_callback(&e->state.JOYP.buttons,
-                           e->joypad_callback_user_data);
+      if (e->joypad_info.callback) {
+        e->joypad_info.callback(&e->state.JOYP.buttons,
+                                e->joypad_info.user_data);
       }
       return JOYP_UNUSED |
              PACK(e->state.JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
@@ -3493,8 +3492,12 @@ void emulator_set_joypad_buttons(struct Emulator* e, JoypadButtons* buttons) {
 
 void emulator_set_joypad_callback(struct Emulator* e, JoypadCallback callback,
                                   void* user_data) {
-  e->joypad_callback = callback;
-  e->joypad_callback_user_data = user_data;
+  e->joypad_info.callback = callback;
+  e->joypad_info.user_data = user_data;
+}
+
+JoypadCallbackInfo emulator_get_joypad_callback(struct Emulator* e) {
+  return e->joypad_info;
 }
 
 void emulator_set_config(struct Emulator* e, const EmulatorConfig* config) {
