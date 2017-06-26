@@ -235,8 +235,8 @@ static void host_handle_event(struct Host* host, EmulatorEvent event) {
 
 void host_run_ms(struct Host* host, f64 delta_ms) {
   struct Emulator* e = host->hook_ctx.e;
-  u32 delta_cycles = (u32)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
-  u32 until_cycles = emulator_get_cycles(e) + delta_cycles;
+  Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
+  Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
   while (1) {
     EmulatorEvent event = emulator_run_until(e, until_cycles);
     host_handle_event(host, event);

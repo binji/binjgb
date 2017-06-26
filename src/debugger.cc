@@ -5,6 +5,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <assert.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -926,7 +927,7 @@ void Debugger::DisassemblyWindow() {
       static Address start_addr = 0;
 
       Registers regs = emulator_get_registers(e);
-      ImGui::Text("Cycles: %u", emulator_get_cycles(e));
+      ImGui::Text("Cycles: %" PRIu64 "", emulator_get_cycles(e));
       ImGui::Text("A: %02X", regs.A);
       ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
       ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);

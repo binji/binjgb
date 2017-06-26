@@ -52,6 +52,7 @@ typedef double f64;
 typedef u16 Address;
 typedef u16 MaskedAddress;
 typedef u32 RGBA;
+typedef u64 Cycles;
 typedef enum Bool { FALSE = 0, TRUE = 1 } Bool;
 typedef enum Result { OK = 0, ERROR = 1 } Result;
 

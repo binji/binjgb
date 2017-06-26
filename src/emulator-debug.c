@@ -6,6 +6,7 @@
  */
 #include "emulator-debug.h"
 
+#include <inttypes.h>
 #include <stdarg.h>
 
 static Bool s_trace = 0;
@@ -18,15 +19,15 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
 #define DECLARE_LOG_HOOK(system, level, name, format) \
   static void HOOK_##name(struct Emulator* e, const char* func_name, ...);
 
-#define DEFINE_LOG_HOOK(system, level, name, format)               \
-  void HOOK_##name(Emulator* e, const char* func_name, ...) {      \
-    if (s_log_level[LOG_SYSTEM_##system] >= LOG_LEVEL_##level) {   \
-      va_list args;                                                \
-      va_start(args, func_name);                                   \
-      fprintf(stdout, "%10u: %-30s:", e->state.cycles, func_name); \
-      vfprintf(stdout, format "\n", args);                         \
-      va_end(args);                                                \
-    }                                                              \
+#define DEFINE_LOG_HOOK(system, level, name, format)                        \
+  void HOOK_##name(Emulator* e, const char* func_name, ...) {               \
+    if (s_log_level[LOG_SYSTEM_##system] >= LOG_LEVEL_##level) {            \
+      va_list args;                                                         \
+      va_start(args, func_name);                                            \
+      fprintf(stdout, "%10" PRIu64 ": %-30s:", e->state.cycles, func_name); \
+      vfprintf(stdout, format "\n", args);                                  \
+      va_end(args);                                                         \
+    }                                                                       \
   }
 
 #define LOG_LEVEL_I LOG_LEVEL_INFO
@@ -271,7 +272,7 @@ void HOOK_emulator_step(Emulator* e, const char* func_name) {
            e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
            e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
            e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
-    printf(" (cy: %u)", e->state.cycles);
+    printf(" (cy: %" PRIu64 ")", e->state.cycles);
     if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
       printf(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
              e->state.ppu.STAT.mode);

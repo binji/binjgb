@@ -147,7 +147,7 @@ void emulator_set_config(struct Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(struct Emulator*);
 FrameBuffer* emulator_get_frame_buffer(struct Emulator*);
 AudioBuffer* emulator_get_audio_buffer(struct Emulator*);
-u32 emulator_get_cycles(struct Emulator*);
+Cycles emulator_get_cycles(struct Emulator*);
 u32 emulator_get_ppu_frame(struct Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
@@ -162,7 +162,7 @@ Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
 EmulatorEvent emulator_step(struct Emulator*);
-EmulatorEvent emulator_run_until(struct Emulator*, u32 until_cycles);
+EmulatorEvent emulator_run_until(struct Emulator*, Cycles until_cycles);
 
 #ifdef __cplusplus
 }

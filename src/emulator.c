@@ -11,9 +11,6 @@
 
 #include "emulator.h"
 
-#define U32_LESS_THAN_WITH_WRAP(x, y) ((s32)((y) - (x)) >= 0)
-#define U32_MIN_WITH_WRAP(x, y) (U32_LESS_THAN_WITH_WRAP((x), (y)) ? (x) : (y))
-
 #define MAXIMUM_ROM_SIZE 8388608
 #define MINIMUM_ROM_SIZE 32768
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
@@ -397,7 +394,7 @@ typedef struct {
   SerialClock clock;
   u8 SB; /* Serial transfer data. */
   u8 transferred_bits;
-  u32 cycles;
+  Cycles cycles;
 } Serial;
 
 typedef struct {
@@ -433,13 +430,13 @@ typedef struct {
   WaveVolume volume;
   u8 volume_shift;
   u8 ram[WAVE_RAM_SIZE];
-  u32 sample_time; /* Time (in cycles) the sample was read. */
-  u8 sample_data;  /* Last sample generated, 0..1 */
-  u32 period;      /* Calculated from the frequency. */
-  u8 position;     /* 0..31 */
-  u32 cycles;      /* 0..period */
-  Bool playing;    /* TRUE if the channel has been triggered but the DAC not
-                           disabled. */
+  Cycles sample_time; /* Time (in cycles) the sample was read. */
+  u8 sample_data;     /* Last sample generated, 0..1 */
+  u32 period;         /* Calculated from the frequency. */
+  u8 position;        /* 0..31 */
+  u32 cycles;         /* 0..period */
+  Bool playing;       /* TRUE if the channel has been triggered but the DAC not
+                              disabled. */
 } Wave;
 
 /* Channel 4 */
@@ -472,8 +469,8 @@ typedef struct {
   Wave wave;
   Noise noise;
   Channel channel[CHANNEL_COUNT];
-  u8 frame;         /* 0..FRAME_SEQUENCER_COUNT */
-  u32 cycles;       /* Raw cycle counter */
+  u8 frame;      /* 0..FRAME_SEQUENCER_COUNT */
+  Cycles cycles; /* Raw cycle counter */
   Bool initialized;
 } APU;
 
@@ -536,7 +533,7 @@ typedef struct {
 typedef struct {
   DMAState state;
   MemoryTypeAddressPair source;
-  u32 cycles;
+  Cycles cycles;
 } DMA;
 
 typedef struct {
@@ -556,7 +553,7 @@ typedef struct {
   PPU ppu;
   DMA dma;
   u8 hram[HIGH_RAM_SIZE];
-  u32 cycles;
+  Cycles cycles;
   Bool is_cgb;
 } EmulatorState;
 
@@ -2723,7 +2720,7 @@ static void apu_update_channels(Emulator* e, u32 total_frames) {
 static void apu_update(Emulator* e, u32 total_cycles) {
   APU* apu = &e->state.apu;
   while (total_cycles) {
-    u32 next_seq_cycles = NEXT_MODULO(apu->cycles, FRAME_SEQUENCER_CYCLES);
+    Cycles next_seq_cycles = NEXT_MODULO(apu->cycles, FRAME_SEQUENCER_CYCLES);
     if (next_seq_cycles == FRAME_SEQUENCER_CYCLES) {
       apu->frame = (apu->frame + 1) % FRAME_SEQUENCER_COUNT;
       switch (apu->frame) {
@@ -2732,7 +2729,7 @@ static void apu_update(Emulator* e, u32 total_cycles) {
         case 7: update_envelopes(e); break;
       }
     }
-    u32 cycles = MIN(next_seq_cycles, total_cycles);
+    Cycles cycles = MIN(next_seq_cycles, total_cycles);
     apu_update_channels(e, cycles / APU_CYCLES);
     total_cycles -= cycles;
   }
@@ -3364,7 +3361,7 @@ static void emulator_step_internal(Emulator* e) {
   handle_interrupts(e);
 }
 
-EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
+EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
   AudioBuffer* ab = &e->audio_buffer;
   if (e->last_event & EMULATOR_EVENT_NEW_FRAME) {
     e->state.ppu.new_frame_edge = FALSE;
@@ -3375,7 +3372,7 @@ EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
   check_joyp_intr(e);
 
   u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
-  u32 max_audio_cycles =
+  Cycles max_audio_cycles =
       e->state.apu.cycles +
       (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
@@ -3384,10 +3381,10 @@ EmulatorEvent emulator_run_until(struct Emulator* e, u32 until_cycles) {
     if (e->state.ppu.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    if (U32_LESS_THAN_WITH_WRAP(max_audio_cycles, e->state.cycles)) {
+    if (max_audio_cycles < e->state.cycles) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
-    if (U32_LESS_THAN_WITH_WRAP(until_cycles, e->state.cycles)) {
+    if (until_cycles < e->state.cycles) {
       event |= EMULATOR_EVENT_UNTIL_CYCLES;
     }
   }
@@ -3483,8 +3480,7 @@ Result init_emulator(Emulator* e) {
   write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
 
-  /* Start the cycle counter near 2**32 to catch overflow bugs. */
-  e->state.apu.cycles = e->state.cycles = (u32)-CPU_CYCLES_PER_SECOND;
+  e->state.apu.cycles = e->state.cycles = 0;
   return OK;
   ON_ERROR_RETURN;
 }
@@ -3515,7 +3511,7 @@ AudioBuffer* emulator_get_audio_buffer(struct Emulator* e) {
   return &e->audio_buffer;
 }
 
-u32 emulator_get_cycles(struct Emulator* e) {
+Cycles emulator_get_cycles(struct Emulator* e) {
   return e->state.cycles;
 }
 
