@@ -120,6 +120,8 @@ typedef struct HostInit {
   int audio_frequency;
   int audio_frames;
   f32 audio_volume;
+  size_t emulator_state_buffer_capacity;
+  int frames_per_emulator_state;
 } HostInit;
 
 typedef struct HostConfig {
@@ -156,6 +158,13 @@ void host_end_video(struct Host*);
 void host_set_palette(struct Host*, RGBA palette[4]);
 void host_enable_palette(struct Host*, Bool enabled);
 void host_render_screen_overlay(struct Host*, struct HostTexture*);
+
+/* Rewind support. */
+Cycles host_first_cycles(struct Host*);
+Cycles host_last_cycles(struct Host*);
+/* Returns cycle count reached, which may not equal cycles if the timeout
+ * expired. */
+Cycles host_seek_to_cycles(struct Host*, Cycles cycles, f64 timeout_ms);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);
 HostTexture* host_create_texture(struct Host*, int w, int h, HostTextureFormat);

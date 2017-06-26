@@ -26,12 +26,6 @@
     }                                                      \
   while (0)
 
-#define DESTROY_IF(ptr, destroy) \
-  if (ptr) {                     \
-    destroy(ptr);                \
-    ptr = NULL;                  \
-  }
-
 typedef f32 HostAudioSample;
 #define AUDIO_SPEC_FORMAT AUDIO_F32
 #define AUDIO_SPEC_CHANNELS 2
@@ -61,13 +55,38 @@ typedef struct JoypadBuffer {
   struct JoypadBuffer *next, *prev;
 } JoypadBuffer;
 
+typedef struct JoypadSearchResult {
+  JoypadBuffer* buffer;
+  JoypadState* state;
+} JoypadSearchResult;
+
+typedef struct {
+  size_t index;
+  void* next;
+} EmulatorStateFreeListNode;
+
+typedef struct {
+  Cycles cycles;
+  FileData file_data;
+} EmulatorStateInfo;
+
+typedef struct {
+  void* data;
+  size_t capacity;
+  EmulatorStateFreeListNode* first_free;
+  EmulatorStateInfo* state_info;
+  size_t num_states;
+  size_t max_states;
+  int frames_until_next_state;
+} EmulatorStateBuffer;
+
 typedef struct {
   SDL_AudioDeviceID dev;
   SDL_AudioSpec spec;
   u8* buffer; /* Size is spec.size. */
   Bool ready;
   f32 volume; /* [0..1] */
-} HostAudio;
+} Audio;
 
 typedef struct Host {
   HostInit init;
@@ -75,20 +94,22 @@ typedef struct Host {
   HostHookContext hook_ctx;
   SDL_Window* window;
   SDL_GLContext gl_context;
-  HostAudio audio;
+  Audio audio;
   u64 start_counter;
   u64 performance_frequency;
   struct HostUI* ui;
   HostTexture* fb_texture;
   JoypadBuffer joypad_buffer_sentinel;
+  EmulatorStateBuffer state_buffer;
   JoypadButtons last_joypad_buttons;
+  Cycles last_cycles;
 } Host;
 
 static struct Emulator* host_get_emulator(Host* host) {
   return host->hook_ctx.e;
 }
 
-Result host_init_video(Host* host) {
+static Result host_init_video(Host* host) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -154,7 +175,7 @@ static HostKeycode scancode_to_keycode(SDL_Scancode scancode) {
 }
 
 Bool host_poll_events(Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host_get_emulator(host);
   Bool running = TRUE;
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
@@ -200,8 +221,8 @@ void host_set_audio_volume(Host* host, f32 volume) {
 }
 
 void host_render_audio(Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
-  HostAudio* audio = &host->audio;
+  struct Emulator* e = host_get_emulator(host);
+  Audio* audio = &host->audio;
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
 
   size_t src_frames = audio_buffer_get_frames(audio_buffer);
@@ -273,6 +294,39 @@ static void host_store_joypad(Host* host, JoypadButtons* buttons) {
   host->last_joypad_buttons = *buttons;
 }
 
+static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
+  /* TODO(binji): Use a skip list if this is too slow? */
+  JoypadBuffer* first_buffer = host->joypad_buffer_sentinel.next;
+  JoypadBuffer* last_buffer = host->joypad_buffer_sentinel.prev;
+  Cycles first_cycles = first_buffer->data[0].cycles;
+  Cycles last_cycles = last_buffer->data[last_buffer->size - 1].cycles;
+  if (cycles <= first_cycles) {
+    /* At or past the beginning. */
+    JoypadSearchResult result;
+    result.buffer = first_buffer;
+    result.state = &first_buffer->data[0];
+    return result;
+  } else if (cycles >= last_cycles) {
+    /* At or past the end. */
+    JoypadSearchResult result;
+    result.buffer = last_buffer;
+    result.state = &last_buffer->data[last_buffer->size - 1];
+    return result;
+  } else if (cycles - first_cycles < last_cycles - cycles) {
+    /* Closer to the beginning. */
+    JoypadBuffer* buffer = first_buffer;
+    while (cycles >= buffer->data[buffer->size - 1].cycles) {
+      buffer = buffer->next;
+    }
+  } else {
+    /* Closer to the end. */
+    JoypadBuffer* buffer = last_buffer;
+    while (cycles < buffer->data[buffer->size - 1].cycles) {
+      buffer = buffer->next;
+    }
+  }
+}
+
 static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
   if (!joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
     host_store_joypad(host, buttons);
@@ -302,6 +356,33 @@ static void host_init_joypad(Host* host, struct Emulator* e) {
   host_store_joypad(host, &host->last_joypad_buttons);
 }
 
+static void host_init_emulator_state_buffer(Host* host) {
+  typedef EmulatorStateFreeListNode FreeListNode;
+
+  size_t capacity = host->init.emulator_state_buffer_capacity;
+  size_t max_states = capacity / s_emulator_state_size;
+  char* data = malloc(capacity);
+  host->state_buffer.capacity = capacity;
+  host->state_buffer.data = data;
+  host->state_buffer.first_free = (EmulatorStateFreeListNode*)data;
+  host->state_buffer.num_states = 0;
+  host->state_buffer.max_states = max_states;
+  host->state_buffer.state_info =
+      malloc(sizeof(EmulatorStateInfo) * max_states);
+  host->state_buffer.frames_until_next_state =
+      host->init.frames_per_emulator_state;
+
+  size_t i;
+  FreeListNode* last = NULL;
+  for (i = max_states; i > 0; i--) {
+    FreeListNode* node =
+        (FreeListNode*)(data + (i - 1) * s_emulator_state_size);
+    node->index = i - 1;
+    node->next = last;
+    last = node;
+  }
+}
+
 Result host_init(Host* host, struct Emulator* e) {
   CHECK_MSG(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0,
             "SDL_init failed.\n");
@@ -309,15 +390,43 @@ Result host_init(Host* host, struct Emulator* e) {
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
   host_init_joypad(host, e);
+  host_init_emulator_state_buffer(host);
+  host->last_cycles = emulator_get_cycles(e);
   return OK;
   ON_ERROR_RETURN;
 }
 
-static void host_handle_event(struct Host* host, EmulatorEvent event) {
-  struct Emulator* e = host->hook_ctx.e;
+static Result alloc_emulator_state(Host* host) {
+  struct Emulator* e = host_get_emulator(host);
+  EmulatorStateBuffer* sb = &host->state_buffer;
+  if (!sb->first_free) {
+    /* TODO: Pick a state to free. */
+    return ERROR;
+  }
+
+  sb->num_states++;
+  EmulatorStateFreeListNode* node = sb->first_free;
+  sb->first_free = node->next;
+  EmulatorStateInfo* info = &sb->state_info[node->index];
+  info->cycles = emulator_get_cycles(e);
+  info->file_data.data = (void*)node;
+  info->file_data.size = s_emulator_state_size;
+  return emulator_write_state(e, &info->file_data);
+}
+
+static void host_handle_event(Host* host, EmulatorEvent event) {
+  struct Emulator* e = host_get_emulator(host);
   if (event & EMULATOR_EVENT_NEW_FRAME) {
     host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
                         *emulator_get_frame_buffer(e));
+
+    if (host->state_buffer.frames_until_next_state > 0) {
+      if (--host->state_buffer.frames_until_next_state == 0) {
+        host->state_buffer.frames_until_next_state =
+            host->init.frames_per_emulator_state;
+        alloc_emulator_state(host);
+      }
+    }
   }
   if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     host_render_audio(host);
@@ -326,7 +435,7 @@ static void host_handle_event(struct Host* host, EmulatorEvent event) {
 }
 
 void host_run_ms(struct Host* host, f64 delta_ms) {
-  struct Emulator* e = host->hook_ctx.e;
+  struct Emulator* e = host_get_emulator(host);
   Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
   while (1) {
@@ -336,12 +445,14 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
       break;
     }
   }
+  host->last_cycles = emulator_get_cycles(e);
 }
 
-void host_step(struct Host* host) {
-  struct Emulator* e = host->hook_ctx.e;
+void host_step(Host* host) {
+  struct Emulator* e = host_get_emulator(host);
   EmulatorEvent event = emulator_step(e);
   host_handle_event(host, event);
+  host->last_cycles = emulator_get_cycles(e);
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {
@@ -374,12 +485,14 @@ void host_delete(Host* host) {
     SDL_DestroyWindow(host->window);
     SDL_Quit();
     host_destroy_joypad(host);
+    free(host->state_buffer.state_info);
+    free(host->state_buffer.data);
     free(host->audio.buffer);
     free(host);
   }
 }
 
-void host_set_config(struct Host* host, const HostConfig* new_config) {
+void host_set_config(Host* host, const HostConfig* new_config) {
   if (host->config.no_sync != new_config->no_sync) {
     SDL_GL_SetSwapInterval(new_config->no_sync ? 0 : 1);
     host_reset_audio(host);
@@ -393,11 +506,11 @@ void host_set_config(struct Host* host, const HostConfig* new_config) {
   host->config = *new_config;
 }
 
-HostConfig host_get_config(struct Host* host) {
+HostConfig host_get_config(Host* host) {
   return host->config;
 }
 
-f64 host_get_monitor_refresh_ms(struct Host* host) {
+f64 host_get_monitor_refresh_ms(Host* host) {
   int refresh_rate_hz = 0;
   SDL_DisplayMode mode;
   if (SDL_GetWindowDisplayMode(host->window, &mode) == 0) {
@@ -409,11 +522,11 @@ f64 host_get_monitor_refresh_ms(struct Host* host) {
   return 1000.0 / refresh_rate_hz;
 }
 
-void host_set_palette(struct Host* host, RGBA palette[4]) {
+void host_set_palette(Host* host, RGBA palette[4]) {
   host_ui_set_palette(host->ui, palette);
 }
 
-void host_enable_palette(struct Host* host, Bool enabled) {
+void host_enable_palette(Host* host, Bool enabled) {
   host_ui_enable_palette(host->ui, enabled);
 }
 
@@ -428,7 +541,7 @@ static u32 next_power_of_two(u32 n) {
   return n + 1;
 }
 
-HostTexture* host_get_frame_buffer_texture(struct Host* host) {
+HostTexture* host_get_frame_buffer_texture(Host* host) {
   return host->fb_texture;
 }
 
@@ -456,7 +569,7 @@ static GLTextureFormat host_apply_texture_format(HostTextureFormat format) {
   return result;
 }
 
-HostTexture* host_create_texture(struct Host* host, int w, int h,
+HostTexture* host_create_texture(Host* host, int w, int h,
                                  HostTextureFormat format) {
   HostTexture* texture = malloc(sizeof(HostTexture));
   texture->width = next_power_of_two(w);
@@ -476,7 +589,7 @@ HostTexture* host_create_texture(struct Host* host, int w, int h,
   return texture;
 }
 
-void host_upload_texture(struct Host* host, HostTexture* texture, int w, int h,
+void host_upload_texture(Host* host, HostTexture* texture, int w, int h,
                          const void* data) {
   assert(w <= texture->width);
   assert(h <= texture->height);
@@ -486,7 +599,7 @@ void host_upload_texture(struct Host* host, HostTexture* texture, int w, int h,
                   gl_format.type, data);
 }
 
-void host_destroy_texture(struct Host* host, HostTexture* texture) {
+void host_destroy_texture(Host* host, HostTexture* texture) {
   GLuint tex = texture->handle;
   glDeleteTextures(1, &tex);
   free(texture);
@@ -495,4 +608,36 @@ void host_destroy_texture(struct Host* host, HostTexture* texture) {
 void host_render_screen_overlay(struct Host* host,
                                 struct HostTexture* texture) {
   host_ui_render_screen_overlay(host->ui, texture);
+}
+
+Cycles host_first_cycles(Host* host) {
+  return host->joypad_buffer_sentinel.next->data[0].cycles;
+}
+
+Cycles host_last_cycles(Host* host) {
+  return host->last_cycles;
+}
+
+static EmulatorStateInfo* host_find_state(Host* host, Cycles cycles) {
+  u32 start = 0;                            // Inclusive.
+  u32 end = host->state_buffer.num_states;  // Exclusive.
+  while (end - start >= 2) {
+    u32 mid = (end - start) / 2;
+    EmulatorStateInfo* info = &host->state_buffer.state_info[mid];
+    if (info->cycles == cycles) {
+      break;
+    } else if (info->cycles < cycles) {
+      end = mid;
+    } else {
+      start = mid + 1;
+    }
+  }
+  EmulatorStateInfo* info = &host->state_buffer.state_info[start];
+  assert(info->cycles <= cycles);
+  return info;
+}
+
+Cycles host_seek_to_cycles(Host* host, Cycles cycles, f64 timeout_ms) {
+  EmulatorStateInfo* info = host_find_state(host, cycles);
+  return 0;
 }

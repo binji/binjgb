@@ -409,6 +409,9 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   host_init.hooks.key_up = [](HostHookContext* ctx, HostKeycode code) {
     static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
   };
+  // TODO: make these configurable?
+  host_init.frames_per_emulator_state = 8;
+  host_init.emulator_state_buffer_capacity = MEGABYTES(20);
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
