@@ -9,7 +9,7 @@ out/$1/Makefile: | out/$1
 	cd out/$1 && cmake ../.. -DCMAKE_BUILD_TYPE=$1
 .PHONY: $2
 $2: out/$1/Makefile
-	+$(MAKE) --no-print-directory -C out/$1 install
+	+$(MAKE) --no-print-directory -C out/$1
 endef
 
 $(eval $(call BUILD,Debug,debug))

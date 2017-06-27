@@ -8,10 +8,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
 option(WASM "Build for WebAssembly" OFF)
 
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR} CACHE PATH "Install directory" FORCE)
-endif ()
-
 if (MSVC)
   add_definitions(-W3 -D_CRT_SECURE_NO_WARNINGS)
 else ()
@@ -21,6 +17,14 @@ else ()
     -Wno-unused-variable
   )
 endif ()
+
+function (target_copy_to_bin name)
+add_custom_target(${name}-copy-to-bin ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_SOURCE_DIR}/bin
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${name}> ${PROJECT_SOURCE_DIR}/bin
+  DEPENDS ${name}
+)
+endfunction ()
 
 if (NOT EMSCRIPTEN)
   find_package(SDL2)
@@ -36,6 +40,12 @@ if (NOT EMSCRIPTEN)
       src/binjgb.c
     )
     target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
+
+    install(TARGETS binjgb DESTINATION bin)
+    target_copy_to_bin(binjgb)
+    if (SDL2_DYNAMIC)
+      install(FILES ${SDL2_RUNTIME_LIBRARY} DESTINATION bin)
+    endif ()
 
     add_executable(binjgb-debugger
       third_party/imgui/imgui.cpp
@@ -65,11 +75,7 @@ if (NOT EMSCRIPTEN)
     target_compile_definitions(binjgb-debugger PUBLIC BINJGB_HOST_IMGUI)
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)
-
-    install(TARGETS binjgb DESTINATION bin)
-    if (SDL2_DYNAMIC)
-      install(FILES ${SDL2_RUNTIME_LIBRARY} DESTINATION bin)
-    endif ()
+    target_copy_to_bin(binjgb-debugger)
   endif ()
 
   add_executable(binjgb-tester
@@ -79,6 +85,7 @@ if (NOT EMSCRIPTEN)
     src/tester.c
   )
   install(TARGETS binjgb-tester DESTINATION bin)
+  target_copy_to_bin(binjgb-tester)
 else (EMSCRIPTEN)
   add_executable(binjgb src/emulator.c src/emscripten/wrapper.c)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)
