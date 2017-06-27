@@ -137,7 +137,6 @@ void parse_options(int argc, char**argv) {
 
   if (!s_rom_filename) {
     PRINT_ERROR("ERROR: expected input .gb\n\n");
-    usage(argc, argv);
     goto error;
   }
 
