@@ -26,6 +26,27 @@
     }                                                      \
   while (0)
 
+#define GET_CYCLES(x) ((x).cycles)
+
+#define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET) \
+  Type* var = NULL;                                                \
+  if (init_end - init_begin != 0) {                                \
+    Type* begin = init_begin; /* Inclusive. */                     \
+    Type* end = init_end;     /* Exclusive. */                     \
+    while (end - begin > 1) {                                      \
+      Type* mid = begin + ((end - begin) / 2);                     \
+      if (to_find == GET(*mid)) {                                  \
+        begin = mid;                                               \
+        break;                                                     \
+      } else if (to_find < GET(*mid)) {                            \
+        end = mid;                                                 \
+      } else {                                                     \
+        begin = mid + 1;                                           \
+      }                                                            \
+    }                                                              \
+    var = begin;                                                   \
+  }
+
 typedef f32 HostAudioSample;
 #define AUDIO_SPEC_FORMAT AUDIO_F32
 #define AUDIO_SPEC_CHANNELS 2
@@ -296,19 +317,19 @@ static void host_store_joypad(Host* host, JoypadButtons* buttons) {
 
 static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
   /* TODO(binji): Use a skip list if this is too slow? */
+  JoypadSearchResult result;
   JoypadBuffer* first_buffer = host->joypad_buffer_sentinel.next;
   JoypadBuffer* last_buffer = host->joypad_buffer_sentinel.prev;
+  assert(first_buffer->size != 0 && last_buffer->size != 0);
   Cycles first_cycles = first_buffer->data[0].cycles;
   Cycles last_cycles = last_buffer->data[last_buffer->size - 1].cycles;
   if (cycles <= first_cycles) {
     /* At or past the beginning. */
-    JoypadSearchResult result;
     result.buffer = first_buffer;
     result.state = &first_buffer->data[0];
     return result;
   } else if (cycles >= last_cycles) {
     /* At or past the end. */
-    JoypadSearchResult result;
     result.buffer = last_buffer;
     result.state = &last_buffer->data[last_buffer->size - 1];
     return result;
@@ -318,13 +339,24 @@ static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
     while (cycles >= buffer->data[buffer->size - 1].cycles) {
       buffer = buffer->next;
     }
+    result.buffer = buffer;
   } else {
     /* Closer to the end. */
     JoypadBuffer* buffer = last_buffer;
     while (cycles < buffer->data[buffer->size - 1].cycles) {
       buffer = buffer->next;
     }
+    result.buffer = buffer;
   }
+
+  JoypadState* begin = result.buffer->data;
+  JoypadState* end = begin + result.buffer->size;
+  LOWER_BOUND(JoypadState, lower_bound, begin, end, cycles, GET_CYCLES);
+  assert(lower_bound != NULL);  // The buffer should not be empty.
+
+  result.state = lower_bound;
+  assert(result.state->cycles <= cycles);
+  return result;
 }
 
 static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
@@ -356,30 +388,55 @@ static void host_init_joypad(Host* host, struct Emulator* e) {
   host_store_joypad(host, &host->last_joypad_buttons);
 }
 
+static Result alloc_emulator_state(Host* host) {
+  struct Emulator* e = host_get_emulator(host);
+  EmulatorStateBuffer* sb = &host->state_buffer;
+  if (!sb->first_free) {
+    /* TODO: Pick a state to free. */
+    return ERROR;
+  }
+
+  sb->num_states++;
+  EmulatorStateFreeListNode* node = sb->first_free;
+  sb->first_free = node->next;
+  assert(node->index < sb->max_states);
+  EmulatorStateInfo* info = &sb->state_info[node->index];
+  info->cycles = emulator_get_cycles(e);
+  info->file_data.data = (void*)node;
+  info->file_data.size = s_emulator_state_size;
+  return emulator_write_state(e, &info->file_data);
+}
+
 static void host_init_emulator_state_buffer(Host* host) {
   typedef EmulatorStateFreeListNode FreeListNode;
 
   size_t capacity = host->init.emulator_state_buffer_capacity;
-  size_t max_states = capacity / s_emulator_state_size;
-  char* data = malloc(capacity);
-  host->state_buffer.capacity = capacity;
-  host->state_buffer.data = data;
-  host->state_buffer.first_free = (EmulatorStateFreeListNode*)data;
-  host->state_buffer.num_states = 0;
-  host->state_buffer.max_states = max_states;
-  host->state_buffer.state_info =
-      malloc(sizeof(EmulatorStateInfo) * max_states);
-  host->state_buffer.frames_until_next_state =
-      host->init.frames_per_emulator_state;
+  if (capacity > 0) {
+    size_t max_states = capacity / s_emulator_state_size;
+    char* data = malloc(capacity);
+    host->state_buffer.capacity = capacity;
+    host->state_buffer.data = data;
+    host->state_buffer.first_free = (EmulatorStateFreeListNode*)data;
+    host->state_buffer.num_states = 0;
+    host->state_buffer.max_states = max_states;
+    host->state_buffer.state_info =
+        malloc(sizeof(EmulatorStateInfo) * max_states);
+    host->state_buffer.frames_until_next_state =
+        host->init.frames_per_emulator_state;
 
-  size_t i;
-  FreeListNode* last = NULL;
-  for (i = max_states; i > 0; i--) {
-    FreeListNode* node =
-        (FreeListNode*)(data + (i - 1) * s_emulator_state_size);
-    node->index = i - 1;
-    node->next = last;
-    last = node;
+    size_t i;
+    FreeListNode* last = NULL;
+    for (i = max_states; i > 0; i--) {
+      FreeListNode* node =
+          (FreeListNode*)(data + (i - 1) * s_emulator_state_size);
+      node->index = i - 1;
+      node->next = last;
+      last = node;
+    }
+
+    /* Write the initial state for convenience. */
+    Result result = alloc_emulator_state(host);
+    assert(SUCCESS(result));
   }
 }
 
@@ -394,24 +451,6 @@ Result host_init(Host* host, struct Emulator* e) {
   host->last_cycles = emulator_get_cycles(e);
   return OK;
   ON_ERROR_RETURN;
-}
-
-static Result alloc_emulator_state(Host* host) {
-  struct Emulator* e = host_get_emulator(host);
-  EmulatorStateBuffer* sb = &host->state_buffer;
-  if (!sb->first_free) {
-    /* TODO: Pick a state to free. */
-    return ERROR;
-  }
-
-  sb->num_states++;
-  EmulatorStateFreeListNode* node = sb->first_free;
-  sb->first_free = node->next;
-  EmulatorStateInfo* info = &sb->state_info[node->index];
-  info->cycles = emulator_get_cycles(e);
-  info->file_data.data = (void*)node;
-  info->file_data.size = s_emulator_state_size;
-  return emulator_write_state(e, &info->file_data);
 }
 
 static void host_handle_event(Host* host, EmulatorEvent event) {
@@ -619,22 +658,12 @@ Cycles host_last_cycles(Host* host) {
 }
 
 static EmulatorStateInfo* host_find_state(Host* host, Cycles cycles) {
-  u32 start = 0;                            // Inclusive.
-  u32 end = host->state_buffer.num_states;  // Exclusive.
-  while (end - start >= 2) {
-    u32 mid = (end - start) / 2;
-    EmulatorStateInfo* info = &host->state_buffer.state_info[mid];
-    if (info->cycles == cycles) {
-      break;
-    } else if (info->cycles < cycles) {
-      end = mid;
-    } else {
-      start = mid + 1;
-    }
-  }
-  EmulatorStateInfo* info = &host->state_buffer.state_info[start];
-  assert(info->cycles <= cycles);
-  return info;
+  EmulatorStateInfo* begin = host->state_buffer.state_info;
+  EmulatorStateInfo* end = begin + host->state_buffer.num_states;
+  LOWER_BOUND(EmulatorStateInfo, lower_bound, begin, end, cycles, GET_CYCLES);
+  assert(lower_bound != NULL);
+  assert(lower_bound->cycles <= cycles);
+  return lower_bound;
 }
 
 Cycles host_seek_to_cycles(Host* host, Cycles cycles, f64 timeout_ms) {
