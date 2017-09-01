@@ -907,6 +907,9 @@ static Result get_cart_info(FileData* file_data, size_t offset,
             "Invalid ROM size code: %u", cart_info->rom_size);
   u32 rom_byte_size = s_rom_bank_count[cart_info->rom_size] << ROM_BANK_SHIFT;
   cart_info->size = rom_byte_size;
+  CHECK_MSG(file_data->size >= offset + rom_byte_size,
+            "File size too small (required %ld, got %ld)\n",
+            (long)(offset + rom_byte_size), (long)file_data->size);
 
   cart_info->cgb_flag = data[CGB_FLAG_ADDR];
   cart_info->sgb_flag = data[SGB_FLAG_ADDR];
@@ -3529,9 +3532,10 @@ u32 audio_buffer_get_frames(AudioBuffer* audio_buffer) {
 }
 
 static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
-  CHECK_MSG(file_data->size >= MINIMUM_ROM_SIZE,
-            "size (%ld) < minimum rom size (%lu).\n", (long)file_data->size,
-            (long)MINIMUM_ROM_SIZE);
+  CHECK_MSG(file_data->size > 0, "File is empty.\n");
+  CHECK_MSG((file_data->size & (MINIMUM_ROM_SIZE - 1)) == 0,
+            "File size (%ld) should be a multiple of minimum rom size (%ld).\n",
+            (long)file_data->size, (long)MINIMUM_ROM_SIZE);
   e->file_data = *file_data;
   return OK;
   ON_ERROR_RETURN;
