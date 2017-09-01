@@ -339,6 +339,7 @@ class Debugger {
   void DisassemblyWindow();
   void MemoryWindow();
   void RewindWindow();
+  void ROMWindow();
 
   void BeginRewind();
   void EndRewind();
@@ -369,6 +370,7 @@ class Debugger {
   RunState run_state;
 
   TileImage tiledata_image;
+  HostTexture* rom_texture;
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
@@ -390,6 +392,7 @@ class Debugger {
   bool disassembly_window_open = true;
   bool memory_window_open = true;
   bool rewind_window_open = true;
+  bool rom_window_open = true;
 };
 
 Debugger::Debugger() {
@@ -442,6 +445,11 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   }
 
   tiledata_image.Init(host);
+
+  int rom_texture_width = ??;
+  int rom_texture_height = ??;
+  rom_texture = host_create_texture(host, rom_texture_width, rom_texture_height,
+                                    HOST_TEXTURE_FORMAT_U8);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
@@ -511,6 +519,7 @@ void Debugger::Run() {
       MapWindow();
       DisassemblyWindow();
       MemoryWindow();
+      ROMWindow();
       ImGui::EndWorkspace();
     }
 
@@ -664,6 +673,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Disassembly", NULL, &disassembly_window_open);
       ImGui::MenuItem("Memory", NULL, &memory_window_open);
       ImGui::MenuItem("Rewind", NULL, &rewind_window_open);
+      ImGui::MenuItem("ROM", NULL, &rom_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMenuBar();
@@ -1274,6 +1284,15 @@ void Debugger::RewindWindow() {
     ImGui::Dummy(ImVec2(w, h));
   }
   ImGui::EndDock();
+}
+
+void Debugger::ROMWindow() {
+  if (rom_window_open) {
+    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiSetCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(500, 1000), ImGuiSetCond_FirstUseEver);
+    if (ImGui::Begin("ROM", &disassembly_window_open)) {
+    }
+  }
 }
 
 void Debugger::BeginRewind() {
