@@ -34,6 +34,7 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   };
 
   static const char* s_vertex_shader =
+      "#version 130\n"
       "attribute vec2 aPos;\n"
       "attribute vec2 aTexCoord;\n"
       "varying vec2 vTexCoord;\n"
@@ -43,6 +44,7 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
       "}\n";
 
   static const char* s_fragment_shader =
+      "#version 130\n"
       "varying vec2 vTexCoord;\n"
       "uniform int uUsePalette;\n"
       "uniform vec4 uPalette[4];\n"

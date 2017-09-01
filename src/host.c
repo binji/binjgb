@@ -43,6 +43,12 @@ typedef u16 HostAudioSample;
 #define JOYPAD_BUFFER_DEFAULT_CAPACITY 4096
 
 typedef struct {
+  GLint internal_format;
+  GLenum format;
+  GLenum type;
+} GLTextureFormat;
+
+typedef struct {
   Cycles cycles;
   u8 buttons;
   u8 padding[3];
@@ -404,6 +410,8 @@ void host_enable_palette(struct Host* host, Bool enabled) {
 }
 
 static u32 next_power_of_two(u32 n) {
+  assert(n != 0);
+  n--;
   n |= n >> 1;
   n |= n >> 2;
   n |= n >> 4;
@@ -416,10 +424,28 @@ HostTexture* host_get_frame_buffer_texture(struct Host* host) {
   return host->fb_texture;
 }
 
-static GLenum host_get_gl_internal_texture_format(HostTextureFormat format) {
-  assert(format == HOST_TEXTURE_FORMAT_RGBA ||
-         format == HOST_TEXTURE_FORMAT_U8);
-  return format == HOST_TEXTURE_FORMAT_RGBA ? 4 : 1;
+static GLTextureFormat host_apply_texture_format(HostTextureFormat format) {
+  GLTextureFormat result;
+  switch (format) {
+    case HOST_TEXTURE_FORMAT_RGBA:
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+      result.internal_format = GL_RGBA8;
+      result.format = GL_RGBA;
+      result.type = GL_UNSIGNED_BYTE;
+      break;
+
+    case HOST_TEXTURE_FORMAT_U8:
+      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+      result.internal_format = GL_R8;
+      result.format = GL_RED;
+      result.type = GL_UNSIGNED_BYTE;
+      break;
+
+    default:
+      assert(0);
+  }
+
+  return result;
 }
 
 HostTexture* host_create_texture(struct Host* host, int w, int h,
@@ -428,12 +454,12 @@ HostTexture* host_create_texture(struct Host* host, int w, int h,
   texture->width = next_power_of_two(w);
   texture->height = next_power_of_two(h);
 
-  GLenum internal_format = host_get_gl_internal_texture_format(format);
   GLuint handle;
   glGenTextures(1, &handle);
   glBindTexture(GL_TEXTURE_2D, handle);
-  glTexImage2D(GL_TEXTURE_2D, 0, internal_format, texture->width,
-               texture->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  GLTextureFormat gl_format = host_apply_texture_format(format);
+  glTexImage2D(GL_TEXTURE_2D, 0, gl_format.internal_format, texture->width,
+               texture->height, 0, gl_format.format, gl_format.type, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
@@ -447,8 +473,9 @@ void host_upload_texture(struct Host* host, HostTexture* texture, int w, int h,
   assert(w <= texture->width);
   assert(h <= texture->height);
   glBindTexture(GL_TEXTURE_2D, texture->handle);
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE,
-                  data);
+  GLTextureFormat gl_format = host_apply_texture_format(texture->format);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, gl_format.format,
+                  gl_format.type, data);
 }
 
 void host_destroy_texture(struct Host* host, HostTexture* texture) {

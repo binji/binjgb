@@ -113,6 +113,7 @@ Result HostUI::init() {
 
 Result HostUI::init_gl() {
   static const char* s_vertex_shader =
+      "#version 130\n"
       "attribute vec2 aPos;\n"
       "attribute vec2 aUV;\n"
       "attribute vec4 aColor;\n"
@@ -126,6 +127,7 @@ Result HostUI::init_gl() {
       "}\n";
 
   static const char* s_fragment_shader =
+      "#version 130\n"
       "varying vec2 vUV;\n"
       "varying vec4 vColor;\n"
       "uniform int uUsePalette;\n"
