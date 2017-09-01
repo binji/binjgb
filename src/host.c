@@ -513,6 +513,10 @@ HostTexture* host_create_texture(Host* host, int w, int h,
   GLTextureFormat gl_format = host_apply_texture_format(format);
   glTexImage2D(GL_TEXTURE_2D, 0, gl_format.internal_format, texture->width,
                texture->height, 0, gl_format.format, gl_format.type, NULL);
+  GLenum error = glGetError();
+  if (error) {
+    printf("host_create_texture = %d\n", error);
+  }
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
@@ -529,6 +533,10 @@ void host_upload_texture(Host* host, HostTexture* texture, int w, int h,
   GLTextureFormat gl_format = host_apply_texture_format(texture->format);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, gl_format.format,
                   gl_format.type, data);
+  GLenum error = glGetError();
+  if (error) {
+    printf("host_upload_texture  = %d\n", error);
+  }
 }
 
 void host_destroy_texture(Host* host, HostTexture* texture) {

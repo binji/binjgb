@@ -134,7 +134,7 @@ Result HostUI::init_gl() {
       "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
       "void main(void) {\n"
-      "  vec4 color = vColor * texture2D(uSampler, vUV);\n"
+      "  vec4 color = vColor * texture(uSampler, vUV);\n"
       "  if (uUsePalette != 0) {\n"
       "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
       "  }\n"

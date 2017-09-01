@@ -104,6 +104,8 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
 static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
+static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
+                             u32 rom_addr, u8 value);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
@@ -275,7 +277,50 @@ void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
   write_u8_raw(e, addr, value);
 }
 
+// Store as 1-1 mapping of bytes, low 2 bits used only.
+typedef enum {
+  ROM_USAGE_CODE = 1,
+  ROM_USAGE_DATA = 2,
+} RomUsage;
+static u8 s_rom_usage[MAXIMUM_ROM_SIZE];
+
+static inline void mark_rom_usage(u32 rom_addr, RomUsage usage) {
+  assert(rom_addr < ARRAY_SIZE(s_rom_usage));
+  s_rom_usage[rom_addr] |= usage;
+}
+
+u8* emulator_get_rom_usage(struct Emulator* e) {
+  return s_rom_usage;
+}
+
+void emulator_clear_rom_usage(struct Emulator* e) {
+  // memset(s_rom_usage, 3, sizeof(s_rom_usage));
+  memset(s_rom_usage, 3, 128 * 256);
+}
+
+void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
+                      u8 value) {
+  mark_rom_usage(rom_addr, ROM_USAGE_DATA);
+}
+
+static void mark_rom_usage_for_pc(struct Emulator* e) {
+  MemoryTypeAddressPair pair = map_address(e->state.reg.PC);
+  u32 rom_addr = 0;
+  switch (pair.type) {
+    case MEMORY_MAP_ROM0:
+    case MEMORY_MAP_ROM1:
+      rom_addr = e->state.memory_map_state.rom_base[pair.type] | pair.addr;
+      break;
+
+    default:
+      return;
+  }
+  mark_rom_usage(rom_addr, ROM_USAGE_CODE);
+}
+
 void HOOK_emulator_step(Emulator* e, const char* func_name) {
+  mark_rom_usage_for_pc(e);
+
   if (s_trace && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
            REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
@@ -355,6 +400,10 @@ void emulator_print_log_systems(void) {
   for (i = 0; i < NUM_LOG_SYSTEMS; ++i) {
     PRINT_ERROR("  %s\n", emulator_get_log_system_name(i));
   }
+}
+
+int emulator_get_rom_size(struct Emulator* e) {
+  return s_rom_bank_count[e->cart_info->rom_size] << ROM_BANK_SHIFT;
 }
 
 TileDataSelect emulator_get_tile_data_select(struct Emulator* e) {

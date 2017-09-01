@@ -1534,7 +1534,9 @@ static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair) {
     case MEMORY_MAP_ROM1: {
       u32 rom_addr = MMAP_STATE.rom_base[pair.type] | pair.addr;
       assert(rom_addr < e->cart_info->size);
-      return e->cart_info->data[rom_addr];
+      u8 value = e->cart_info->data[rom_addr];
+      HOOK(read_rom_ib, rom_addr, value);
+      return value;
     }
     case MEMORY_MAP_VRAM:
       return read_vram(e, pair.addr);

@@ -88,6 +88,10 @@ const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 void emulator_print_log_systems();
 
+int emulator_get_rom_size(struct Emulator*);
+u8* emulator_get_rom_usage(struct Emulator*);
+void emulator_clear_rom_usage(struct Emulator* e);
+
 int emulator_opcode_bytes(struct Emulator*, Address);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
 Registers emulator_get_registers(struct Emulator*);
