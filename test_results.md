@@ -35,6 +35,8 @@
 | acceptance/gpu/intr\_2\_mode0\_timing\_sprites | :ok: |
 | acceptance/gpu/intr\_2\_mode3\_timing | :ok: |
 | acceptance/gpu/intr\_2\_oam\_ok\_timing | :ok: |
+| acceptance/gpu/lcdon\_timing-dmgABCXmgbS | :x: |
+| acceptance/gpu/lcdon\_write\_timing-GS | :x: |
 | acceptance/gpu/stat\_irq\_blocking | :ok: |
 | acceptance/gpu/vblank\_stat\_intr-GS | :ok: |
 | acceptance/halt\_ime0\_ei | :ok: |
@@ -42,6 +44,7 @@
 | acceptance/halt\_ime1\_timing | :ok: |
 | acceptance/halt\_ime1\_timing2-GS | :ok: |
 | acceptance/if\_ie\_registers | :ok: |
+| acceptance/interrupts/ie\_push | :x: |
 | acceptance/intr\_timing | :ok: |
 | acceptance/jp\_cc\_timing | :ok: |
 | acceptance/jp\_timing | :ok: |
@@ -70,6 +73,15 @@
 | acceptance/timer/tima\_reload | :ok: |
 | acceptance/timer/tima\_write\_reloading | :ok: |
 | acceptance/timer/tma\_write\_reloading | :ok: |
+| emulator-only/mbc1/multicart\_rom\_8Mb | :x: |
+| emulator-only/mbc1/ram\_256Kb | :ok: |
+| emulator-only/mbc1/ram\_64Kb | :x: |
+| emulator-only/mbc1/rom\_16Mb | :x: |
+| emulator-only/mbc1/rom\_1Mb | :ok: |
+| emulator-only/mbc1/rom\_2Mb | :ok: |
+| emulator-only/mbc1/rom\_4Mb | :ok: |
+| emulator-only/mbc1/rom\_512Kb | :ok: |
+| emulator-only/mbc1/rom\_8Mb | :x: |
 | manual-only/sprite\_priority | :ok: |
 
 [Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):

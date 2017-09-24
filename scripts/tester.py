@@ -136,8 +136,8 @@ def MDTestName(rom, prefix):
   name = name.replace('_', '\\_')
   return name
 
-def MDTestResult(ok):
-  return ':ok:' if ok else ':x:'
+def MDTestResult(passed):
+  return ':ok:' if passed else ':x:'
 
 def SuiteHeader(out_file, name, url):
   out_file.write('%s:\n\n' % MDLink(name, url))
@@ -149,7 +149,7 @@ def Suite(out_file, results, suite, prefix):
     if result.test.suite != suite:
       continue
     name = MDTestName(result.test.rom, prefix)
-    out_file.write(MDTableRow(name, MDTestResult(result.ok)))
+    out_file.write(MDTableRow(name, MDTestResult(result.passed)))
   out_file.write('\n')
 
 def GenerateTestResults(results):
