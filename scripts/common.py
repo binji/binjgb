@@ -3,6 +3,7 @@
 # This software may be modified and distributed under the terms
 # of the MIT license.  See the LICENSE file for details.
 #
+from __future__ import print_function
 import fnmatch
 import os
 import hashlib
@@ -15,6 +16,7 @@ BIN_DIR = os.path.join(ROOT_DIR, 'bin')
 OUT_DIR = os.path.join(ROOT_DIR, 'out')
 ROM_DIR = os.path.join(ROOT_DIR, 'rom')
 TEST_DIR = os.path.join(ROOT_DIR, 'test')
+THIRD_PARTY_DIR = os.path.join(ROOT_DIR, 'third_party')
 TESTER = os.path.join(BIN_DIR, 'binjgb-tester')
 
 
@@ -22,13 +24,19 @@ class Error(Exception):
   pass
 
 
-def Run(exe, *args):
+def Run(exe, *args, **kwargs):
+  cwd = kwargs.get('cwd')
   cmd = [exe] + list(args)
-  # print('Running:', ' '.join(cmd))
+
+  if kwargs.get('verbose', False):
+    print('>', ' '.join(cmd), '[cwd = %s]' % cwd if cwd is not None else '')
+
   basename = os.path.basename(exe)
   try:
+    env = kwargs.get('env')
     PIPE = subprocess.PIPE
-    process = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    process = subprocess.Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE,
+                               cwd=cwd, env=env)
     stdout, stderr = process.communicate()
     if process.returncode != 0:
       raise Error('Error running "%s":\n%s' % (basename, stderr.decode('ascii')))

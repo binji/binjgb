@@ -26,7 +26,8 @@ UNKNOWN = '[?]  '
 
 Test = collections.namedtuple('Test', ['suite', 'rom', 'frames', 'hash'])
 TestResult = collections.namedtuple('TestResult',
-                                    ['test', 'ok', 'message', 'duration'])
+                                    ['test', 'passed', 'ok', 'message',
+                                     'duration'])
 
 
 def RunTest(test, options):
@@ -45,7 +46,8 @@ def RunTest(test, options):
       expected = test.hash
 
     message = ''
-    if actual == expected:
+    ok = actual == expected
+    if ok:
       if expect_fail and options.verbose > 0:
         message = FAIL + test.rom
       elif options.verbose > 1:
@@ -56,13 +58,13 @@ def RunTest(test, options):
       else:
         message = FAIL + '%s => %s' % (test.rom, actual)
 
-    ok = actual == expected and not expect_fail
+    passed = ok and not expect_fail
     duration = time.time() - start_time
-    return TestResult(test, ok, message, duration)
+    return TestResult(test, passed, ok, message, duration)
   except (common.Error, KeyboardInterrupt) as e:
     duration = time.time() - start_time
     message = FAIL + '%s => %s' % (test.rom, str(e))
-    return TestResult(test, False, message, duration)
+    return TestResult(test, False, False, message, duration)
 
 
 last_message_len = 0
@@ -159,11 +161,11 @@ def GenerateTestResults(results):
     {'name': 'Gekkio\'s mooneye-gb tests',
      'url': 'https://github.com/Gekkio/mooneye-gb',
      'suite': 'mooneye',
-     'prefix': 'test/mooneye-gb/tests/build/'},
+     'prefix': 'test/mooneye-gb/build/'},
     {'name': 'Wilbert Pol\'s mooneye-gb tests',
      'url': 'https://github.com/wilbertpol/mooneye-gb',
      'suite': 'wilbertpol',
-     'prefix': 'test/mooneye-gb/tests/build/'},
+     'prefix': 'test/mooneye-gb-wp/build/'},
   ]
 
   with open(TEST_RESULTS_MD, 'w') as out_file:
@@ -199,16 +201,15 @@ def main(args):
   duration = time.time() - start_time
   PrintReplace('total time: %.3fs' % duration, newline=True)
 
-  passed = sum(1 for result in results if result.ok)
+  ok = sum(1 for result in results if result.ok)
+  passed = sum(1 for result in results if result.passed)
   completed = len(results)
   print('Passed %d/%d' % (passed, completed))
 
   if options.generate:
     GenerateTestResults(results)
 
-  if passed == completed:
-    return 0
-  return 1
+  return 0 if ok == completed else 1
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1:]))

@@ -1,6 +1,8 @@
 /bin
 /out
-/test
+/test/mooneye-gb
+/test/mooneye-gb-wp
+/third_party/wla-dx
 *.gb
 __pycache__
 *.pyc

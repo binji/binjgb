@@ -1,22 +1,25 @@
+language: c
 script:
   - cmake . -DCMAKE_BUILD_TYPE=$CONFIG
   - cmake --build . --config %CONFIG%
+  - python scripts/build_tests.py
+  - python scripts/tester.py -vv --exe ./binjgb-tester
 
 matrix:
   include:
     - os: linux
       dist: trusty
-      sudo: required
+      sudo: false
       compiler: gcc
       env: CONFIG=Release
     - os: linux
       dist: trusty
-      sudo: required
+      sudo: false
       compiler: clang
       env: CONFIG=Debug
     - os: linux
       dist: trusty
-      sudo: required
+      sudo: false
       compiler: clang
       env: CONFIG=Release
     - os: osx

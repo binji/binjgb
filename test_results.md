@@ -4,12 +4,12 @@
 
 | Test | Result |
 | --- | --- |
-| cpu\_instrs/cpu\_instrs | :ok: |
-| dmg\_sound-2/dmg\_sound | :ok: |
+| cpu\_instrs | :ok: |
+| dmg\_sound | :ok: |
 | halt\_bug | :ok: |
-| instr\_timing/instr\_timing | :ok: |
-| mem\_timing-2/mem\_timing | :ok: |
-| oam\_bug-2/oam\_bug | :x: |
+| instr\_timing | :ok: |
+| mem\_timing | :ok: |
+| oam\_bug | :x: |
 
 [Gekkio's mooneye-gb tests](https://github.com/Gekkio/mooneye-gb):
 
@@ -70,7 +70,6 @@
 | acceptance/timer/tima\_reload | :ok: |
 | acceptance/timer/tima\_write\_reloading | :ok: |
 | acceptance/timer/tma\_write\_reloading | :ok: |
-| emulator-only/mbc1\_rom\_4banks | :ok: |
 | manual-only/sprite\_priority | :ok: |
 
 [Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):
