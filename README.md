@@ -118,10 +118,8 @@ Keys:
 
 ## Running tests
 
-You'll have to get the various test suites below, build the `.gb` files if
-necessary, and copy the results to the appropriate directories. See
-`scripts/tester.py` for the expected locations. Probably should write a script
-that does this automatically.
+Run `scripts/build_tests.py` to download and build the necessary testsuites.
+This works on Linux and Mac, not sure about Windows.
 
 `scripts/tester.py` will only run the tests that match a filter passed on the
 command line. Some examples:
