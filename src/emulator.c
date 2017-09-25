@@ -3062,24 +3062,83 @@ static u8 s_opcode_bytes[] = {
 #define XOR_MR(MR) RA ^= READMR(MR); XOR_FLAGS
 #define XOR_N RA ^= READ_N; XOR_FLAGS
 
+static void dispatch_interrupt(Emulator* e) {
+  if (!(INTR(IME) || INTR(halt))) {
+    return;
+  }
+
+  Bool was_halt = INTR(halt);
+  INTR(halt) = INTR(stop) = INTR(IME) = FALSE;
+
+  /* Write MSB of PC. */
+  RSP--; WRITE8(RSP, REG(PC) >> 8);
+
+  /* Now check which interrupt to raise, after having written the MSB of PC.
+   * This behavior is needed to pass the ie_push mooneye-gb test. */
+  u8 interrupt = INTR(new_IF) & INTR(IE) & IF_ALL;
+
+  Bool delay = FALSE;
+  u8 mask = 0;
+  Address vector = 0;
+  if (interrupt & IF_VBLANK) {
+    HOOK(vblank_interrupt_i, e->state.ppu.frame);
+    vector = 0x40;
+    mask = IF_VBLANK;
+  } else if (interrupt & IF_STAT) {
+    HOOK(stat_interrupt_cccc, e->state.ppu.STAT.y_compare.irq ? 'Y' : '.',
+         e->state.ppu.STAT.mode2.irq ? 'O' : '.',
+         e->state.ppu.STAT.vblank.irq ? 'V' : '.',
+         e->state.ppu.STAT.hblank.irq ? 'H' : '.');
+    vector = 0x48;
+    mask = IF_STAT;
+  } else if (interrupt & IF_TIMER) {
+    HOOK0(timer_interrupt_v);
+    vector = 0x50;
+    mask = IF_TIMER;
+    delay = was_halt;
+  } else if (interrupt & IF_SERIAL) {
+    HOOK0(serial_interrupt_v);
+    vector = 0x58;
+    mask = IF_SERIAL;
+  } else if (interrupt & IF_JOYPAD) {
+    HOOK0(joypad_interrupt_v);
+    vector = 0x60;
+    mask = IF_JOYPAD;
+  } else {
+    /* Interrupt was canceled. */
+    vector = 0;
+    mask = 0;
+  }
+
+  INTR(new_IF) &= ~mask;
+
+  /* Now write the LSB of PC. */
+  RSP--; WRITE8(RSP, REG(PC));
+  REG(PC) = vector;
+
+  if (delay) {
+    mcycle(e);
+  }
+  mcycle(e);
+  mcycle(e);
+}
+
 static void execute_instruction(Emulator* e) {
   s8 s;
   u8 u, c, opcode;
   u16 u16;
   Address new_pc;
 
-  if (INTR(stop)) {
+  Bool should_dispatch =
+      (INTR(IME) || INTR(halt)) && ((INTR(new_IF) & INTR(IE) & IF_ALL) != 0);
+
+  if (INTR(stop) && !should_dispatch) {
     return;
   }
 
   if (INTR(enable)) {
     INTR(enable) = FALSE;
     INTR(IME) = TRUE;
-  }
-
-  if (INTR(halt)) {
-    mcycle(e);
-    return;
   }
 
   if (INTR(halt_bug)) {
@@ -3091,6 +3150,21 @@ static void execute_instruction(Emulator* e) {
   } else {
     opcode = read_u8_cy(e, e->state.reg.PC);
   }
+
+  if (should_dispatch) {
+    if (INTR(halt_DI)) {
+      HOOK0(interrupt_during_halt_di_v);
+      INTR(halt) = INTR(halt_DI) = FALSE;
+    } else {
+      dispatch_interrupt(e);
+      return;
+    }
+  }
+
+  if (INTR(halt)) {
+    return;
+  }
+
   new_pc = e->state.reg.PC + s_opcode_bytes[opcode];
 
 #define REG_OPS(code, name)            \
@@ -3294,75 +3368,9 @@ static void execute_instruction(Emulator* e) {
   e->state.reg.PC = new_pc;
 }
 
-static void handle_interrupts(Emulator* e) {
-  if (!(e->state.interrupt.IME || e->state.interrupt.halt)) {
-    return;
-  }
-
-  u8 interrupt =
-      e->state.interrupt.new_IF & e->state.interrupt.IE & IF_ALL;
-  if (interrupt == 0) {
-    return;
-  }
-
-  Bool delay = FALSE;
-  u8 mask = 0;
-  Address vector = 0;
-  if (interrupt & IF_VBLANK) {
-    HOOK(vblank_interrupt_i, e->state.ppu.frame);
-    vector = 0x40;
-    mask = IF_VBLANK;
-  } else if (interrupt & IF_STAT) {
-    HOOK(stat_interrupt_cccc, e->state.ppu.STAT.y_compare.irq ? 'Y' : '.',
-         e->state.ppu.STAT.mode2.irq ? 'O' : '.',
-         e->state.ppu.STAT.vblank.irq ? 'V' : '.',
-         e->state.ppu.STAT.hblank.irq ? 'H' : '.');
-    vector = 0x48;
-    mask = IF_STAT;
-#if 0
-    /* I'm pretty sure this is right, but it currently breaks a lot of tests;
-     * need to figure out how to fix the rest of the tests to handle this extra
-     * delay. */
-    delay = e->state.interrupt.halt && e->state.ppu.STAT.mode2.irq;
-#endif
-  } else if (interrupt & IF_TIMER) {
-    HOOK0(timer_interrupt_v);
-    vector = 0x50;
-    mask = IF_TIMER;
-    delay = e->state.interrupt.halt;
-  } else if (interrupt & IF_SERIAL) {
-    HOOK0(serial_interrupt_v);
-    vector = 0x58;
-    mask = IF_SERIAL;
-  } else if (interrupt & IF_JOYPAD) {
-    HOOK0(joypad_interrupt_v);
-    vector = 0x60;
-    mask = IF_JOYPAD;
-  }
-
-  if (delay) {
-    mcycle(e);
-  }
-
-  if (e->state.interrupt.halt_DI) {
-    HOOK0(interrupt_during_halt_di_v);
-    INTR(halt_DI) = FALSE;
-  } else {
-    e->state.interrupt.new_IF &= ~mask;
-    Address new_pc = REG(PC);
-    CALL(vector);
-    REG(PC) = new_pc;
-    e->state.interrupt.IME = FALSE;
-    mcycle(e);
-    mcycle(e);
-  }
-  e->state.interrupt.halt = e->state.interrupt.stop = FALSE;
-}
-
 static void emulator_step_internal(Emulator* e) {
   HOOK0(emulator_step);
   execute_instruction(e);
-  handle_interrupts(e);
 }
 
 EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {

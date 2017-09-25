@@ -44,7 +44,7 @@
 | acceptance/halt\_ime1\_timing | :ok: |
 | acceptance/halt\_ime1\_timing2-GS | :ok: |
 | acceptance/if\_ie\_registers | :ok: |
-| acceptance/interrupts/ie\_push | :x: |
+| acceptance/interrupts/ie\_push | :ok: |
 | acceptance/intr\_timing | :ok: |
 | acceptance/jp\_cc\_timing | :ok: |
 | acceptance/jp\_timing | :ok: |

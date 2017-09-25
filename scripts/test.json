@@ -35,7 +35,7 @@
   ["mooneye", "test/mooneye-gb/build/acceptance/halt_ime1_timing2-GS.gb", 9, "7288573b156b9f6620829d43966fa87085e61315"],
   ["mooneye", "test/mooneye-gb/build/acceptance/halt_ime1_timing.gb", 1, "be5d42552c3bf9135e415dbe2e5933b2b4814ab5"],
   ["mooneye", "test/mooneye-gb/build/acceptance/if_ie_registers.gb", 1, "a73f7b6492b660632a8a2235c474aa60bb22cfc0"],
-  ["mooneye", "test/mooneye-gb/build/acceptance/interrupts/ie_push.gb", 1, "!066f07cc221f19d6463bf745d3971e74c66ad102"],
+  ["mooneye", "test/mooneye-gb/build/acceptance/interrupts/ie_push.gb", 1, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
   ["mooneye", "test/mooneye-gb/build/acceptance/intr_timing.gb", 1, "178dadbb3e7baa04148a73423a1815adc54649da"],
   ["mooneye", "test/mooneye-gb/build/acceptance/jp_cc_timing.gb", 4, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
   ["mooneye", "test/mooneye-gb/build/acceptance/jp_timing.gb", 4, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
