@@ -301,7 +301,8 @@ SetLogLevelError emulator_set_log_level_from_string(const char* s) {
   }
 
   LogSystem system = NUM_LOG_SYSTEMS;
-  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+  int i;
+  for (i = 0; i < NUM_LOG_SYSTEMS; ++i) {
     const char* name = emulator_get_log_system_name(i);
     if (strncmp(log_system_name, name, strlen(name)) == 0) {
       system = i;
@@ -340,7 +341,8 @@ LogLevel emulator_get_log_level(LogSystem system) {
 
 void emulator_print_log_systems(void) {
   PRINT_ERROR("valid log systems:\n");
-  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+  int i;
+  for (i = 0; i < NUM_LOG_SYSTEMS; ++i) {
     PRINT_ERROR("  %s\n", emulator_get_log_system_name(i));
   }
 }
