@@ -1240,8 +1240,30 @@ static Result init_memory_map(Emulator* e) {
   return OK;
 }
 
+static Bool is_almost_mode3(Emulator* e) {
+  return PPU.state_cycles == 4 && STAT.mode == PPU_MODE_MODE2;
+}
+
+static Bool is_using_vram(Emulator* e, Bool write) {
+  if (write) {
+    return STAT.mode == PPU_MODE_MODE3;
+  } else {
+    return STAT.mode == PPU_MODE_MODE3 || is_almost_mode3(e);
+  }
+}
+
+static Bool is_using_oam(Emulator* e, Bool write) {
+  if (write) {
+    return (STAT.mode == PPU_MODE_MODE2 && !is_almost_mode3(e)) ||
+           STAT.mode == PPU_MODE_MODE3;
+  } else {
+    return STAT.mode2.trigger || STAT.mode == PPU_MODE_MODE2 ||
+           STAT.mode == PPU_MODE_MODE3;
+  }
+}
+
 static u8 read_vram(Emulator* e, MaskedAddress addr) {
-  if (STAT.mode == PPU_MODE_MODE3) {
+  if (is_using_vram(e, FALSE)) {
     HOOK(read_vram_in_use_a, addr);
     return INVALID_READ_BYTE;
   } else {
@@ -1250,12 +1272,8 @@ static u8 read_vram(Emulator* e, MaskedAddress addr) {
   }
 }
 
-static Bool is_using_oam(Emulator* e) {
-  return STAT.mode == PPU_MODE_MODE2 || STAT.mode == PPU_MODE_MODE3;
-}
-
 static u8 read_oam(Emulator* e, MaskedAddress addr) {
-  if (is_using_oam(e)) {
+  if (is_using_oam(e, FALSE)) {
     HOOK(read_oam_in_use_a, addr);
     return INVALID_READ_BYTE;
   }
@@ -1527,7 +1545,7 @@ u8 read_u8(Emulator* e, Address addr) {
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
-  if (STAT.mode == PPU_MODE_MODE3) {
+  if (is_using_vram(e, TRUE)) {
     HOOK(write_vram_in_use_ab, addr, value);
     return;
   }
@@ -1553,7 +1571,7 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
-  if (is_using_oam(e)) {
+  if (is_using_oam(e, TRUE)) {
     HOOK(write_oam_in_use_ab, addr, value);
     return;
   }
@@ -1722,6 +1740,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       if (was_enabled ^ LCDC.display) {
         STAT.mode = PPU_MODE_HBLANK;
         PPU.ly = PPU.line_y = 0;
+        check_ly_eq_lyc(e, FALSE);
         if (LCDC.display) {
           HOOK0(enable_display_v);
           PPU.state = PPU_STATE_LCD_ON_MODE2;

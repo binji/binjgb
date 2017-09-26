@@ -35,8 +35,8 @@
 | acceptance/gpu/intr\_2\_mode0\_timing\_sprites | :ok: |
 | acceptance/gpu/intr\_2\_mode3\_timing | :ok: |
 | acceptance/gpu/intr\_2\_oam\_ok\_timing | :ok: |
-| acceptance/gpu/lcdon\_timing-dmgABCXmgbS | :x: |
-| acceptance/gpu/lcdon\_write\_timing-GS | :x: |
+| acceptance/gpu/lcdon\_timing-dmgABCXmgbS | :ok: |
+| acceptance/gpu/lcdon\_write\_timing-GS | :ok: |
 | acceptance/gpu/stat\_irq\_blocking | :ok: |
 | acceptance/gpu/vblank\_stat\_intr-GS | :ok: |
 | acceptance/halt\_ime0\_ei | :ok: |
