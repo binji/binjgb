@@ -293,6 +293,30 @@ void emulator_set_log_level(LogSystem system, LogLevel level) {
   s_log_level[system] = level;
 }
 
+SetLogLevelError emulator_set_log_level_from_string(const char* s) {
+  const char* log_system_name = s;
+  const char* equals = strchr(s, '=');
+  if (!equals) {
+    return SET_LOG_LEVEL_ERROR_INVALID_FORMAT;
+  }
+
+  LogSystem system = NUM_LOG_SYSTEMS;
+  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+    const char* name = emulator_get_log_system_name(i);
+    if (strncmp(log_system_name, name, strlen(name)) == 0) {
+      system = i;
+      break;
+    }
+  }
+
+  if (system == NUM_LOG_SYSTEMS) {
+    return SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM;
+  }
+
+  emulator_set_log_level(system, atoi(equals + 1));
+  return SET_LOG_LEVEL_ERROR_NONE;
+}
+
 void emulator_set_trace(Bool trace) {
   s_trace = TRUE;
 }
@@ -312,6 +336,13 @@ const char* emulator_get_log_system_name(LogSystem system) {
 LogLevel emulator_get_log_level(LogSystem system) {
   assert(system < NUM_LOG_SYSTEMS);
   return s_log_level[system];
+}
+
+void emulator_print_log_systems(void) {
+  PRINT_ERROR("valid log systems:\n");
+  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
+    PRINT_ERROR("  %s\n", emulator_get_log_system_name(i));
+  }
 }
 
 TileDataSelect emulator_get_tile_data_select(struct Emulator* e) {

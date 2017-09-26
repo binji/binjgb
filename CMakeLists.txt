@@ -81,7 +81,7 @@ if (NOT EMSCRIPTEN)
   add_executable(binjgb-tester
     src/common.c
     src/options.c
-    src/emulator.c
+    src/emulator-debug.c
     src/tester.c
   )
   install(TARGETS binjgb-tester DESTINATION bin)

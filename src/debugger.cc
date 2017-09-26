@@ -24,14 +24,6 @@
 static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
 
-static void print_log_systems(void) {
-  PRINT_ERROR("valid log systems:\n");
-  for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
-    PRINT_ERROR("  %s\n",
-                emulator_get_log_system_name(static_cast<LogSystem>(i)));
-  }
-}
-
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
@@ -41,7 +33,7 @@ static void usage(int argc, char** argv) {
       "  -l,--log S=N       set log level for system S to N\n\n",
       argv[0]);
 
-  print_log_systems();
+  emulator_print_log_systems();
 }
 
 void parse_arguments(int argc, char** argv) {
@@ -87,34 +79,24 @@ void parse_arguments(int argc, char** argv) {
             s_font_scale = atof(result.value);
             break;
 
-          case 'l': {
-            const char* log_system_name = result.value;
-            const char* equals = strchr(result.value, '=');
-            if (!equals) {
-              PRINT_ERROR("invalid log level format, should be S=N\n");
-              continue;
-            }
+          case 'l':
+            switch (emulator_set_log_level_from_string(result.value)) {
+              case SET_LOG_LEVEL_ERROR_NONE:
+                break;
 
-            LogSystem system = NUM_LOG_SYSTEMS;
-            for (int i = 0; i < NUM_LOG_SYSTEMS; ++i) {
-              const char* name =
-                  emulator_get_log_system_name(static_cast<LogSystem>(i));
-              if (strncmp(log_system_name, name, strlen(name)) == 0) {
-                system = static_cast<LogSystem>(i);
+              case SET_LOG_LEVEL_ERROR_INVALID_FORMAT:
+                PRINT_ERROR("invalid log level format, should be S=N\n");
+                break;
+
+              case SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM: {
+                const char* equals = strchr(result.value, '=');
+                PRINT_ERROR("unknown log system: %.*s\n",
+                            (int)(equals - result.value), result.value);
+                emulator_print_log_systems();
                 break;
               }
             }
-
-            if (system == NUM_LOG_SYSTEMS) {
-              PRINT_ERROR("unknown log system: %.*s\n",
-                          (int)(equals - result.value), result.value);
-              print_log_systems();
-              continue;
-            }
-            emulator_set_log_level(system,
-                                   static_cast<LogLevel>(atoi(equals + 1)));
             break;
-          }
 
           default:
             assert(0);

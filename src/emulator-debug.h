@@ -37,6 +37,12 @@ typedef enum LogLevel {
   LOG_LEVEL_VERBOSE = 3,
 } LogLevel;
 
+typedef enum SetLogLevelError {
+  SET_LOG_LEVEL_ERROR_NONE = 0,
+  SET_LOG_LEVEL_ERROR_INVALID_FORMAT = 1,
+  SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM = 2,
+} SetLogLevelError;
+
 typedef enum PaletteType {
   PALETTE_TYPE_BGP,
   PALETTE_TYPE_OBP0,
@@ -76,9 +82,11 @@ void emulator_set_hooks(struct Emulator*, EmulatorHooks*);
 #endif
 
 void emulator_set_log_level(LogSystem, LogLevel);
+SetLogLevelError emulator_set_log_level_from_string(const char*);
 void emulator_set_trace(Bool trace);
 const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
+void emulator_print_log_systems();
 
 int emulator_opcode_bytes(struct Emulator*, Address);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);

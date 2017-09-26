@@ -9,7 +9,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "emulator.h"
+#include "emulator-debug.h"
 #include "options.h"
 
 #define AUDIO_FREQUENCY 44100
@@ -48,12 +48,16 @@ void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
       "  -h,--help          help\n"
+      "  -t,--trace         trace each instruction\n"
+      "  -l,--log S=N       set log level for system S to N\n"
       "  -i,--input FILE    read controller input from FILE\n"
       "  -f,--frames N      run for N frames (default: %u)\n"
       "  -o,--output FILE   output PPM file to FILE\n"
       "  -a,--animate       output an image every frame\n",
       argv[0],
       DEFAULT_FRAMES);
+
+  emulator_print_log_systems();
 }
 
 static time_t s_start_time;
@@ -69,6 +73,8 @@ static f64 get_time_sec(void) {
 void parse_options(int argc, char**argv) {
   static const Option options[] = {
     {'h', "help", 0},
+    {'t', "trace", 0},
+    {'l', "log", 1},
     {'i', "input", 1},
     {'f', "frames", 1},
     {'o', "output", 1},
@@ -101,6 +107,29 @@ void parse_options(int argc, char**argv) {
         switch (result.option->short_name) {
           case 'h':
             goto error;
+
+          case 't':
+            emulator_set_trace(TRUE);
+            break;
+
+          case 'l':
+            switch (emulator_set_log_level_from_string(result.value)) {
+              case SET_LOG_LEVEL_ERROR_NONE:
+                break;
+
+              case SET_LOG_LEVEL_ERROR_INVALID_FORMAT:
+                PRINT_ERROR("invalid log level format, should be S=N\n");
+                break;
+
+              case SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM: {
+                const char* equals = strchr(result.value, '=');
+                PRINT_ERROR("unknown log system: %.*s\n",
+                            (int)(equals - result.value), result.value);
+                emulator_print_log_systems();
+                break;
+              }
+            }
+            break;
 
           case 'i':
             CHECK_MSG((s_controller_input_file = fopen(result.value, "r")) != 0,
