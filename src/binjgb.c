@@ -21,10 +21,10 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
   HostConfig host_config = host_get_config(ctx->host);
 
   switch (code) {
-    case HOST_KEYCODE_1: emu_config.disable_sound[CHANNEL1] ^= 1; break;
-    case HOST_KEYCODE_2: emu_config.disable_sound[CHANNEL2] ^= 1; break;
-    case HOST_KEYCODE_3: emu_config.disable_sound[CHANNEL3] ^= 1; break;
-    case HOST_KEYCODE_4: emu_config.disable_sound[CHANNEL4] ^= 1; break;
+    case HOST_KEYCODE_1: emu_config.disable_sound[APU_CHANNEL1] ^= 1; break;
+    case HOST_KEYCODE_2: emu_config.disable_sound[APU_CHANNEL2] ^= 1; break;
+    case HOST_KEYCODE_3: emu_config.disable_sound[APU_CHANNEL3] ^= 1; break;
+    case HOST_KEYCODE_4: emu_config.disable_sound[APU_CHANNEL4] ^= 1; break;
     case HOST_KEYCODE_B: emu_config.disable_bg ^= 1; break;
     case HOST_KEYCODE_W: emu_config.disable_window ^= 1; break;
     case HOST_KEYCODE_O: emu_config.disable_obj ^= 1; break;

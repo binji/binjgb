@@ -484,10 +484,10 @@ void Debugger::OnKeyDown(HostKeycode code) {
   HostConfig host_config = host_get_config(host);
 
   switch (code) {
-    case HOST_KEYCODE_1: Toggle(emu_config.disable_sound[CHANNEL1]); break;
-    case HOST_KEYCODE_2: Toggle(emu_config.disable_sound[CHANNEL2]); break;
-    case HOST_KEYCODE_3: Toggle(emu_config.disable_sound[CHANNEL3]); break;
-    case HOST_KEYCODE_4: Toggle(emu_config.disable_sound[CHANNEL4]); break;
+    case HOST_KEYCODE_1: Toggle(emu_config.disable_sound[APU_CHANNEL1]); break;
+    case HOST_KEYCODE_2: Toggle(emu_config.disable_sound[APU_CHANNEL2]); break;
+    case HOST_KEYCODE_3: Toggle(emu_config.disable_sound[APU_CHANNEL3]); break;
+    case HOST_KEYCODE_4: Toggle(emu_config.disable_sound[APU_CHANNEL4]); break;
     case HOST_KEYCODE_B: Toggle(emu_config.disable_bg); break;
     case HOST_KEYCODE_W: Toggle(emu_config.disable_window); break;
     case HOST_KEYCODE_O: Toggle(emu_config.disable_obj); break;
@@ -616,10 +616,10 @@ void Debugger::AudioWindow() {
     ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiSetCond_FirstUseEver);
     if (ImGui::Begin("Audio", &audio_window_open)) {
       EmulatorConfig config = emulator_get_config(e);
-      ImGui::CheckboxNot("channel1", &config.disable_sound[CHANNEL1]);
-      ImGui::CheckboxNot("channel2", &config.disable_sound[CHANNEL2]);
-      ImGui::CheckboxNot("channel3", &config.disable_sound[CHANNEL3]);
-      ImGui::CheckboxNot("channel4", &config.disable_sound[CHANNEL4]);
+      ImGui::CheckboxNot("channel1", &config.disable_sound[APU_CHANNEL1]);
+      ImGui::CheckboxNot("channel2", &config.disable_sound[APU_CHANNEL2]);
+      ImGui::CheckboxNot("channel3", &config.disable_sound[APU_CHANNEL3]);
+      ImGui::CheckboxNot("channel4", &config.disable_sound[APU_CHANNEL4]);
       emulator_set_config(e, &config);
 
       ImGui::Spacing();

@@ -263,25 +263,22 @@ static void print_instruction(Emulator* e, Address addr) {
   printf("%s", temp);
 }
 
-Registers emulator_get_registers(struct Emulator* e) { return e->state.reg; }
+Registers emulator_get_registers(struct Emulator* e) { return REG; }
 
 void HOOK_emulator_step(Emulator* e, const char* func_name) {
   if (s_trace && !e->state.interrupt.halt) {
-    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x",
-           e->state.reg.A, e->state.reg.F.Z ? 'Z' : '-',
-           e->state.reg.F.N ? 'N' : '-', e->state.reg.F.H ? 'H' : '-',
-           e->state.reg.F.C ? 'C' : '-', e->state.reg.BC, e->state.reg.DE,
-           e->state.reg.HL, e->state.reg.SP, e->state.reg.PC);
+    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
+           REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
+           REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);
     printf(" (cy: %" PRIu64 ")", e->state.cycles);
     if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
-      printf(" ppu:%c%u", e->state.ppu.LCDC.display ? '+' : '-',
-             e->state.ppu.STAT.mode);
+      printf(" ppu:%c%u", PPU.lcdc.display ? '+' : '-', PPU.stat.mode);
     }
     if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
-      printf(" LY:%u", e->state.ppu.LY);
+      printf(" LY:%u", PPU.ly);
     }
     printf(" |");
-    print_instruction(e, e->state.reg.PC);
+    print_instruction(e, REG.PC);
     printf("\n");
     if (s_trace_counter > 0) {
       if (--s_trace_counter == 0) {
@@ -318,16 +315,16 @@ LogLevel emulator_get_log_level(LogSystem system) {
 }
 
 TileDataSelect emulator_get_tile_data_select(struct Emulator* e) {
-  return e->state.ppu.LCDC.bg_tile_data_select;
+  return PPU.lcdc.bg_tile_data_select;
 }
 
 TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
                                            LayerType layer_type) {
   switch (layer_type) {
     case LAYER_TYPE_BG:
-      return e->state.ppu.LCDC.bg_tile_map_select;
+      return PPU.lcdc.bg_tile_map_select;
     case LAYER_TYPE_WINDOW:
-      return e->state.ppu.LCDC.window_tile_map_select;
+      return PPU.lcdc.window_tile_map_select;
     default:
       return TILE_MAP_9800_9BFF;
   }
@@ -336,11 +333,11 @@ TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
 Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   switch (type) {
     case PALETTE_TYPE_BGP:
-      return e->state.ppu.BGP;
+      return PPU.bgp;
     case PALETTE_TYPE_OBP0:
-      return e->state.ppu.OBP[0];
+      return PPU.obp[0];
     case PALETTE_TYPE_OBP1:
-      return e->state.ppu.OBP[1];
+      return PPU.obp[1];
     default: {
       Palette palette;
       palette.color[0] = COLOR_WHITE;
@@ -389,33 +386,33 @@ void emulator_get_tile_map(struct Emulator* e, TileMapSelect map_select,
 }
 
 void emulator_get_bg_scroll(struct Emulator* e, u8* x, u8* y) {
-  *x = e->state.ppu.SCX;
-  *y = e->state.ppu.SCY;
+  *x = PPU.scx;
+  *y = PPU.scy;
 }
 
 void emulator_get_window_scroll(struct Emulator* e, u8* x, u8* y) {
-  *x = e->state.ppu.WX - WINDOW_X_OFFSET;
-  *y = e->state.ppu.WY;
+  *x = PPU.wx - WINDOW_X_OFFSET;
+  *y = PPU.wy;
 }
 
 Bool emulator_get_display(struct Emulator* e) {
-  return e->state.ppu.LCDC.display;
+  return PPU.lcdc.display;
 }
 
 Bool emulator_get_bg_display(struct Emulator* e) {
-  return e->state.ppu.LCDC.bg_display;
+  return PPU.lcdc.bg_display;
 }
 
 Bool emulator_get_window_display(struct Emulator* e) {
-  return e->state.ppu.LCDC.window_display;
+  return PPU.lcdc.window_display;
 }
 
 Bool emulator_get_obj_display(struct Emulator* e) {
-  return e->state.ppu.LCDC.obj_display;
+  return PPU.lcdc.obj_display;
 }
 
 ObjSize emulator_get_obj_size(struct Emulator* e) {
-  return e->state.ppu.LCDC.obj_size;
+  return PPU.lcdc.obj_size;
 }
 
 Obj emulator_get_obj(struct Emulator* e, int index) {

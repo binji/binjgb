@@ -33,11 +33,11 @@ extern "C" {
 struct Emulator;
 
 enum {
-  CHANNEL1,
-  CHANNEL2,
-  CHANNEL3,
-  CHANNEL4,
-  CHANNEL_COUNT,
+  APU_CHANNEL1,
+  APU_CHANNEL2,
+  APU_CHANNEL3,
+  APU_CHANNEL4,
+  APU_CHANNEL_COUNT,
 };
 
 typedef struct JoypadButtons {
@@ -128,7 +128,7 @@ typedef struct EmulatorInit {
 } EmulatorInit;
 
 typedef struct EmulatorConfig {
-  Bool disable_sound[CHANNEL_COUNT];
+  Bool disable_sound[APU_CHANNEL_COUNT];
   Bool disable_bg;
   Bool disable_window;
   Bool disable_obj;
