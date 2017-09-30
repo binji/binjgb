@@ -836,7 +836,7 @@ static u32 s_ext_ram_byte_size[] = {
 #undef V
 };
 #define EXT_RAM_BYTE_SIZE(e) s_ext_ram_byte_size[(e)->cart_info->ext_ram_size]
-#define EXT_RAM_BANK_MASK(e) (EXT_RAM_BYTE_SIZE(e) - 1)
+#define EXT_RAM_BYTE_SIZE_MASK(e) (EXT_RAM_BYTE_SIZE(e) - 1)
 
 static CartTypeInfo s_cart_type_info[] = {
 #define V(name, code, mbc, ram, battery) \
@@ -988,7 +988,7 @@ static void set_rom1_bank(Emulator* e, u16 bank) {
 }
 
 static void set_ext_ram_bank(Emulator* e, u8 bank) {
-  u32 new_base = (bank & EXT_RAM_BANK_MASK(e)) << EXT_RAM_BANK_SHIFT;
+  u32 new_base = (bank << EXT_RAM_BANK_SHIFT) & EXT_RAM_BYTE_SIZE_MASK(e);
   u32* base = &MMAP_STATE.ext_ram_base;
   if (new_base != *base) {
     HOOK(set_ext_ram_bank_bi, bank, new_base);
@@ -1194,7 +1194,7 @@ static Result init_memory_map(Emulator* e) {
       assert(is_ext_ram_size_valid(e->cart_info->ext_ram_size));
       memory_map->read_ext_ram = gb_read_ext_ram;
       memory_map->write_ext_ram = gb_write_ext_ram;
-      EXT_RAM.size = s_ext_ram_byte_size[e->cart_info->ext_ram_size];
+      EXT_RAM.size = EXT_RAM_BYTE_SIZE(e);
       break;
     default:
     case EXT_RAM_TYPE_NO_RAM:

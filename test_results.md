@@ -75,7 +75,7 @@
 | acceptance/timer/tma\_write\_reloading | :ok: |
 | emulator-only/mbc1/multicart\_rom\_8Mb | :x: |
 | emulator-only/mbc1/ram\_256Kb | :ok: |
-| emulator-only/mbc1/ram\_64Kb | :x: |
+| emulator-only/mbc1/ram\_64Kb | :ok: |
 | emulator-only/mbc1/rom\_16Mb | :x: |
 | emulator-only/mbc1/rom\_1Mb | :ok: |
 | emulator-only/mbc1/rom\_2Mb | :ok: |
