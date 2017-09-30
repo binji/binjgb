@@ -346,7 +346,7 @@ typedef struct {
 } MemoryMap;
 
 typedef struct {
-  u32 rom1_base;
+  u32 rom_base[2];
   u32 ext_ram_base;
   Bool ext_ram_enabled;
   union {
@@ -647,6 +647,8 @@ typedef struct Emulator {
 #define MBC1_ROM_BANK_LO_SELECT_MASK 0x1f
 #define MBC1_BANK_HI_SELECT_MASK 0x3
 #define MBC1_BANK_HI_SHIFT 5
+#define MBC1M_ROM_BANK_LO_SELECT_MASK 0xf
+#define MBC1M_BANK_HI_SHIFT 4
 /* MBC2 has built-in RAM, 512 4-bit values. It's not external, but it maps to
  * the same address space. */
 #define MBC2_RAM_SIZE 0x200
@@ -931,22 +933,35 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   cart_info->offset = offset;
   cart_info->data = data;
   cart_info->rom_size = data[ROM_SIZE_ADDR];
-  CHECK_MSG(is_rom_size_valid(cart_info->rom_size),
-            "Invalid ROM size code: %u", cart_info->rom_size);
+  /* HACK(binji): The mooneye-gb multicart test doesn't set any of the header
+   * bits, even though multicart games all seem to. Just force the values in
+   * reasonable defaults in that case. */
+  if (offset != 0 && !is_rom_size_valid(cart_info->rom_size)) {
+    cart_info->rom_size = ROM_SIZE_32K;
+    cart_info->cgb_flag = FALSE;
+    cart_info->sgb_flag = FALSE;
+    cart_info->cart_type = CART_TYPE_MBC1;
+    cart_info->ext_ram_size = EXT_RAM_TYPE_NO_RAM;
+  } else {
+    CHECK_MSG(is_rom_size_valid(cart_info->rom_size),
+              "Invalid ROM size code: %u\n", cart_info->rom_size);
+
+    cart_info->cgb_flag = data[CGB_FLAG_ADDR];
+    cart_info->sgb_flag = data[SGB_FLAG_ADDR];
+    cart_info->cart_type = data[CART_TYPE_ADDR];
+    CHECK_MSG(is_cart_type_valid(cart_info->cart_type),
+              "Invalid cart type: %u\n", cart_info->cart_type);
+    cart_info->ext_ram_size = data[EXT_RAM_SIZE_ADDR];
+    CHECK_MSG(is_ext_ram_size_valid(cart_info->ext_ram_size),
+              "Invalid ext ram size: %u\n", cart_info->ext_ram_size);
+  }
+
   u32 rom_byte_size = s_rom_bank_count[cart_info->rom_size] << ROM_BANK_SHIFT;
   cart_info->size = rom_byte_size;
   CHECK_MSG(file_data->size >= offset + rom_byte_size,
             "File size too small (required %ld, got %ld)\n",
             (long)(offset + rom_byte_size), (long)file_data->size);
 
-  cart_info->cgb_flag = data[CGB_FLAG_ADDR];
-  cart_info->sgb_flag = data[SGB_FLAG_ADDR];
-  cart_info->cart_type = data[CART_TYPE_ADDR];
-  CHECK_MSG(is_cart_type_valid(cart_info->cart_type), "Invalid cart type: %u\n",
-            cart_info->cart_type);
-  cart_info->ext_ram_size = data[EXT_RAM_SIZE_ADDR];
-  CHECK_MSG(is_ext_ram_size_valid(cart_info->ext_ram_size),
-            "Invalid ext ram size: %u\n", cart_info->ext_ram_size);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -978,11 +993,11 @@ static u8 dummy_read(Emulator* e, MaskedAddress addr) {
   return INVALID_READ_BYTE;
 }
 
-static void set_rom1_bank(Emulator* e, u16 bank) {
+static void set_rom_bank(Emulator* e, int index, u16 bank) {
   u32 new_base = (bank & ROM_BANK_MASK(e)) << ROM_BANK_SHIFT;
-  u32* base = &MMAP_STATE.rom1_base;
+  u32* base = &MMAP_STATE.rom_base[index];
   if (new_base != *base) {
-    HOOK(set_rom1_bank_hi, bank, new_base);
+    HOOK(set_rom_bank_ihi, index, bank, new_base);
   }
   *base = new_base;
 }
@@ -1015,7 +1030,9 @@ static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 }
 
-static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
+static void mbc1_write_rom_shared(Emulator* e, u16 bank_lo_mask,
+                                  int bank_hi_shift, MaskedAddress addr,
+                                  u8 value) {
   Mbc1* mbc1 = &MMAP_STATE.mbc1;
   switch (addr >> 13) {
     case 0: /* 0000-1fff */
@@ -1023,34 +1040,44 @@ static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: /* 2000-3fff */
-      mbc1->byte_2000_3fff = value;
+      mbc1->byte_2000_3fff = value & MBC1_ROM_BANK_LO_SELECT_MASK;
       break;
     case 2: /* 4000-5fff */
-      mbc1->byte_4000_5fff = value;
+      mbc1->byte_4000_5fff = value & MBC1_BANK_HI_SELECT_MASK;
       break;
     case 3: /* 6000-7fff */
       mbc1->bank_mode = (BankMode)(value & 1);
       break;
   }
 
-  u16 rom1_bank = mbc1->byte_2000_3fff & MBC1_ROM_BANK_LO_SELECT_MASK;
+  u16 hi_bank = mbc1->byte_4000_5fff << bank_hi_shift;
+
+  u16 rom1_bank = mbc1->byte_2000_3fff;
   if (rom1_bank == 0) {
     rom1_bank++;
   }
+  rom1_bank = (rom1_bank & bank_lo_mask) | hi_bank;
 
+  u16 rom0_bank = 0;
   u8 ext_ram_bank = 0;
-  if (mbc1->bank_mode == BANK_MODE_ROM) {
-    rom1_bank |= (mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK)
-                 << MBC1_BANK_HI_SHIFT;
-  } else if (e->cart_info_count > 1 && mbc1->byte_4000_5fff > 0) {
-    /* All MBC1M roms seem to have carts at 0x40000 intervals. */
-    set_cart_info(e, mbc1->byte_4000_5fff << 3);
-  } else {
-    ext_ram_bank = mbc1->byte_4000_5fff & MBC1_BANK_HI_SELECT_MASK;
+  if (mbc1->bank_mode == BANK_MODE_RAM) {
+    rom0_bank |= hi_bank;
+    ext_ram_bank = mbc1->byte_4000_5fff;
   }
 
-  set_rom1_bank(e, rom1_bank);
+  set_rom_bank(e, 0, rom0_bank);
+  set_rom_bank(e, 1, rom1_bank);
   set_ext_ram_bank(e, ext_ram_bank);
+}
+
+static void mbc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
+  mbc1_write_rom_shared(e, MBC1_ROM_BANK_LO_SELECT_MASK, MBC1_BANK_HI_SHIFT,
+                        addr, value);
+}
+
+static void mbc1m_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
+  mbc1_write_rom_shared(e, MBC1M_ROM_BANK_LO_SELECT_MASK, MBC1M_BANK_HI_SHIFT,
+                        addr, value);
 }
 
 static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1068,7 +1095,7 @@ static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
         if (rom1_bank == 0) {
           rom1_bank++;
         }
-        set_rom1_bank(e, rom1_bank);
+        set_rom_bank(e, 1, rom1_bank);
       }
       break;
     }
@@ -1099,7 +1126,7 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: { /* 2000-3fff */
-      set_rom1_bank(e, value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e));
+      set_rom_bank(e, 1, value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e));
       break;
     }
     case 2: /* 4000-5fff */
@@ -1129,8 +1156,9 @@ static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       break;
   }
 
-  set_rom1_bank(e, ((MMAP_STATE.mbc5.byte_3000_3fff & 1) << 8) |
-                       MMAP_STATE.mbc5.byte_2000_2fff);
+  set_rom_bank(e, 1,
+               ((MMAP_STATE.mbc5.byte_3000_3fff & 1) << 8) |
+                   MMAP_STATE.mbc5.byte_2000_2fff);
 }
 
 static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1164,7 +1192,7 @@ static void huc1_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
   } else {
     ext_ram_bank = huc1->byte_4000_5fff & HUC1_BANK_HI_SELECT_MASK;
   }
-  set_rom1_bank(e, rom1_bank);
+  set_rom_bank(e, 1, rom1_bank);
   set_ext_ram_bank(e, ext_ram_bank);
 }
 
@@ -1208,9 +1236,11 @@ static Result init_memory_map(Emulator* e) {
     case MBC_TYPE_NO_MBC:
       memory_map->write_rom = dummy_write;
       break;
-    case MBC_TYPE_MBC1:
-      memory_map->write_rom = mbc1_write_rom;
+    case MBC_TYPE_MBC1: {
+      Bool is_mbc1m = e->cart_info_count > 1;
+      memory_map->write_rom = is_mbc1m ? mbc1m_write_rom : mbc1_write_rom;
       break;
+    }
     case MBC_TYPE_MBC2:
       memory_map->write_rom = mbc2_write_rom;
       memory_map->read_ext_ram = mbc2_read_ram;
@@ -1498,11 +1528,11 @@ static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
 
 static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   switch (pair.type) {
+    /* Take advantage of the fact that MEMORY_MAP_ROM9 is 0, and ROM1 is 1 when
+     * indexing into rom_base. */
     case MEMORY_MAP_ROM0:
-      assert(pair.addr < e->cart_info->size);
-      return e->cart_info->data[pair.addr];
     case MEMORY_MAP_ROM1: {
-      u32 rom_addr = MMAP_STATE.rom1_base| pair.addr;
+      u32 rom_addr = MMAP_STATE.rom_base[pair.type] | pair.addr;
       assert(rom_addr < e->cart_info->size);
       return e->cart_info->data[rom_addr];
     }
@@ -3455,7 +3485,8 @@ Result init_emulator(Emulator* e) {
   };
   CHECK(SUCCESS(get_cart_infos(e)));
   log_cart_info(e->cart_info);
-  MMAP_STATE.rom1_base = 1 << ROM_BANK_SHIFT;
+  MMAP_STATE.rom_base[0] = 0;
+  MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
   set_af_reg(e, 0x01b0);
   REG.BC = 0x0013;
   REG.DE = 0x00d8;

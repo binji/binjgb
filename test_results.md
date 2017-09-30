@@ -73,15 +73,15 @@
 | acceptance/timer/tima\_reload | :ok: |
 | acceptance/timer/tima\_write\_reloading | :ok: |
 | acceptance/timer/tma\_write\_reloading | :ok: |
-| emulator-only/mbc1/multicart\_rom\_8Mb | :x: |
+| emulator-only/mbc1/multicart\_rom\_8Mb | :ok: |
 | emulator-only/mbc1/ram\_256Kb | :ok: |
 | emulator-only/mbc1/ram\_64Kb | :ok: |
-| emulator-only/mbc1/rom\_16Mb | :x: |
+| emulator-only/mbc1/rom\_16Mb | :ok: |
 | emulator-only/mbc1/rom\_1Mb | :ok: |
 | emulator-only/mbc1/rom\_2Mb | :ok: |
 | emulator-only/mbc1/rom\_4Mb | :ok: |
 | emulator-only/mbc1/rom\_512Kb | :ok: |
-| emulator-only/mbc1/rom\_8Mb | :x: |
+| emulator-only/mbc1/rom\_8Mb | :ok: |
 | manual-only/sprite\_priority | :ok: |
 
 [Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):

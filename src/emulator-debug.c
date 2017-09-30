@@ -98,7 +98,7 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(M, D, read_during_dma_a, "(%#04x) during DMA")                             \
   X(M, D, read_ram_disabled_a, "(%#04x) ignored, ram disabled")                \
   X(M, D, set_ext_ram_bank_bi, "(%d) = %#06x")                                 \
-  X(M, D, set_rom1_bank_hi, "(bank: %d) = %#06x")                              \
+  X(M, D, set_rom_bank_ihi, "(index: %d, bank: %d) = %#06x")                   \
   X(M, D, write_during_dma_ab, "(%#04x, %#02x) during DMA")                    \
   X(M, D, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
@@ -248,8 +248,10 @@ int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
 
   char bank[3] = "??";
   MemoryTypeAddressPair pair = map_address(addr);
-  if (pair.type == MEMORY_MAP_ROM1) {
-    sprint_hex(bank, e->state.memory_map_state.rom1_base >> ROM_BANK_SHIFT);
+  if (pair.type == MEMORY_MAP_ROM0) {
+    sprint_hex(bank, e->state.memory_map_state.rom_base[0] >> ROM_BANK_SHIFT);
+  } else if (pair.type == MEMORY_MAP_ROM1) {
+    sprint_hex(bank, e->state.memory_map_state.rom_base[1] >> ROM_BANK_SHIFT);
   }
 
   snprintf(buffer, size, "[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode,
