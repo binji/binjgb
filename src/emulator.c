@@ -938,10 +938,10 @@ static Result get_cart_info(FileData* file_data, size_t offset,
    * reasonable defaults in that case. */
   if (offset != 0 && !is_rom_size_valid(cart_info->rom_size)) {
     cart_info->rom_size = ROM_SIZE_32K;
-    cart_info->cgb_flag = FALSE;
-    cart_info->sgb_flag = FALSE;
+    cart_info->cgb_flag = CGB_FLAG_NONE;
+    cart_info->sgb_flag = SGB_FLAG_NONE;
     cart_info->cart_type = CART_TYPE_MBC1;
-    cart_info->ext_ram_size = EXT_RAM_TYPE_NO_RAM;
+    cart_info->ext_ram_size = EXT_RAM_SIZE_NONE;
   } else {
     CHECK_MSG(is_rom_size_valid(cart_info->rom_size),
               "Invalid ROM size code: %u\n", cart_info->rom_size);
