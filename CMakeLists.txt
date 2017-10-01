@@ -50,6 +50,7 @@ if (NOT EMSCRIPTEN)
     add_executable(binjgb-debugger
       third_party/imgui/imgui.cpp
       third_party/imgui/imgui_draw.cpp
+      third_party/imgui_dock/imgui_dock.cpp
       src/common.c
       src/options.c
       src/emulator-debug.c
@@ -71,7 +72,8 @@ if (NOT EMSCRIPTEN)
     endif ()
 
     target_include_directories(binjgb-debugger PUBLIC
-        ${PROJECT_SOURCE_DIR}/third_party/imgui)
+        ${PROJECT_SOURCE_DIR}/third_party/imgui
+        ${PROJECT_SOURCE_DIR}/third_party/imgui_dock)
     target_compile_definitions(binjgb-debugger PUBLIC BINJGB_HOST_IMGUI)
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)

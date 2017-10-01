@@ -17,6 +17,7 @@
 #include "host.h"
 
 #include "imgui.h"
+#include "imgui_dock.h"
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
@@ -433,13 +434,28 @@ void Debugger::Run() {
 
     tiledata_image.Upload(e);
 
-    MainMenuBar();
-    EmulatorWindow();
-    AudioWindow();
-    TiledataWindow();
-    ObjWindow();
-    MapWindow();
-    DisassemblyWindow();
+    // Create a frameless top-level window to hold the workspace.
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+    if (ImGui::Begin("##root", nullptr, flags)) {
+      MainMenuBar();
+      ImGui::BeginWorkspace();
+      EmulatorWindow();
+      AudioWindow();
+      TiledataWindow();
+      ObjWindow();
+      MapWindow();
+      DisassemblyWindow();
+      ImGui::EndWorkspace();
+    }
+
+    ImGui::End();
 
     host_end_video(host);
   }
@@ -507,7 +523,7 @@ void Debugger::ReadStateFromFile() {
 }
 
 void Debugger::MainMenuBar() {
-  if (ImGui::BeginMainMenuBar()) {
+  if (ImGui::BeginMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       if (ImGui::MenuItem("Exit")) {
         running = false;
@@ -535,343 +551,332 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Disassembly", NULL, &disassembly_window_open);
       ImGui::EndMenu();
     }
-    ImGui::EndMainMenuBar();
+    ImGui::EndMenuBar();
   }
 }
 
 void Debugger::EmulatorWindow() {
-  ImGui::SetNextWindowPos(ImVec2(16, 48), ImGuiSetCond_FirstUseEver);
-  ImGui::SetNextWindowSize(kScreenSize * host_init.render_scale,
-                           ImGuiSetCond_FirstUseEver);
-  if (emulator_window_open) {
-    if (ImGui::Begin("Binjgb", &emulator_window_open)) {
-      ImVec2 cursor = ImGui::GetCursorScreenPos();
-      HostTexture* fb_texture = host_get_frame_buffer_texture(host);
-      ImVec2 avail_size = ImGui::GetContentRegionAvail();
-      f32 w = avail_size.x, h = avail_size.y;
-      f32 aspect = w / h;
-      f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
-      ImVec2 image_size(aspect < want_aspect ? w : h * want_aspect,
-                        aspect < want_aspect ? w / want_aspect : h);
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("Binjgb", &emulator_window_open)) {
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    HostTexture* fb_texture = host_get_frame_buffer_texture(host);
+    ImVec2 avail_size = ImGui::GetContentRegionAvail();
+    f32 w = avail_size.x, h = avail_size.y;
+    f32 aspect = w / h;
+    f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+    ImVec2 image_size(aspect < want_aspect ? w : h * want_aspect,
+                      aspect < want_aspect ? w / want_aspect : h);
 
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
-      ImVec2 image_ul = cursor + (avail_size - image_size) * 0.5f;
-      ImVec2 image_br = image_ul + image_size;
-      draw_list->PushClipRect(image_ul, image_br);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 image_ul = cursor + (avail_size - image_size) * 0.5f;
+    ImVec2 image_br = image_ul + image_size;
+    draw_list->PushClipRect(image_ul, image_br);
 
-      ImVec2 ul_uv(0, 0);
-      ImVec2 br_uv((f32)SCREEN_WIDTH / fb_texture->width,
-                   (f32)SCREEN_HEIGHT / fb_texture->height);
+    ImVec2 ul_uv(0, 0);
+    ImVec2 br_uv((f32)SCREEN_WIDTH / fb_texture->width,
+                 (f32)SCREEN_HEIGHT / fb_texture->height);
 
-      draw_list->AddImage((ImTextureID)fb_texture->handle, image_ul, image_br,
-                          ul_uv, br_uv);
+    draw_list->AddImage((ImTextureID)fb_texture->handle, image_ul, image_br,
+                        ul_uv, br_uv);
 
-      if (highlight_obj) {
-        f32 scale = image_size.x / SCREEN_WIDTH;
-        ObjSize obj_size = emulator_get_obj_size(e);
-        Obj obj = emulator_get_obj(e, highlight_obj_index);
+    if (highlight_obj) {
+      f32 scale = image_size.x / SCREEN_WIDTH;
+      ObjSize obj_size = emulator_get_obj_size(e);
+      Obj obj = emulator_get_obj(e, highlight_obj_index);
 
-        // The OBJ position is already offset so it draws from the top-left,
-        // but this means that the coordinates are sometimes positive when they
-        // should be negative (e.g. 255 should be drawn as -1). This code adds
-        // the offset back in, wrapped to 255, and draws from the bottom-right
-        // instead.
-        ImVec2 obj_pos(static_cast<u8>(obj.x + OBJ_X_OFFSET),
-                       static_cast<u8>(obj.y + OBJ_Y_OFFSET));
-        ImVec2 br_pos = image_ul + obj_pos * scale;
-        ImVec2 ul_pos = br_pos - k8x16OBJSize * scale;
-        if (obj_size == OBJ_SIZE_8X8) {
-          br_pos.y -= kTileSize.y * scale;
-        }
-        draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
+      // The OBJ position is already offset so it draws from the top-left,
+      // but this means that the coordinates are sometimes positive when they
+      // should be negative (e.g. 255 should be drawn as -1). This code adds
+      // the offset back in, wrapped to 255, and draws from the bottom-right
+      // instead.
+      ImVec2 obj_pos(static_cast<u8>(obj.x + OBJ_X_OFFSET),
+                     static_cast<u8>(obj.y + OBJ_Y_OFFSET));
+      ImVec2 br_pos = image_ul + obj_pos * scale;
+      ImVec2 ul_pos = br_pos - k8x16OBJSize * scale;
+      if (obj_size == OBJ_SIZE_8X8) {
+        br_pos.y -= kTileSize.y * scale;
       }
-
-      draw_list->PopClipRect();
+      draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
     }
-    ImGui::End();
+
+    draw_list->PopClipRect();
   }
+  ImGui::EndDock();
 }
 
 void Debugger::AudioWindow() {
-  if (audio_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(16, 640), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("Audio", &audio_window_open)) {
-      EmulatorConfig config = emulator_get_config(e);
-      ImGui::CheckboxNot("channel1", &config.disable_sound[APU_CHANNEL1]);
-      ImGui::CheckboxNot("channel2", &config.disable_sound[APU_CHANNEL2]);
-      ImGui::CheckboxNot("channel3", &config.disable_sound[APU_CHANNEL3]);
-      ImGui::CheckboxNot("channel4", &config.disable_sound[APU_CHANNEL4]);
-      emulator_set_config(e, &config);
+  ImGui::SetNextDock(ImGuiDockSlot_Bottom);
+  if (ImGui::BeginDock("Audio", &audio_window_open)) {
+    EmulatorConfig config = emulator_get_config(e);
+    ImGui::CheckboxNot("channel1", &config.disable_sound[APU_CHANNEL1]);
+    ImGui::CheckboxNot("channel2", &config.disable_sound[APU_CHANNEL2]);
+    ImGui::CheckboxNot("channel3", &config.disable_sound[APU_CHANNEL3]);
+    ImGui::CheckboxNot("channel4", &config.disable_sound[APU_CHANNEL4]);
+    emulator_set_config(e, &config);
 
-      ImGui::Spacing();
-      ImGui::PlotLines("left", audio_data[0], kAudioDataSamples, 0, nullptr, 0,
-                       128, ImVec2(0, 80));
-      ImGui::PlotLines("right", audio_data[1], kAudioDataSamples, 0, nullptr, 0,
-                       128, ImVec2(0, 80));
-    }
-    ImGui::End();
+    ImGui::Spacing();
+    ImGui::PlotLines("left", audio_data[0], kAudioDataSamples, 0, nullptr, 0,
+                     128, ImVec2(0, 80));
+    ImGui::PlotLines("right", audio_data[1], kAudioDataSamples, 0, nullptr, 0,
+                     128, ImVec2(0, 80));
   }
+  ImGui::EndDock();
 }
 
 void Debugger::TiledataWindow() {
-  if (tiledata_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(660, 48), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(440, 800), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("TileData", &tiledata_window_open)) {
-      static const int kPaletteCustom = 3;
-      static const char* palette_names[] = {
-          "BGP", "OBP0", "OBP1", "Custom",
+  ImGui::SetNextDockParentToRoot();
+  ImGui::SetNextDock(ImGuiDockSlot_Right);
+  if (ImGui::BeginDock("TileData", &tiledata_window_open)) {
+    static const int kPaletteCustom = 3;
+    static const char* palette_names[] = {
+        "BGP",
+        "OBP0",
+        "OBP1",
+        "Custom",
+    };
+    static int scale = 3;
+    static int palette_type = PALETTE_TYPE_BGP;
+
+    ImGui::SliderInt("Scale", &scale, 1, 5);
+    ImGui::Combo("Palette", &palette_type, palette_names, 4);
+    PaletteRGBA palette_rgba;
+
+    if (palette_type == kPaletteCustom) {
+      static Palette custom_palette = {
+          {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
+
+      for (int i = 0; i < 3; ++i) {
+        char label[16];
+        snprintf(label, sizeof(label), "Copy from %s", palette_names[i]);
+        if (ImGui::Button(label)) {
+          custom_palette = emulator_get_palette(e, static_cast<PaletteType>(i));
+        }
+      }
+
+      static const char* color_names[] = {
+          "White",
+          "Light Gray",
+          "Dark Gray",
+          "Black",
       };
-      static int scale = 3;
-      static int palette_type = PALETTE_TYPE_BGP;
-
-      ImGui::SliderInt("Scale", &scale, 1, 5);
-      ImGui::Combo("Palette", &palette_type, palette_names, 4);
-      PaletteRGBA palette_rgba;
-
-      if (palette_type == kPaletteCustom) {
-        static Palette custom_palette = {
-            {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
-
-        for (int i = 0; i < 3; ++i) {
-          char label[16];
-          snprintf(label, sizeof(label), "Copy from %s", palette_names[i]);
-          if (ImGui::Button(label)) {
-            custom_palette =
-                emulator_get_palette(e, static_cast<PaletteType>(i));
-          }
-        }
-
-        static const char* color_names[] = {
-            "White", "Light Gray", "Dark Gray", "Black",
-        };
-        ImGui::Combo("Color 0", &custom_palette.color[0], color_names, 4);
-        ImGui::Combo("Color 1", &custom_palette.color[1], color_names, 4);
-        ImGui::Combo("Color 2", &custom_palette.color[2], color_names, 4);
-        ImGui::Combo("Color 3", &custom_palette.color[3], color_names, 4);
-        palette_rgba = palette_to_palette_rgba(custom_palette);
-      } else {
-        palette_rgba = emulator_get_palette_rgba(e, (PaletteType)palette_type);
-      }
-
-      static int tw = 16;
-      static bool size8x16 = false;
-      ImGui::Checkbox("8x16", &size8x16);
-      ImGui::SliderInt("Width", &tw, 1, 48);
-      ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
-                        ImGuiWindowFlags_HorizontalScrollbar);
-      int th = (384 + tw - 1) / tw;
-
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-      ImVec2 cursor = ImGui::GetCursorScreenPos();
-      int width = TILE_DATA_TEXTURE_WIDTH / kTileSize.x;
-      if (size8x16) {
-        th = (th + 1) & ~1;
-      }
-      ImVec2 scaled_tile_size = kTileSize * scale;
-      for (int ty = 0; ty < th; ++ty) {
-        for (int tx = 0; tx < tw; ++tx) {
-          int tile_index;
-          if (size8x16) {
-            tile_index = (ty & ~1) * tw + (tx * 2);
-            if ((ty & 1) == 1) {
-              tile_index++;
-            }
-          } else {
-            tile_index = ty * tw + tx;
-          }
-          ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
-          ImVec2 br_pos = ul_pos + scaled_tile_size;
-          bool is_hovering = tiledata_image.DrawTile(
-              draw_list, tile_index, ul_pos, scale, palette_rgba);
-          if (highlight_tile && highlight_tile_index == tile_index) {
-            draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
-          }
-          if (is_hovering) {
-            ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
-                              0x8000 + tile_index * 16);
-          }
-        }
-      }
-      highlight_tile = false;
-      ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
-      ImGui::EndChild();
+      ImGui::Combo("Color 0", &custom_palette.color[0], color_names, 4);
+      ImGui::Combo("Color 1", &custom_palette.color[1], color_names, 4);
+      ImGui::Combo("Color 2", &custom_palette.color[2], color_names, 4);
+      ImGui::Combo("Color 3", &custom_palette.color[3], color_names, 4);
+      palette_rgba = palette_to_palette_rgba(custom_palette);
+    } else {
+      palette_rgba = emulator_get_palette_rgba(e, (PaletteType)palette_type);
     }
-    ImGui::End();
+
+    static int tw = 16;
+    static bool size8x16 = false;
+    ImGui::Checkbox("8x16", &size8x16);
+    ImGui::SliderInt("Width", &tw, 1, 48);
+    ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    int th = (384 + tw - 1) / tw;
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    int width = TILE_DATA_TEXTURE_WIDTH / kTileSize.x;
+    if (size8x16) {
+      th = (th + 1) & ~1;
+    }
+    ImVec2 scaled_tile_size = kTileSize * scale;
+    for (int ty = 0; ty < th; ++ty) {
+      for (int tx = 0; tx < tw; ++tx) {
+        int tile_index;
+        if (size8x16) {
+          tile_index = (ty & ~1) * tw + (tx * 2);
+          if ((ty & 1) == 1) {
+            tile_index++;
+          }
+        } else {
+          tile_index = ty * tw + tx;
+        }
+        ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
+        ImVec2 br_pos = ul_pos + scaled_tile_size;
+        bool is_hovering = tiledata_image.DrawTile(draw_list, tile_index,
+                                                   ul_pos, scale, palette_rgba);
+        if (highlight_tile && highlight_tile_index == tile_index) {
+          draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
+        }
+        if (is_hovering) {
+          ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
+                            0x8000 + tile_index * 16);
+        }
+      }
+    }
+    highlight_tile = false;
+    ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
+    ImGui::EndChild();
   }
+  ImGui::EndDock();
 }
 
 void Debugger::ObjWindow() {
-  if (obj_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(660, 860), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(440, 516), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("Obj", &obj_window_open)) {
-      static int scale = 4;
-      static int obj_index = 0;
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("Obj", &obj_window_open)) {
+    static int scale = 4;
+    static int obj_index = 0;
 
-      ObjSize obj_size = emulator_get_obj_size(e);
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ObjSize obj_size = emulator_get_obj_size(e);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-      for (int y = 0; y < 4; ++y) {
-        for (int x = 0; x < 10; ++x) {
-          int button_index = y * 10 + x;
-          Obj obj = emulator_get_obj(e, button_index);
-          bool visible = static_cast<bool>(obj_is_visible(&obj));
+    for (int y = 0; y < 4; ++y) {
+      for (int x = 0; x < 10; ++x) {
+        int button_index = y * 10 + x;
+        Obj obj = emulator_get_obj(e, button_index);
+        bool visible = static_cast<bool>(obj_is_visible(&obj));
 
-          char label[16];
-          snprintf(label, sizeof(label), "%2d", button_index);
-          if (x > 0) {
-            ImGui::SameLine();
-          }
-
-          ImVec2 button_size = get_obj_size_vec2(obj_size, scale);
-          bool clicked;
-          if (visible) {
-            PaletteRGBA palette_rgba = emulator_get_palette_rgba(
-                e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
-
-            int tile_index = tiledata_image.DrawOBJ(
-                draw_list, obj_size, obj.tile, ImGui::GetCursorScreenPos(),
-                scale, palette_rgba, obj.xflip, obj.yflip);
-
-            if (tile_index >= 0) {
-              highlight_tile = true;
-              highlight_tile_index = tile_index;
-            }
-            clicked = ImGui::InvisibleButton(label, button_size);
-          } else {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
-            clicked = ImGui::Button(label, button_size);
-            ImGui::PopStyleColor();
-          }
-          if (clicked) {
-            highlight_obj_index = obj_index = button_index;
-          }
-          if (obj_index == button_index) {
-            ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
-                                                ImGui::GetItemRectMax(),
-                                                IM_COL32_WHITE);
-          }
+        char label[16];
+        snprintf(label, sizeof(label), "%2d", button_index);
+        if (x > 0) {
+          ImGui::SameLine();
         }
-      }
 
-      ImGui::Checkbox("Highlight OBJ", &highlight_obj);
-      ImGui::Separator();
+        ImVec2 button_size = get_obj_size_vec2(obj_size, scale);
+        bool clicked;
+        if (visible) {
+          PaletteRGBA palette_rgba = emulator_get_palette_rgba(
+              e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
 
-      Obj obj = emulator_get_obj(e, obj_index);
+          int tile_index = tiledata_image.DrawOBJ(
+              draw_list, obj_size, obj.tile, ImGui::GetCursorScreenPos(), scale,
+              palette_rgba, obj.xflip, obj.yflip);
 
-      ImGui::LabelText("Index", "%d", obj_index);
-      ImGui::LabelText("Tile", "%d", obj.tile);
-      ImGui::LabelText("Pos", "%d, %d", obj.x, obj.y);
-      ImGui::LabelText("Priority", "%s", obj.priority == OBJ_PRIORITY_ABOVE_BG
-                                             ? "Above BG"
-                                             : "Behind BG");
-      ImGui::LabelText("Flip", "%c%c", obj.xflip ? 'X' : '_',
-                       obj.yflip ? 'Y' : '_');
-      ImGui::LabelText("Palette", "OBP%d", obj.palette);
-
-    }
-    ImGui::End();
-  }
-}
-
-void Debugger::MapWindow() {
-  if (map_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(1719, 50), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(800, 1014), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("Map", &map_window_open)) {
-      static int scale = 3;
-      static const char* layer_names[] = {
-          "BG", "Window",
-      };
-      static LayerType layer_type = LAYER_TYPE_BG;
-      static bool highlight = true;
-
-      ImGui::SliderInt("Scale", &scale, 1, 5);
-      ImGui::Combo("Layer", &layer_type, layer_names, 2);
-      ImGui::Checkbox("Highlight", &highlight);
-      ImGui::Separator();
-
-      bool display = false;
-      u8 scroll_x, scroll_y;
-      switch (layer_type) {
-        case LAYER_TYPE_BG:
-          display = emulator_get_bg_display(e);
-          emulator_get_bg_scroll(e, &scroll_x, &scroll_y);
-          break;
-        case LAYER_TYPE_WINDOW:
-          display = emulator_get_window_display(e);
-          emulator_get_window_scroll(e, &scroll_x, &scroll_y);
-          break;
-      }
-
-      ImGui::LabelText("Display", "%s", display ? "On" : "Off");
-      ImGui::LabelText("Scroll", "%d, %d", scroll_x, scroll_y);
-
-      TileMapSelect map_select = emulator_get_tile_map_select(e, layer_type);
-      TileDataSelect data_select = emulator_get_tile_data_select(e);
-      TileMap tile_map;
-      emulator_get_tile_map(e, map_select, tile_map);
-      PaletteRGBA palette_rgba = emulator_get_palette_rgba(e, PALETTE_TYPE_BGP);
-
-      const ImVec2 scaled_tile_size = kTileSize * scale;
-      const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
-      ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
-                        ImGuiWindowFlags_HorizontalScrollbar);
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
-      ImVec2 cursor = ImGui::GetCursorScreenPos();
-      ImGui::PushClipRect(cursor, cursor + scaled_tile_map_size, true);
-      for (int ty = 0; ty < TILE_MAP_HEIGHT; ++ty) {
-        for (int tx = 0; tx < TILE_MAP_WIDTH; ++tx) {
-          ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
-          int tile_index = tile_map[ty * TILE_MAP_WIDTH + tx];
-          if (data_select == TILE_DATA_8800_97FF) {
-            tile_index = 256 + (s8)tile_index;
-          }
-          if (tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale,
-                                      palette_rgba)) {
-            ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
-                              0x8000 + tile_index * 16);
+          if (tile_index >= 0) {
             highlight_tile = true;
             highlight_tile_index = tile_index;
           }
+          clicked = ImGui::InvisibleButton(label, button_size);
+        } else {
+          ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
+          clicked = ImGui::Button(label, button_size);
+          ImGui::PopStyleColor();
+        }
+        if (clicked) {
+          highlight_obj_index = obj_index = button_index;
+        }
+        if (obj_index == button_index) {
+          ImGui::GetWindowDrawList()->AddRect(
+              ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32_WHITE);
         }
       }
-
-      if (display && highlight) {
-        // The BG layer wraps, but the window layer doesn't. Also, the window
-        // layer always displays the lower-right corner of its map.
-        switch (layer_type) {
-          case LAYER_TYPE_BG: {
-            ImVec2 ul_pos = cursor + ImVec2(scroll_x, scroll_y) * scale;
-            ImVec2 br_pos = ul_pos + kScreenSize * scale;
-            for (int y = -1; y <= 0; ++y) {
-              for (int x = -1; x <= 0; ++x) {
-                ImVec2 offset = ImVec2(x, y) * scaled_tile_map_size;
-                draw_list->AddRect(ul_pos + offset, br_pos + offset,
-                                   kHighlightColor, 0, ~0, 4.0f);
-              }
-            }
-            break;
-          }
-          case LAYER_TYPE_WINDOW: {
-            ImVec2 ul_pos = cursor;
-            ImVec2 br_pos =
-                ul_pos + (kScreenSize - ImVec2(scroll_x, scroll_y)) * scale;
-            draw_list->AddRect(ul_pos, br_pos, kHighlightColor, 0, ~0, 4.0f);
-            break;
-          }
-        }
-      }
-
-      ImGui::PopClipRect();
-      ImGui::Dummy(scaled_tile_map_size);
-      ImGui::EndChild();
     }
-    ImGui::End();
+
+    ImGui::Checkbox("Highlight OBJ", &highlight_obj);
+    ImGui::Separator();
+
+    Obj obj = emulator_get_obj(e, obj_index);
+
+    ImGui::LabelText("Index", "%d", obj_index);
+    ImGui::LabelText("Tile", "%d", obj.tile);
+    ImGui::LabelText("Pos", "%d, %d", obj.x, obj.y);
+    ImGui::LabelText(
+        "Priority", "%s",
+        obj.priority == OBJ_PRIORITY_ABOVE_BG ? "Above BG" : "Behind BG");
+    ImGui::LabelText("Flip", "%c%c", obj.xflip ? 'X' : '_',
+                     obj.yflip ? 'Y' : '_');
+    ImGui::LabelText("Palette", "OBP%d", obj.palette);
   }
+  ImGui::EndDock();
+}
+
+void Debugger::MapWindow() {
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("Map", &map_window_open)) {
+    static int scale = 3;
+    static const char* layer_names[] = {
+        "BG",
+        "Window",
+    };
+    static LayerType layer_type = LAYER_TYPE_BG;
+    static bool highlight = true;
+
+    ImGui::SliderInt("Scale", &scale, 1, 5);
+    ImGui::Combo("Layer", &layer_type, layer_names, 2);
+    ImGui::Checkbox("Highlight", &highlight);
+    ImGui::Separator();
+
+    bool display = false;
+    u8 scroll_x, scroll_y;
+    switch (layer_type) {
+      case LAYER_TYPE_BG:
+        display = emulator_get_bg_display(e);
+        emulator_get_bg_scroll(e, &scroll_x, &scroll_y);
+        break;
+      case LAYER_TYPE_WINDOW:
+        display = emulator_get_window_display(e);
+        emulator_get_window_scroll(e, &scroll_x, &scroll_y);
+        break;
+    }
+
+    ImGui::LabelText("Display", "%s", display ? "On" : "Off");
+    ImGui::LabelText("Scroll", "%d, %d", scroll_x, scroll_y);
+
+    TileMapSelect map_select = emulator_get_tile_map_select(e, layer_type);
+    TileDataSelect data_select = emulator_get_tile_data_select(e);
+    TileMap tile_map;
+    emulator_get_tile_map(e, map_select, tile_map);
+    PaletteRGBA palette_rgba = emulator_get_palette_rgba(e, PALETTE_TYPE_BGP);
+
+    const ImVec2 scaled_tile_size = kTileSize * scale;
+    const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
+    ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImGui::PushClipRect(cursor, cursor + scaled_tile_map_size, true);
+    for (int ty = 0; ty < TILE_MAP_HEIGHT; ++ty) {
+      for (int tx = 0; tx < TILE_MAP_WIDTH; ++tx) {
+        ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
+        int tile_index = tile_map[ty * TILE_MAP_WIDTH + tx];
+        if (data_select == TILE_DATA_8800_97FF) {
+          tile_index = 256 + (s8)tile_index;
+        }
+        if (tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale,
+                                    palette_rgba)) {
+          ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
+                            0x8000 + tile_index * 16);
+          highlight_tile = true;
+          highlight_tile_index = tile_index;
+        }
+      }
+    }
+
+    if (display && highlight) {
+      // The BG layer wraps, but the window layer doesn't. Also, the window
+      // layer always displays the lower-right corner of its map.
+      switch (layer_type) {
+        case LAYER_TYPE_BG: {
+          ImVec2 ul_pos = cursor + ImVec2(scroll_x, scroll_y) * scale;
+          ImVec2 br_pos = ul_pos + kScreenSize * scale;
+          for (int y = -1; y <= 0; ++y) {
+            for (int x = -1; x <= 0; ++x) {
+              ImVec2 offset = ImVec2(x, y) * scaled_tile_map_size;
+              draw_list->AddRect(ul_pos + offset, br_pos + offset,
+                                 kHighlightColor, 0, ~0, 4.0f);
+            }
+          }
+          break;
+        }
+        case LAYER_TYPE_WINDOW: {
+          ImVec2 ul_pos = cursor;
+          ImVec2 br_pos =
+              ul_pos + (kScreenSize - ImVec2(scroll_x, scroll_y)) * scale;
+          draw_list->AddRect(ul_pos, br_pos, kHighlightColor, 0, ~0, 4.0f);
+          break;
+        }
+      }
+    }
+
+    ImGui::PopClipRect();
+    ImGui::Dummy(scaled_tile_map_size);
+    ImGui::EndChild();
+  }
+  ImGui::EndDock();
 }
 
 static Address step_forward_by_instruction(Emulator* e, Address from_addr) {
@@ -900,90 +905,87 @@ static Address step_backward_by_instruction(Emulator* e, Address from_addr) {
 }
 
 void Debugger::DisassemblyWindow() {
-  if (disassembly_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(1113, 51), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(590, 1326), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("Disassembly", &disassembly_window_open)) {
-      static bool track_pc = true;
-      static Address start_addr = 0;
+  ImGui::SetNextDock(ImGuiDockSlot_Right);
+  if (ImGui::BeginDock("Disassembly", &disassembly_window_open)) {
+    static bool track_pc = true;
+    static Address start_addr = 0;
 
-      Registers regs = emulator_get_registers(e);
-      ImGui::Text("Cycles: %" PRIu64 "", emulator_get_cycles(e));
-      ImGui::Text("A: %02X", regs.A);
-      ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
-      ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);
-      ImGui::Text("H: %02X L: %02X HL: %04X", regs.H, regs.L, regs.HL);
-      ImGui::Text("SP: %04X", regs.SP);
-      ImGui::Text("PC: %04X", regs.PC);
-      ImGui::Text("F: %c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
-                  regs.F.H ? 'H' : '_', regs.F.C ? 'C' : '_');
-      ImGui::Separator();
+    Registers regs = emulator_get_registers(e);
+    ImGui::Text("Cycles: %" PRIu64 "", emulator_get_cycles(e));
+    ImGui::Text("A: %02X", regs.A);
+    ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
+    ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);
+    ImGui::Text("H: %02X L: %02X HL: %04X", regs.H, regs.L, regs.HL);
+    ImGui::Text("SP: %04X", regs.SP);
+    ImGui::Text("PC: %04X", regs.PC);
+    ImGui::Text("F: %c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
+                regs.F.H ? 'H' : '_', regs.F.C ? 'C' : '_');
+    ImGui::Separator();
 
-      ImGui::PushButtonRepeat(true);
-      if (ImGui::Button("-1")) {
-        start_addr = std::max(start_addr - 1, 0);
-        track_pc = false;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("+1")) {
-        start_addr = std::min(start_addr + 1, 0xffff);
-        track_pc = false;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("-I")) {
-        start_addr = step_backward_by_instruction(e, start_addr);
-        track_pc = false;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("+I")) {
-        start_addr = step_forward_by_instruction(e, start_addr);
-        track_pc = false;
-      }
-      ImGui::PopButtonRepeat();
-      ImGui::SameLine();
-      ImGui::Checkbox("Track PC", &track_pc);
-      ImGui::Separator();
+    ImGui::PushButtonRepeat(true);
+    if (ImGui::Button("-1")) {
+      start_addr = std::max(start_addr - 1, 0);
+      track_pc = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+1")) {
+      start_addr = std::min(start_addr + 1, 0xffff);
+      track_pc = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("-I")) {
+      start_addr = step_backward_by_instruction(e, start_addr);
+      track_pc = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+I")) {
+      start_addr = step_forward_by_instruction(e, start_addr);
+      track_pc = false;
+    }
+    ImGui::PopButtonRepeat();
+    ImGui::SameLine();
+    ImGui::Checkbox("Track PC", &track_pc);
+    ImGui::Separator();
 
-      ImGui::PushButtonRepeat(true);
-      if (ImGui::Button("step")) {
-        host_step(host);
-        paused = true;
-      }
-      ImGui::PopButtonRepeat();
+    ImGui::PushButtonRepeat(true);
+    if (ImGui::Button("step")) {
+      host_step(host);
+      paused = true;
+    }
+    ImGui::PopButtonRepeat();
 
-      f32 height = ImGui::GetTextLineHeightWithSpacing();
-      int lines = static_cast<int>(ImGui::GetContentRegionAvail().y / height);
+    f32 height = ImGui::GetTextLineHeightWithSpacing();
+    int lines = static_cast<int>(ImGui::GetContentRegionAvail().y / height);
 
-      // When tracking the PC, determine whether PC is in currently visible
-      // range; if it's not, adjust the view so it is.
-      if (track_pc) {
-        Address addr = start_addr;
-        for (int i = 0; i < lines; ++i) {
-          addr += emulator_opcode_bytes(e, addr);
-        }
-        if (regs.PC < start_addr || regs.PC > addr) {
-          start_addr = regs.PC;
-          // Step backward by half the height to center the instruction at PC.
-          for (int j = 0; j < lines / 2 - 1; ++j) {
-            start_addr = step_backward_by_instruction(e, start_addr);
-          }
-        }
-      }
-
+    // When tracking the PC, determine whether PC is in currently visible
+    // range; if it's not, adjust the view so it is.
+    if (track_pc) {
       Address addr = start_addr;
       for (int i = 0; i < lines; ++i) {
-        char buffer[64];
-        bool is_pc = addr == regs.PC;
-        addr += emulator_disassemble(e, addr, buffer, sizeof(buffer));
-        if (is_pc) {
-          ImGui::TextColored(kPCColor, "%s", buffer);
-        } else {
-          ImGui::Text("%s", buffer);
+        addr += emulator_opcode_bytes(e, addr);
+      }
+      if (regs.PC < start_addr || regs.PC > addr) {
+        start_addr = regs.PC;
+        // Step backward by half the height to center the instruction at PC.
+        for (int j = 0; j < lines / 2 - 1; ++j) {
+          start_addr = step_backward_by_instruction(e, start_addr);
         }
       }
     }
-    ImGui::End();
+
+    Address addr = start_addr;
+    for (int i = 0; i < lines; ++i) {
+      char buffer[64];
+      bool is_pc = addr == regs.PC;
+      addr += emulator_disassemble(e, addr, buffer, sizeof(buffer));
+      if (is_pc) {
+        ImGui::TextColored(kPCColor, "%s", buffer);
+      } else {
+        ImGui::Text("%s", buffer);
+      }
+    }
   }
+  ImGui::EndDock();
 }
 
 int main(int argc, char** argv) {
