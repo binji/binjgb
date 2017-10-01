@@ -1310,7 +1310,7 @@ void Debugger::ROMWindow() {
   if (rom_window_open) {
     ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiSetCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(100, 100), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("ROM", &disassembly_window_open)) {
+    if (ImGui::Begin("ROM", &rom_window_open)) {
       static int scale = 3;
       const ImVec2 texture_size(rom_texture_width, rom_texture_height);
       const ImVec2 scaled_texture_size = texture_size * scale;
@@ -1344,8 +1344,8 @@ void Debugger::ROMWindow() {
       ImGui::PopClipRect();
       ImGui::Dummy(scaled_texture_size);
       ImGui::EndChild();
-      ImGui::End();
     }
+    ImGui::End();
   }
 }
 
