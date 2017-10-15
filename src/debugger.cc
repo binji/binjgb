@@ -976,9 +976,9 @@ void Debugger::DisassemblyWindow() {
         bool is_pc = addr == regs.PC;
         addr += emulator_disassemble(e, addr, buffer, sizeof(buffer));
         if (is_pc) {
-          ImGui::TextColored(kPCColor, buffer);
+          ImGui::TextColored(kPCColor, "%s", buffer);
         } else {
-          ImGui::Text(buffer);
+          ImGui::Text("%s", buffer);
         }
       }
     }

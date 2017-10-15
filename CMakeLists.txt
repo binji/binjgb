@@ -61,7 +61,7 @@ if (NOT EMSCRIPTEN)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD_REQUIRED ON)
 
-    if (NOT MSVC)
+    if (${CMAKE_C_COMPILER_ID} STREQUAL "GNU")
       # Disable warnings in stb_truetype.h.
       set_source_files_properties(
         third_party/imgui/imgui_draw.cpp

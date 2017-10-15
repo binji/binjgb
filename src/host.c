@@ -205,7 +205,8 @@ void host_render_audio(Host* host) {
   HostAudioSample* dst = (HostAudioSample*)audio->buffer;
   HostAudioSample* dst_end = dst + frames * AUDIO_SPEC_CHANNELS;
   assert((u8*)dst_end <= audio->buffer + audio->spec.size);
-  for (size_t i = 0; i < frames; i++) {
+  size_t i;
+  for (i = 0; i < frames; i++) {
     assert(dst + 2 <= dst_end);
     *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
     *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);

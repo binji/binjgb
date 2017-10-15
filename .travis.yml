@@ -1,6 +1,23 @@
 language: c
+
+addons:
+  apt:
+    packages:
+      - p7zip-full
+
+install:
+  - if [ $TRAVIS_OS_NAME = osx ]; then brew update; fi
+  - if [ $TRAVIS_OS_NAME = osx ]; then brew install p7zip sdl2; fi
+    # Trusty has SDL2, but it's too old. We'll build our own.
+  - if [ $TRAVIS_OS_NAME = linux ]; then python scripts/build_sdl2.py; fi
+
 script:
-  - cmake . -DCMAKE_BUILD_TYPE=$CONFIG
+  - |
+    if [ $TRAVIS_OS_NAME = linux ]; then
+      cmake . -DCMAKE_BUILD_TYPE=$CONFIG -DSDL2_ROOT_DIR=$TRAVIS_BUILD_DIR/sdl2
+    else
+      cmake . -DCMAKE_BUILD_TYPE=$CONFIG
+    fi
   - cmake --build . --config %CONFIG%
   - python scripts/build_tests.py
   - python scripts/tester.py -vv --exe ./binjgb-tester
@@ -21,12 +38,25 @@ matrix:
       dist: trusty
       sudo: false
       compiler: clang
-      env: CONFIG=Release
+      env: CONFIG=Release DEPLOY_NAME=binjgb-linux.zip
     - os: osx
       compiler: clang
-      env: CONFIG=Release
+      env: CONFIG=Release DEPLOY_NAME=binjgb-osx.zip
 
   allow_failures:
     - os: osx
 
   fast_finish: true
+
+before_deploy:
+  - 7z a $DEPLOY_NAME ./bin/binjgb*
+
+deploy:
+  provider: releases
+  api_key:
+    secure: I1jJwc9J8/lvv2tRum1RxBiPEyMCwr2GihsD7keGHaIlDpMzQc+rLOxylO8hn8SGQpzmyEoe+0tAVOPpyVL0xgfdKib4P25ZecD+VLHSigdJE7GpU4loiD2yKot91mD05KIISkQnvefT5NavJEH55723INURAnJSk4+BhNo211m0g6I1NnzXWoJ5kxjnQD2vv6F0MmZJrsR6opbeK5umDQpXlOHnAIm9wS5b7kbYHCwI1smR1xip4m6SbkOzCNBAMAW+Wfm9W+nRkkhcW1N6R53Fb6byFgH2bDI9FF5rtKk5bywOokkp7wiemkrfyodz+j+cePlZVpUymYVzdDs50uHIQ/fLBegF4F2+XP2w0WUeB/LWGRkSIT2T5lNiiWWb2UPIqh3TV5gIP1QJsqjcPTDQCnNWWO/4IBvzd/0E2gyxOFoAGdlKsnd34/r2VijmPc6v273gtfCBeHL+RzEfAP9V7RxdgK2ZIpgI7S9oA4/1P+mjutHpw6m6D0P3sTw8gVBaCfFOov+l9UgkdwkvNAkx2tPWQigm4rF1fCZ4wHKHBhSDX5cmSqBV8MzA+Ul3isvHHrAWbYWWJfyO1/p9evHPi7LPxdTFdWtgjKAkuwHrgbI91IHLnh+s5U3vDF4SP+qQwCvgRET0qxYn5LCKAkaJtyu2C2ignZ+GWzc7VNE=
+  file: $DEPLOY_NAME
+  skip_cleanup: true
+  on:
+    tags: true
+    condition: $DEPLOY_NAME
