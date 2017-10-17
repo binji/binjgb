@@ -202,11 +202,13 @@ void HostUI::event(union SDL_Event* event) {
   switch (event->type) {
     case SDL_WINDOWEVENT:
       switch (event->window.event) {
-        case SDL_WINDOWEVENT_RESIZED: {
+        case SDL_WINDOWEVENT_SHOWN:
+        case SDL_WINDOWEVENT_SIZE_CHANGED: {
           ImGuiIO& io = ImGui::GetIO();
 
-          f32 w = event->window.data1;
-          f32 h = event->window.data2;
+          int iw, ih;
+          SDL_GetWindowSize(window, &iw, &ih);
+          f32 w = iw, h = ih;
           int display_w, display_h;
           SDL_GL_GetDrawableSize(window, &display_w, &display_h);
           io.DisplaySize = ImVec2(w, h);

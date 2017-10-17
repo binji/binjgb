@@ -102,9 +102,11 @@ void host_ui_delete(struct HostUI* ui) {
 
 void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   if (event->type == SDL_WINDOWEVENT &&
-      event->window.event == SDL_WINDOWEVENT_RESIZED) {
-    f32 w = event->window.data1;
-    f32 h = event->window.data2;
+      (event->window.event == SDL_WINDOWEVENT_SHOWN ||
+       event->window.event == SDL_WINDOWEVENT_RESIZED)) {
+    int iw, ih;
+    SDL_GetWindowSize(ui->window, &iw, &ih);
+    f32 w = iw, h = ih;
     f32 aspect = w / h;
     f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
     f32 new_w = aspect < want_aspect ? w : h * want_aspect;
