@@ -801,7 +801,6 @@ struct DockContext {
     if (first || (prev_opened != dock.opened)) {
       Dock* root = m_next_parent ? m_next_parent : getRootDock();
       if (root && (&dock != root) && !dock.parent) {
-        printf("doDock: %s, %d\n", label, next_slot);
         doDock(dock, root, next_slot);
       }
       m_next_parent = &dock;
