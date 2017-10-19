@@ -608,10 +608,15 @@ void Debugger::AudioWindow() {
   ImGui::SetNextDock(ImGuiDockSlot_Bottom);
   if (ImGui::BeginDock("Audio", &audio_window_open)) {
     EmulatorConfig config = emulator_get_config(e);
-    ImGui::CheckboxNot("channel1", &config.disable_sound[APU_CHANNEL1]);
-    ImGui::CheckboxNot("channel2", &config.disable_sound[APU_CHANNEL2]);
-    ImGui::CheckboxNot("channel3", &config.disable_sound[APU_CHANNEL3]);
-    ImGui::CheckboxNot("channel4", &config.disable_sound[APU_CHANNEL4]);
+    ImGui::Text("channel enable");
+    ImGui::SameLine(0, 20);
+    ImGui::CheckboxNot("1", &config.disable_sound[APU_CHANNEL1]);
+    ImGui::SameLine();
+    ImGui::CheckboxNot("2", &config.disable_sound[APU_CHANNEL2]);
+    ImGui::SameLine();
+    ImGui::CheckboxNot("3", &config.disable_sound[APU_CHANNEL3]);
+    ImGui::SameLine();
+    ImGui::CheckboxNot("4", &config.disable_sound[APU_CHANNEL4]);
     emulator_set_config(e, &config);
 
     ImGui::Spacing();
