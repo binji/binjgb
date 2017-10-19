@@ -294,8 +294,7 @@ u8* emulator_get_rom_usage(struct Emulator* e) {
 }
 
 void emulator_clear_rom_usage(struct Emulator* e) {
-  // memset(s_rom_usage, 3, sizeof(s_rom_usage));
-  memset(s_rom_usage, 3, 128 * 256);
+  memset(s_rom_usage, 0, sizeof(s_rom_usage));
 }
 
 void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,

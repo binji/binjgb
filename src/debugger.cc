@@ -370,7 +370,7 @@ class Debugger {
   RunState run_state;
 
   TileImage tiledata_image;
-  HostTexture* rom_texture;
+  HostTexture* rom_texture = nullptr;
   int rom_texture_width = 0;
   int rom_texture_height = 0;
 
@@ -451,7 +451,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   int rom_size = emulator_get_rom_size(e);
   // ROM size should always be a power of two.
   assert(rom_size != 0 && (rom_size & (rom_size - 1)) == 0);
-#if 1
+
   // Try to make it as square as possible, while keeping the sides
   // powers-of-two.
   rom_texture_width = rom_size;
@@ -460,14 +460,10 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     rom_texture_width >>= 1;
     rom_texture_height <<= 1;
   }
-#else
-  rom_texture_width = 128;
-  rom_texture_height = rom_size / rom_texture_width;
-#endif
-  printf("rom texture: %u x %u\n", rom_texture_width, rom_texture_height);
+
   rom_texture = host_create_texture(host, rom_texture_width, rom_texture_height,
                                     HOST_TEXTURE_FORMAT_U8);
-  // emulator_clear_rom_usage(e);
+  emulator_clear_rom_usage(e);
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
@@ -1307,46 +1303,40 @@ void Debugger::RewindWindow() {
 }
 
 void Debugger::ROMWindow() {
-  if (rom_window_open) {
-    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiSetCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(100, 100), ImGuiSetCond_FirstUseEver);
-    if (ImGui::Begin("ROM", &rom_window_open)) {
-      static int scale = 3;
-      const ImVec2 texture_size(rom_texture_width, rom_texture_height);
-      const ImVec2 scaled_texture_size = texture_size * scale;
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("ROM", &rom_window_open)) {
+    static int scale = 3;
+    const ImVec2 texture_size(rom_texture_width, rom_texture_height);
+    const ImVec2 scaled_texture_size = texture_size * scale;
 
-      PaletteRGBA palette;
-      palette.color[0] = 0xff00ff00u;
-      palette.color[1] = 0xff0000ffu;
-      palette.color[2] = 0xffff0000u;
-      palette.color[3] = 0xffff00ffu;
+    PaletteRGBA palette = {
+        {0xff000000u, 0xff00ff00u, 0xffff0000u, 0xffff00ffu}};
 
-      ImGui::SliderInt("Scale", &scale, 1, 10);
-      ImGui::Separator();
-      ImGui::BeginChild("Data", ImVec2(0, 0), false,
-                        ImGuiWindowFlags_HorizontalScrollbar);
-      ImDrawList* draw_list = ImGui::GetWindowDrawList();
-      ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImGui::SliderInt("Scale", &scale, 1, 10);
+    ImGui::Separator();
+    ImGui::BeginChild("Data", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
 
-      ImVec2 ul_pos = cursor;
-      ImVec2 br_pos = ul_pos + scaled_texture_size;
-      ImVec2 ul_uv(0, 0);
-      ImVec2 br_uv((f32)rom_texture_width / rom_texture->width,
-                   (f32)rom_texture_height / rom_texture->height);
+    ImVec2 ul_pos = cursor;
+    ImVec2 br_pos = ul_pos + scaled_texture_size;
+    ImVec2 ul_uv(0, 0);
+    ImVec2 br_uv((f32)rom_texture_width / rom_texture->width,
+                 (f32)rom_texture_height / rom_texture->height);
 
-      draw_list->PushClipRect(ul_pos, br_pos, true);
+    draw_list->PushClipRect(ul_pos, br_pos, true);
 
-      SetPaletteAndEnable(host, draw_list, palette);
-      draw_list->AddImage((ImTextureID)rom_texture->handle, ul_pos, br_pos,
-                          ul_uv, br_uv);
-      DisablePalette(host, draw_list);
+    SetPaletteAndEnable(host, draw_list, palette);
+    draw_list->AddImage((ImTextureID)rom_texture->handle, ul_pos, br_pos, ul_uv,
+                        br_uv);
+    DisablePalette(host, draw_list);
 
-      ImGui::PopClipRect();
-      ImGui::Dummy(scaled_texture_size);
-      ImGui::EndChild();
-    }
-    ImGui::End();
+    ImGui::PopClipRect();
+    ImGui::Dummy(scaled_texture_size);
+    ImGui::EndChild();
   }
+  ImGui::EndDock();
 }
 
 void Debugger::BeginRewind() {
