@@ -73,7 +73,8 @@ if (NOT EMSCRIPTEN)
 
     target_include_directories(binjgb-debugger PUBLIC
         ${PROJECT_SOURCE_DIR}/third_party/imgui
-        ${PROJECT_SOURCE_DIR}/third_party/imgui_dock)
+        ${PROJECT_SOURCE_DIR}/third_party/imgui_dock
+        ${PROJECT_SOURCE_DIR}/third_party/imgui_memory_editor)
     target_compile_definitions(binjgb-debugger PUBLIC BINJGB_HOST_IMGUI)
     target_link_libraries(binjgb-debugger SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
     install(TARGETS binjgb-debugger DESTINATION bin)

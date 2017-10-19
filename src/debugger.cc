@@ -18,6 +18,7 @@
 
 #include "imgui.h"
 #include "imgui_dock.h"
+#include "imgui_memory_editor.h"
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
@@ -321,51 +322,43 @@ class Debugger {
   void ObjWindow();
   void MapWindow();
   void DisassemblyWindow();
+  void MemoryWindow();
+
+  u8 MemoryEditorRead(Address addr);
+  void MemoryEditorWrite(Address addr, u8 value);
 
   EmulatorInit emulator_init;
   HostInit host_init;
-  Emulator* e;
-  Host* host;
-  const char* save_filename;
-  const char* save_state_filename;
-  bool running;
-  bool paused;
-  bool step_frame;
+  Emulator* e = nullptr;
+  Host* host = nullptr;
+  const char* save_filename = nullptr;
+  const char* save_state_filename = nullptr;
+  bool running = true;
+  bool paused = false;
+  bool step_frame = false;
 
   TileImage tiledata_image;
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
 
-  bool highlight_obj;
-  int highlight_obj_index;
-  bool highlight_tile;
-  int highlight_tile_index;
+  bool highlight_obj = false;
+  int highlight_obj_index = 0;
+  bool highlight_tile = false;
+  int highlight_tile_index = 0;
 
-  bool emulator_window_open;
-  bool audio_window_open;
-  bool tiledata_window_open;
-  bool obj_window_open;
-  bool map_window_open;
-  bool disassembly_window_open;
+  MemoryEditor memory_editor;
+
+  bool emulator_window_open = true;
+  bool audio_window_open = true;
+  bool tiledata_window_open = true;
+  bool obj_window_open = true;
+  bool map_window_open = true;
+  bool disassembly_window_open = true;
+  bool memory_window_open = true;
 };
 
-Debugger::Debugger()
-    : e(nullptr),
-      host(nullptr),
-      save_filename(nullptr),
-      save_state_filename(nullptr),
-      running(true),
-      highlight_obj(false),
-      highlight_obj_index(0),
-      highlight_tile(false),
-      highlight_tile_index(0),
-      emulator_window_open(true),
-      audio_window_open(true),
-      tiledata_window_open(true),
-      obj_window_open(true),
-      map_window_open(true),
-      disassembly_window_open(true) {
+Debugger::Debugger() {
   ZERO_MEMORY(audio_data);
 }
 
@@ -414,6 +407,15 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
+
+  memory_editor.UserData = this;
+  memory_editor.ReadFn = [](u8*, size_t offset, void* user_data) {
+    return static_cast<Debugger*>(user_data)->MemoryEditorRead(offset);
+  };
+  memory_editor.WriteFn = [](u8*, size_t offset, u8 value, void* user_data) {
+    static_cast<Debugger*>(user_data)->MemoryEditorWrite(offset, value);
+  };
+
   return true;
 }
 
@@ -452,6 +454,7 @@ void Debugger::Run() {
       ObjWindow();
       MapWindow();
       DisassemblyWindow();
+      MemoryWindow();
       ImGui::EndWorkspace();
     }
 
@@ -549,6 +552,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Obj", NULL, &obj_window_open);
       ImGui::MenuItem("Map", NULL, &map_window_open);
       ImGui::MenuItem("Disassembly", NULL, &disassembly_window_open);
+      ImGui::MenuItem("Memory", NULL, &memory_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMenuBar();
@@ -991,6 +995,22 @@ void Debugger::DisassemblyWindow() {
     }
   }
   ImGui::EndDock();
+}
+
+void Debugger::MemoryWindow() {
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("Memory", &memory_window_open)) {
+    memory_editor.DrawContents(nullptr, 0x10000);
+  }
+  ImGui::EndDock();
+}
+
+u8 Debugger::MemoryEditorRead(Address addr) {
+  return emulator_read_u8_raw(e, addr);
+}
+
+void Debugger::MemoryEditorWrite(Address addr, u8 value) {
+  return emulator_write_u8_raw(e, addr, value);
 }
 
 int main(int argc, char** argv) {

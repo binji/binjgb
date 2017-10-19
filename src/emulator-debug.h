@@ -92,6 +92,9 @@ int emulator_opcode_bytes(struct Emulator*, Address);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
 Registers emulator_get_registers(struct Emulator*);
 
+u8 emulator_read_u8_raw(struct Emulator*, Address);
+void emulator_write_u8_raw(struct Emulator*, Address, u8);
+
 TileDataSelect emulator_get_tile_data_select(struct Emulator*);
 TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
 Palette emulator_get_palette(struct Emulator*, PaletteType);

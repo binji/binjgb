@@ -267,6 +267,14 @@ static void print_instruction(Emulator* e, Address addr) {
 
 Registers emulator_get_registers(struct Emulator* e) { return REG; }
 
+u8 emulator_read_u8_raw(struct Emulator* e, Address addr) {
+  return read_u8_raw(e, addr);
+}
+
+void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
+  write_u8_raw(e, addr, value);
+}
+
 void HOOK_emulator_step(Emulator* e, const char* func_name) {
   if (s_trace && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,

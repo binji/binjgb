@@ -1526,7 +1526,7 @@ static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
   return DMA.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
 }
 
-static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
+static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair) {
   switch (pair.type) {
     /* Take advantage of the fact that MEMORY_MAP_ROM9 is 0, and ROM1 is 1 when
      * indexing into rom_base. */
@@ -1564,14 +1564,19 @@ static u8 read_u8_no_dma_check(Emulator* e, MemoryTypeAddressPair pair) {
   }
 }
 
-u8 read_u8(Emulator* e, Address addr) {
+static u8 read_u8_raw(Emulator* e, Address addr) {
+  MemoryTypeAddressPair pair = map_address(addr);
+  return read_u8_pair(e, pair);
+}
+
+static u8 read_u8(Emulator* e, Address addr) {
   MemoryTypeAddressPair pair = map_address(addr);
   if (!is_dma_access_ok(e, pair)) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
 
-  return read_u8_no_dma_check(e, pair);
+  return read_u8_pair(e, pair);
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
@@ -2194,13 +2199,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 }
 
-void write_u8(Emulator* e, Address addr, u8 value) {
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (!is_dma_access_ok(e, pair)) {
-    HOOK(write_during_dma_ab, addr, value);
-    return;
-  }
-
+static void write_u8_pair(Emulator* e, MemoryTypeAddressPair pair, u8 value) {
   switch (pair.type) {
     case MEMORY_MAP_ROM0:
       e->memory_map.write_rom(e, pair.addr, value);
@@ -2238,6 +2237,19 @@ void write_u8(Emulator* e, Address addr, u8 value) {
       HRAM[pair.addr] = value;
       break;
   }
+}
+
+static void write_u8_raw(Emulator* e, Address addr, u8 value) {
+  write_u8_pair(e, map_address(addr), value);
+}
+
+static void write_u8(Emulator* e, Address addr, u8 value) {
+  MemoryTypeAddressPair pair = map_address(addr);
+  if (!is_dma_access_ok(e, pair)) {
+    HOOK(write_during_dma_ab, addr, value);
+    return;
+  }
+  write_u8_pair(e, pair, value);
 }
 
 static void ppu_mode2_mcycle(Emulator* e) {
@@ -2800,7 +2812,7 @@ static void dma_mcycle(Emulator* e) {
   assert(addr_offset < OAM_TRANSFER_SIZE);
   MemoryTypeAddressPair pair = DMA.source;
   pair.addr += addr_offset;
-  u8 value = read_u8_no_dma_check(e, pair);
+  u8 value = read_u8_pair(e, pair);
   write_oam_no_mode_check(e, addr_offset, value);
   DMA.cycles += CPU_MCYCLE;
   if (VALUE_WRAPPED(DMA.cycles, DMA_CYCLES)) {
