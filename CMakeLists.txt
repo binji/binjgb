@@ -81,6 +81,7 @@ if (NOT EMSCRIPTEN)
       src/debugger/audio-window.cc
       src/debugger/emulator-window.cc
       src/debugger/disassembly-window.cc
+      src/debugger/io-window.cc
       src/debugger/map-window.cc
       src/debugger/memory-window.cc
       src/debugger/obj-window.cc

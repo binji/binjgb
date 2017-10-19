@@ -99,6 +99,7 @@ Debugger::Debugger()
     : audio_window(this),
       disassembly_window(this),
       emulator_window(this),
+      io_window(this),
       map_window(this),
       memory_window(this),
       obj_window(this),
@@ -262,6 +263,7 @@ void Debugger::Run() {
         ImGui::DockBuilderDockWindow(s_map_window_name, mid_bottom);
         ImGui::DockBuilderDockWindow(s_disassembly_window_name, right);
         ImGui::DockBuilderDockWindow(s_memory_window_name, right);
+        ImGui::DockBuilderDockWindow(s_io_window_name, right);
         ImGui::DockBuilderDockWindow(s_rom_window_name, right);
         ImGui::DockBuilderFinish(dockspace_id);
       }
@@ -276,6 +278,7 @@ void Debugger::Run() {
       map_window.Tick();
       rom_window.Tick();
       memory_window.Tick();
+      io_window.Tick();
       disassembly_window.Tick();
     }
 
@@ -429,6 +432,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Memory", NULL, &memory_window.is_open);
       ImGui::MenuItem("Rewind", NULL, &rewind_window.is_open);
       ImGui::MenuItem("ROM", NULL, &rom_window.is_open);
+      ImGui::MenuItem("IO", NULL, &io_window.is_open);
       ImGui::EndMenu();
     }
     ImGui::EndMenuBar();

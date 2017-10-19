@@ -83,6 +83,13 @@ typedef enum ObjPriority {
   OBJ_PRIORITY_BEHIND_BG = 1,
 } ObjPriority;
 
+typedef enum {
+  TIMER_CLOCK_4096_HZ = 0,
+  TIMER_CLOCK_262144_HZ = 1,
+  TIMER_CLOCK_65536_HZ = 2,
+  TIMER_CLOCK_16384_HZ = 3,
+} TimerClock;
+
 /* TODO(binji): endianness */
 #define REGISTER_PAIR(X, Y) \
   union {                   \

@@ -153,6 +153,11 @@ class Debugger {
     void Tick();
   };
 
+  struct IOWindow : Window {
+    explicit IOWindow(Debugger*);
+    void Tick();
+  };
+
   struct MapWindow : Window {
     explicit MapWindow(Debugger*);
     void Tick();
@@ -224,6 +229,7 @@ class Debugger {
   AudioWindow audio_window;
   DisassemblyWindow disassembly_window;
   EmulatorWindow emulator_window;
+  IOWindow io_window;
   MapWindow map_window;
   MemoryWindow memory_window;
   ObjWindow obj_window;
@@ -234,6 +240,7 @@ class Debugger {
   static const char s_audio_window_name[];
   static const char s_disassembly_window_name[];
   static const char s_emulator_window_name[];
+  static const char s_io_window_name[];
   static const char s_map_window_name[];
   static const char s_memory_window_name[];
   static const char s_obj_window_name[];

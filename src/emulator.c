@@ -262,13 +262,6 @@ typedef enum {
 } JoypadSelect;
 
 typedef enum {
-  TIMER_CLOCK_4096_HZ = 0,
-  TIMER_CLOCK_262144_HZ = 1,
-  TIMER_CLOCK_65536_HZ = 2,
-  TIMER_CLOCK_16384_HZ = 3,
-} TimerClock;
-
-typedef enum {
   TIMA_STATE_NORMAL,
   TIMA_STATE_OVERFLOW,
   TIMA_STATE_RESET,
