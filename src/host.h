@@ -120,8 +120,8 @@ typedef struct HostInit {
   int audio_frequency;
   int audio_frames;
   f32 audio_volume;
-  size_t emulator_state_buffer_capacity;
-  int frames_per_emulator_state;
+  size_t rewind_buffer_capacity;
+  int frames_per_base_state;
 } HostInit;
 
 typedef struct HostConfig {
@@ -160,17 +160,25 @@ void host_enable_palette(struct Host*, Bool enabled);
 void host_render_screen_overlay(struct Host*, struct HostTexture*);
 
 /* Rewind support. */
+
 Cycles host_first_cycles(struct Host*);
 Cycles host_last_cycles(struct Host*);
-/* Returns cycle count reached, which may not equal cycles if the timeout
- * expired. */
-Cycles host_seek_to_cycles(struct Host*, Cycles cycles, f64 timeout_ms);
+
+Cycles host_get_rewind_first_cycles(struct Host*);
+Cycles host_get_rewind_last_cycles(struct Host*);
+size_t host_get_rewind_base_bytes(struct Host*);
+size_t host_get_rewind_diff_bytes(struct Host*);
+size_t host_get_rewind_uncompressed_bytes(struct Host*);
+void host_get_rewind_buffer_usage(struct Host*, size_t* out_used,
+                                  size_t* out_capacity);
+Result host_seek_to_cycles(struct Host*, Cycles cycles);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);
 HostTexture* host_create_texture(struct Host*, int w, int h, HostTextureFormat);
 void host_upload_texture(struct Host*, HostTexture*, int w, int h,
                          const void* data);
 void host_destroy_texture(struct Host*, HostTexture*);
+
 
 #ifdef __cplusplus
 }

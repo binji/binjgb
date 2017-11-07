@@ -159,6 +159,7 @@ Cycles emulator_get_cycles(struct Emulator*);
 u32 emulator_get_ppu_frame(struct Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
+void emulator_init_state_file_data(FileData*);
 Result emulator_read_state(struct Emulator*, const FileData*);
 Result emulator_write_state(struct Emulator*, FileData*);
 Result emulator_read_ext_ram(struct Emulator*, const FileData*);

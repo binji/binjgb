@@ -3587,6 +3587,11 @@ static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
   ON_ERROR_RETURN;
 }
 
+void emulator_init_state_file_data(FileData* file_data) {
+  file_data->size = sizeof(EmulatorState);
+  file_data->data = malloc(file_data->size);
+}
+
 Result emulator_read_state(Emulator* e, const FileData* file_data) {
   CHECK_MSG(file_data->size == sizeof(EmulatorState),
             "save state file is wrong size: %ld, expected %ld.\n",
@@ -3678,8 +3683,7 @@ error:
 Result emulator_write_state_to_file(struct Emulator* e, const char* filename) {
   Result result = ERROR;
   FileData file_data;
-  file_data.size = sizeof(EmulatorState);
-  file_data.data = malloc(file_data.size);
+  emulator_init_state_file_data(&file_data);
   CHECK(SUCCESS(emulator_write_state(e, &file_data)));
   CHECK(SUCCESS(file_write(filename, &file_data)));
   result = OK;

@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 #include "emulator-debug.h"
@@ -410,8 +411,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
   };
   // TODO: make these configurable?
-  host_init.frames_per_emulator_state = 8;
-  host_init.emulator_state_buffer_capacity = MEGABYTES(20);
+  host_init.frames_per_base_state = 120;  // ~2 seconds.
+  host_init.rewind_buffer_capacity = MEGABYTES(2);
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -630,6 +631,24 @@ void Debugger::EmulatorWindow() {
   ImGui::EndDock();
 }
 
+static std::string PrettySize(size_t size) {
+  char buffer[1000];
+  const char* suffix;
+  float fsize;
+  if (size > MEGABYTES(1)) {
+    suffix = "Mib";
+    fsize = size / (float)(MEGABYTES(1));
+  } else if (size > KILOBYTES(1)) {
+    suffix = "Kib";
+    fsize = size / (float)(KILOBYTES(1));
+  } else {
+    suffix = "b";
+    fsize = size;
+  }
+  snprintf(buffer, sizeof(buffer), "%.1f%s", fsize, suffix);
+  return buffer;
+}
+
 void Debugger::AudioWindow() {
   ImGui::SetNextDock(ImGuiDockSlot_Bottom);
   if (ImGui::BeginDock("Audio", &audio_window_open)) {
@@ -654,6 +673,32 @@ void Debugger::AudioWindow() {
                      128, ImVec2(0, 80));
     ImGui::PlotLines("right", audio_data[1], kAudioDataSamples, 0, nullptr, 0,
                      128, ImVec2(0, 80));
+
+    // TODO(binji): better place for this
+    size_t base = host_get_rewind_base_bytes(host);
+    size_t diff = host_get_rewind_diff_bytes(host);
+    size_t total = base + diff;
+    size_t uncompressed = host_get_rewind_uncompressed_bytes(host);
+    Cycles total_cycles = host_last_cycles(host) - host_first_cycles(host);
+    float sec = (float)total_cycles / CPU_CYCLES_PER_SECOND;
+
+    ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
+                PrettySize(base).c_str(), PrettySize(diff).c_str(),
+                PrettySize(total).c_str(), (float)(total)*100 / uncompressed);
+    ImGui::Text("rewind uncomp: %s", PrettySize(uncompressed).c_str());
+    size_t used, capacity;
+    host_get_rewind_buffer_usage(host, &used, &capacity);
+    ImGui::Text("rewind used: %s/%s (%.0f%%)", PrettySize(used).c_str(),
+                PrettySize(capacity).c_str(), (float)used * 100 / capacity);
+    ImGui::Text("rate: %s/sec %s/min %s/hr", PrettySize(total / sec).c_str(),
+                PrettySize(total / sec * 60).c_str(),
+                PrettySize(total / sec * 60 * 60).c_str());
+
+    Cycles first = host_get_rewind_first_cycles(host);
+    Cycles last = host_get_rewind_last_cycles(host);
+    float range = (float)(last - first) / CPU_CYCLES_PER_SECOND;
+    ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", first, last,
+                range);
   }
   ImGui::EndDock();
 }

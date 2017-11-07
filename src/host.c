@@ -27,25 +27,95 @@
   while (0)
 
 #define GET_CYCLES(x) ((x).cycles)
+#define CMP_LT(x, y) ((x) < (y))
+#define CMP_GT(x, y) ((x) > (y))
 
-#define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET) \
-  Type* var = NULL;                                                \
-  if (init_end - init_begin != 0) {                                \
-    Type* begin = init_begin; /* Inclusive. */                     \
-    Type* end = init_end;     /* Exclusive. */                     \
-    while (end - begin > 1) {                                      \
-      Type* mid = begin + ((end - begin) / 2);                     \
-      if (to_find == GET(*mid)) {                                  \
-        begin = mid;                                               \
-        break;                                                     \
-      } else if (to_find < GET(*mid)) {                            \
-        end = mid;                                                 \
-      } else {                                                     \
-        begin = mid + 1;                                           \
-      }                                                            \
-    }                                                              \
-    var = begin;                                                   \
+#define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET, CMP) \
+  Type* var = NULL;                                                     \
+  if (init_end - init_begin != 0) {                                     \
+    Type* begin = init_begin; /* Inclusive. */                          \
+    Type* end = init_end;     /* Exclusive. */                          \
+    while (end - begin > 1) {                                           \
+      Type* mid = begin + ((end - begin) / 2);                          \
+      if (to_find == GET(*mid)) {                                       \
+        begin = mid;                                                    \
+        break;                                                          \
+      } else if (CMP(to_find, GET(*mid))) {                             \
+        end = mid;                                                      \
+      } else {                                                          \
+        begin = mid + 1;                                                \
+      }                                                                 \
+    }                                                                   \
+    var = begin;                                                        \
   }
+
+#define CHECK_WRITE(count, dst, dst_max_end) \
+  do {                                       \
+    if ((dst) + (count) > (dst_max_end)) {   \
+      return NULL;                           \
+    }                                        \
+  } while (0)
+
+/* RLE encoded as follows:
+ * - non-runs are written directly
+ * - runs are written with the first two bytes of the run , followed by the
+ *   number of subsequent bytes in the run (i.e. count - 2) encoded as a
+ *   varint. */
+#define ENCODE_RLE(READ, src_size, dst_begin, dst_max_end, dst_new_end) \
+  do {                                                                  \
+    u8* dst = dst_begin;                                                \
+    assert(src_size > 0);                                               \
+    size_t src_left = src_size - 1;                                     \
+                                                                        \
+    /* Always write the first byte. */                                  \
+    u8 last = READ();                                                   \
+    CHECK_WRITE(1, dst, dst_max_end);                                   \
+    *dst++ = last;                                                      \
+                                                                        \
+    u32 count = 1;                                                      \
+    for (; src_left > 0; src_left--) {                                  \
+      u8 next = READ();                                                 \
+      if (next == last) {                                               \
+        count++;                                                        \
+        continue;                                                       \
+      }                                                                 \
+      CHECK_WRITE(1, dst, dst_max_end);                                 \
+      *dst++ = last;                                                    \
+      if (count >= 2) {                                                 \
+        dst = write_varint(count - 2, dst, dst_max_end);                \
+        if (!dst) {                                                     \
+          return NULL;                                                  \
+        }                                                               \
+      }                                                                 \
+                                                                        \
+      last = next;                                                      \
+      count = 1;                                                        \
+    }                                                                   \
+                                                                        \
+    dst_new_end =                                                       \
+        count >= 2 ? write_varint(count - 2, dst, dst_max_end) : dst;   \
+  } while (0)
+
+#define DECODE_RLE(WRITE, src, src_size)   \
+  do {                                     \
+    assert(src_size > 0);                  \
+    size_t src_left = src_size - 1;        \
+                                           \
+    u8 last = *src++;                      \
+    WRITE(last);                           \
+    for (; src_left > 0; src_left--) {     \
+      u8 next = *src++;                    \
+      if (next == last) {                  \
+        u32 count = read_varint(&src) + 1; \
+        for (; count > 0; count--) {       \
+          WRITE(last);                     \
+        }                                  \
+      } else {                             \
+        WRITE(next);                       \
+        last = next;                       \
+      }                                    \
+    }                                      \
+  } while (0)
 
 typedef f32 HostAudioSample;
 #define AUDIO_SPEC_FORMAT AUDIO_F32
@@ -56,6 +126,8 @@ typedef f32 HostAudioSample;
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
 #define JOYPAD_BUFFER_DEFAULT_CAPACITY 4096
+
+#define INVALID_CYCLES (~0ULL)
 
 typedef struct {
   GLint internal_format;
@@ -81,25 +153,52 @@ typedef struct JoypadSearchResult {
   JoypadState* state;
 } JoypadSearchResult;
 
-typedef struct {
-  size_t index;
-  void* next;
-} EmulatorStateFreeListNode;
+typedef enum RewindStateKind {
+  RewindStateKind_Base,
+  RewindStateKind_Diff,
+} RewindStateKind;
 
-typedef struct {
+typedef struct RewindStateInfo {
   Cycles cycles;
-  FileData file_data;
-} EmulatorStateInfo;
+  u8* data;
+  size_t size;
+  RewindStateKind kind;
+} RewindStateInfo;
 
-typedef struct {
-  void* data;
-  size_t capacity;
-  EmulatorStateFreeListNode* first_free;
-  EmulatorStateInfo* state_info;
-  size_t num_states;
-  size_t max_states;
-  int frames_until_next_state;
-} EmulatorStateBuffer;
+typedef struct RewindStateInfoRange {
+  RewindStateInfo* begin; /* begin <= end; if begin == end range is empty. */
+  RewindStateInfo* end;   /* end is exclusive. */
+} RewindStateInfoRange;
+
+typedef struct RewindDataRange {
+  u8* begin;
+  u8* end;
+} RewindDataRange;
+
+typedef struct RewindBuffer {
+ /* All RewindStateInfo elements and their associated data are stored in the
+  * same buffer. The data grows from lower addresses to higher addresses
+  * starting from the beginning of the buffer. The info grows in the opposite
+  * direction, from the opposite end. When the buffer fills, the older values
+  * are overwritten. When this happens, there may be a gap in the used data;
+  * this is why there are two data_ranges. Thus, there are two info_ranges to
+  * maintain symmetry. All RewindStateInfo elements in info_range[i] have data
+  * in data_range[i]. */
+  RewindDataRange data_range[2];
+  RewindStateInfoRange info_range[2];
+  FileData last_state;
+  FileData last_base_state;
+  Cycles last_base_state_cycles;
+  int frames_until_next_base;
+
+  /* Data is decompressed into these states when seeking. */
+  FileData seek_base_state;
+  FileData seek_diff_state;
+
+  /* Stats */
+  size_t total_kind_bytes[2];
+  size_t total_uncompressed_bytes;
+} RewindBuffer;
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -121,7 +220,7 @@ typedef struct Host {
   struct HostUI* ui;
   HostTexture* fb_texture;
   JoypadBuffer joypad_buffer_sentinel;
-  EmulatorStateBuffer state_buffer;
+  RewindBuffer rewind_buffer;
   JoypadButtons last_joypad_buttons;
   Cycles last_cycles;
 } Host;
@@ -131,8 +230,8 @@ static struct Emulator* host_get_emulator(Host* host) {
 }
 
 static Result host_init_video(Host* host) {
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   host->window = SDL_CreateWindow(
       "binjgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -351,8 +450,8 @@ static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
 
   JoypadState* begin = result.buffer->data;
   JoypadState* end = begin + result.buffer->size;
-  LOWER_BOUND(JoypadState, lower_bound, begin, end, cycles, GET_CYCLES);
-  assert(lower_bound != NULL);  // The buffer should not be empty.
+  LOWER_BOUND(JoypadState, lower_bound, begin, end, cycles, GET_CYCLES, CMP_LT);
+  assert(lower_bound != NULL); /* The buffer should not be empty. */
 
   result.state = lower_bound;
   assert(result.state->cycles <= cycles);
@@ -388,56 +487,357 @@ static void host_init_joypad(Host* host, struct Emulator* e) {
   host_store_joypad(host, &host->last_joypad_buttons);
 }
 
-static Result alloc_emulator_state(Host* host) {
+static u8* write_varint(u32 value, u8* dst_begin, u8* dst_max_end) {
+  u8* dst = dst_begin;
+  if (value < 0x80) {
+    CHECK_WRITE(1, dst, dst_max_end);
+    *dst++ = (u8)value;
+  } else if (value < 0x4000) {
+    CHECK_WRITE(2, dst, dst_max_end);
+    *dst++ = 0x80 | (value & 0x7f);
+    *dst++ = (value >> 7) & 0x7f;
+  } else {
+    /* If this fires there is a run of 128K. In the current EmulatorState this
+     * is impossible. */
+    assert(value < 0x20000);
+    CHECK_WRITE(3, dst, dst_max_end);
+    *dst++ = 0x80 | (value & 0x7f);
+    *dst++ = 0x80 | ((value >> 7) & 0x7f);
+    *dst++ = (value >> 14) & 0x7f;
+  }
+  return dst;
+}
+
+static u32 read_varint(const u8** src) {
+  const u8* s = *src;
+  u32 result = 0;
+  if ((s[0] & 0x80) == 0) {
+    return s[0];
+  } else if ((s[1] & 0x80) == 0) {
+    return (s[1] << 7) | (s[0] & 0x7f);
+  } else {
+    assert((s[2] & 0x80) == 0);
+    return (s[2] << 14) | ((s[1] & 0x7f) << 7) | (s[0] & 0x7f);
+  }
+}
+
+static u8* encode_rle(const u8* src, size_t src_size, u8* dst_begin,
+                      u8* dst_max_end) {
+  u8* dst_new_end;
+#define READ() (*src++)
+  ENCODE_RLE(READ, src_size, dst_begin, dst_max_end, dst_new_end);
+#undef READ
+  return dst_new_end;
+}
+
+static void decode_rle(const u8* src, size_t src_size, u8* dst, u8* dst_end) {
+#define WRITE(x) *dst++ = (x)
+  DECODE_RLE(WRITE, src, src_size);
+#undef WRITE
+  assert(dst == dst_end);
+}
+
+static u8* encode_diff(const u8* src, const u8* base, size_t src_size,
+                       u8* dst_begin, u8* dst_max_end) {
+  u8* dst_new_end;
+#define READ() (*src++ - *base++)
+  ENCODE_RLE(READ, src_size, dst_begin, dst_max_end, dst_new_end);
+#undef READ
+  return dst_new_end;
+}
+
+static void decode_diff(const u8* src, size_t src_size, const u8* base, u8* dst,
+                        u8* dst_end) {
+#define WRITE(x) *dst++ = (*base++ + (x))
+  DECODE_RLE(WRITE, src, src_size);
+#undef WRITE
+  assert(dst == dst_end);
+}
+
+static RewindStateInfo* append_rewind_state(Host* host) {
+  RewindBuffer* buf = &host->rewind_buffer;
   struct Emulator* e = host_get_emulator(host);
-  EmulatorStateBuffer* sb = &host->state_buffer;
-  if (!sb->first_free) {
-    /* TODO: Pick a state to free. */
+  Cycles cycles = emulator_get_cycles(e);
+  (void)emulator_write_state(e, &buf->last_state);
+
+  /* The new state must be written in sorted order; if it is out of order (from
+   * a rewind), then the subsequent saved states should have been cleared
+   * first. */
+  assert(host_get_rewind_last_cycles(host) == INVALID_CYCLES ||
+         cycles > host_get_rewind_first_cycles(host));
+
+  RewindStateKind kind;
+  if (buf->frames_until_next_base-- == 0) {
+    kind = RewindStateKind_Base;
+    buf->frames_until_next_base = host->init.frames_per_base_state;
+  } else {
+    kind = RewindStateKind_Diff;
+  }
+
+  RewindDataRange* data_range = buf->data_range;
+  RewindStateInfoRange* info_range = buf->info_range;
+  RewindStateInfo* new_info = --info_range[1].begin;
+  if ((u8 *)new_info <= data_range[1].end) {
+  wrap:
+    /* Need to wrap, roll back decrement and swap ranges. */
+    info_range[1].begin++;
+    info_range[0] = info_range[1];
+    info_range[1].begin = info_range[1].end;
+    data_range[1] = data_range[0];
+    data_range[0].end = data_range[0].begin;
+
+    new_info = --info_range[1].begin;
+    assert((u8*)new_info > data_range[1].end);
+  }
+
+  u8* data_begin = data_range[0].end;
+  u8* data_end_max = (u8*)MIN(info_range[0].begin, new_info);
+  u8* data_end;
+  switch (kind) {
+    case RewindStateKind_Diff:
+      if (buf->last_base_state_cycles != INVALID_CYCLES) {
+        data_end = encode_diff(buf->last_state.data, buf->last_base_state.data,
+                               buf->last_state.size, data_begin, data_end_max);
+        break;
+      }
+      /* There is no previous base state, so we can't diff. Fallthrough to
+       * writing a base state. */
+
+    case RewindStateKind_Base:
+      kind = RewindStateKind_Base;
+      data_end = encode_rle(buf->last_state.data, buf->last_state.size,
+                            data_begin, data_end_max);
+      memcpy(buf->last_base_state.data, buf->last_state.data,
+             buf->last_state.size);
+      buf->last_base_state_cycles = cycles;
+      break;
+  }
+
+  if (data_end == NULL) {
+    /* Failed to write, need to wrap. */
+    goto wrap;
+  }
+
+  assert(data_end <= data_end_max);
+  data_range[0].end = data_end;
+
+  /* Check to see how many data chunks we overwrote. */
+  RewindStateInfo* new_end = info_range[0].end;
+  while (info_range[0].begin < new_end && new_end[-1].data < data_end) {
+    --new_end;
+  }
+
+  new_end = MIN(new_end, new_info);
+
+  info_range[0].end = new_end;
+  info_range[0].begin = MIN(info_range[0].begin, info_range[0].end);
+
+  new_info->cycles = cycles;
+  new_info->data = data_begin;
+  new_info->size = data_end - data_begin;
+  new_info->kind = kind;
+
+  if (info_range[0].begin < info_range[0].end) {
+    data_range[1].begin = info_range[0].end[-1].data;
+    data_range[1].end = info_range[0].begin->data + info_range[0].begin->size;
+  } else {
+    data_range[1].begin = data_range[1].end =
+        info_range[1].begin->data + info_range[1].begin->size;
+  }
+
+  /* Update stats. */
+  buf->total_kind_bytes[kind] += new_info->size;
+  buf->total_uncompressed_bytes += buf->last_state.size;
+
+  return new_info;
+}
+
+static void host_init_rewind_buffer(Host* host) {
+  size_t capacity = host->init.rewind_buffer_capacity;
+  if (capacity == 0) {
+    return;
+  }
+
+  u8* data = malloc(capacity);
+  RewindBuffer* buf = &host->rewind_buffer;
+  emulator_init_state_file_data(&buf->last_state);
+  emulator_init_state_file_data(&buf->last_base_state);
+  emulator_init_state_file_data(&buf->seek_base_state);
+  emulator_init_state_file_data(&buf->seek_diff_state);
+  buf->last_base_state_cycles = INVALID_CYCLES;
+  buf->data_range[0].begin = buf->data_range[0].end = data;
+  buf->data_range[1] = buf->data_range[0];
+  RewindStateInfo* info = (RewindStateInfo*)(data + capacity);
+  buf->info_range[1].begin = buf->info_range[1].end = info;
+  buf->info_range[0] = buf->info_range[1];
+  buf->frames_until_next_base = 0;
+  append_rewind_state(host);
+}
+
+static Bool is_rewind_range_empty(RewindStateInfoRange* r) {
+  return r->end == r->begin;
+}
+
+static Bool is_in_rewind_range(RewindStateInfoRange* range, Cycles cycles) {
+  if (is_rewind_range_empty(range)) {
+    return FALSE;
+  }
+
+  /* begin is inclusive and end is exclusive. */
+  return range->begin->cycles <= cycles && cycles <= range->end[-1].cycles;
+}
+
+Cycles host_get_rewind_first_cycles(struct Host* host) {
+  RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
+  /* info_range[0] is always older than info_range[1], if it exists, so check
+   * that first. */
+  int i;
+  for (i = 0; i < 2; ++i) {
+    if (!is_rewind_range_empty(&info_range[i])) {
+      /* end is exclusive. */
+      return info_range[i].end[-1].cycles;
+    }
+  }
+
+  return INVALID_CYCLES;
+}
+
+Cycles host_get_rewind_last_cycles(struct Host* host) {
+  RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
+  /* info_range[1] is always newer than info_range[0]. There's no need to check
+   * info_range[0], because if info_range[1] doesn't exist, then info_range[0]
+   * won't exist either. */
+  if (!is_rewind_range_empty(&info_range[1])) {
+    return info_range[1].begin->cycles;
+  } else {
+    assert(is_rewind_range_empty(&info_range[0]));
+  }
+
+  return INVALID_CYCLES;
+}
+
+size_t host_get_rewind_base_bytes(struct Host* host) {
+  return host->rewind_buffer.total_kind_bytes[RewindStateKind_Base];
+}
+
+size_t host_get_rewind_diff_bytes(struct Host* host) {
+  return host->rewind_buffer.total_kind_bytes[RewindStateKind_Diff];
+}
+
+size_t host_get_rewind_uncompressed_bytes(struct Host* host) {
+  return host->rewind_buffer.total_uncompressed_bytes;
+}
+
+void host_get_rewind_buffer_usage(struct Host* host, size_t* out_used,
+                                  size_t* out_capacity) {
+  size_t used = 0;
+  int i;
+  for (i = 0; i < 2; ++i) {
+    RewindDataRange* data_range = &host->rewind_buffer.data_range[i];
+    RewindStateInfoRange* info_range = &host->rewind_buffer.info_range[i];
+    used += data_range->end - data_range->begin;
+    used += (info_range->end - info_range->begin) * sizeof(RewindStateInfo);
+  }
+
+  *out_used = used;
+  *out_capacity = host->init.rewind_buffer_capacity;
+}
+
+static RewindStateInfo* find_first_base_in_range(RewindStateInfoRange range) {
+  RewindStateInfo* base = range.begin;
+  for (; base < range.end; base++) {
+    if (base->kind == RewindStateKind_Base) {
+      return base;
+    }
+  }
+  return NULL;
+}
+
+static void host_handle_event(Host* host, EmulatorEvent event) {
+  struct Emulator* e = host_get_emulator(host);
+  if (event & EMULATOR_EVENT_NEW_FRAME) {
+    host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
+                        *emulator_get_frame_buffer(e));
+
+    append_rewind_state(host);
+  }
+  if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+    host_render_audio(host);
+    HOOK0(audio_buffer_full);
+  }
+}
+
+static void host_run_until_cycles(struct Host* host, Cycles cycles) {
+  struct Emulator* e = host_get_emulator(host);
+  while (1) {
+    EmulatorEvent event = emulator_run_until(e, cycles);
+    host_handle_event(host, event);
+    if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
+      break;
+    }
+  }
+  host->last_cycles = emulator_get_cycles(e);
+}
+
+Result host_seek_to_cycles(Host* host, Cycles cycles) {
+  RewindBuffer* buf = &host->rewind_buffer;
+  RewindStateInfoRange* info_range = buf->info_range;
+  int i;
+  for (i = 0; i < 2; ++i) {
+    if (is_in_rewind_range(&info_range[i], cycles)) {
+      break;
+    }
+  }
+
+  if (i == 2) {
     return ERROR;
   }
 
-  sb->num_states++;
-  EmulatorStateFreeListNode* node = sb->first_free;
-  sb->first_free = node->next;
-  assert(node->index < sb->max_states);
-  EmulatorStateInfo* info = &sb->state_info[node->index];
-  info->cycles = emulator_get_cycles(e);
-  info->file_data.data = (void*)node;
-  info->file_data.size = s_emulator_state_size;
-  return emulator_write_state(e, &info->file_data);
-}
+  RewindStateInfo* begin = info_range[i].begin;
+  RewindStateInfo* end = info_range[i].end;
+  LOWER_BOUND(RewindStateInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
+  assert(found);
+  assert(found->cycles <= cycles);
 
-static void host_init_emulator_state_buffer(Host* host) {
-  typedef EmulatorStateFreeListNode FreeListNode;
+  FileData* file_data;
+  if (found->kind == RewindStateKind_Base) {
+    file_data = &buf->seek_base_state;
+    decode_rle(found->data, found->size, file_data->data,
+               file_data->data + file_data->size);
+  } else {
+    assert(found->kind == RewindStateKind_Diff);
+    /* Find the previous base state. */
+    RewindStateInfoRange range = {found, end};
+    RewindStateInfo* base_info = find_first_base_in_range(range);
+    if (!base_info) {
+      if (info_range == &buf->info_range[0]) {
+        /* No previous base state, can't decode. */
+        return ERROR;
+      }
 
-  size_t capacity = host->init.emulator_state_buffer_capacity;
-  if (capacity > 0) {
-    size_t max_states = capacity / s_emulator_state_size;
-    char* data = malloc(capacity);
-    host->state_buffer.capacity = capacity;
-    host->state_buffer.data = data;
-    host->state_buffer.first_free = (EmulatorStateFreeListNode*)data;
-    host->state_buffer.num_states = 0;
-    host->state_buffer.max_states = max_states;
-    host->state_buffer.state_info =
-        malloc(sizeof(EmulatorStateInfo) * max_states);
-    host->state_buffer.frames_until_next_state =
-        host->init.frames_per_emulator_state;
-
-    size_t i;
-    FreeListNode* last = NULL;
-    for (i = max_states; i > 0; i--) {
-      FreeListNode* node =
-          (FreeListNode*)(data + (i - 1) * s_emulator_state_size);
-      node->index = i - 1;
-      node->next = last;
-      last = node;
+      /* Search the previous range. */
+      base_info = find_first_base_in_range(info_range[0]);
+      if (!base_info) {
+        return ERROR;
+      }
     }
 
-    /* Write the initial state for convenience. */
-    Result result = alloc_emulator_state(host);
-    assert(SUCCESS(result));
+    FileData* base = &buf->seek_base_state;
+    decode_rle(base_info->data, base_info->size, base->data,
+               base->data + base->size);
+
+    file_data = &buf->seek_diff_state;
+    decode_diff(found->data, found->size, base->data, file_data->data,
+                file_data->data + file_data->size);
   }
+
+  struct Emulator* e = host_get_emulator(host);
+  CHECK(SUCCESS(emulator_read_state(e, file_data)));
+  // TODO remove states from rewind buffer that are now invalid.
+  host_run_until_cycles(host, cycles);
+
+  return OK;
+  ON_ERROR_RETURN;
 }
 
 Result host_init(Host* host, struct Emulator* e) {
@@ -447,44 +847,17 @@ Result host_init(Host* host, struct Emulator* e) {
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
   host_init_joypad(host, e);
-  host_init_emulator_state_buffer(host);
+  host_init_rewind_buffer(host);
   host->last_cycles = emulator_get_cycles(e);
   return OK;
   ON_ERROR_RETURN;
-}
-
-static void host_handle_event(Host* host, EmulatorEvent event) {
-  struct Emulator* e = host_get_emulator(host);
-  if (event & EMULATOR_EVENT_NEW_FRAME) {
-    host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
-                        *emulator_get_frame_buffer(e));
-
-    if (host->state_buffer.frames_until_next_state > 0) {
-      if (--host->state_buffer.frames_until_next_state == 0) {
-        host->state_buffer.frames_until_next_state =
-            host->init.frames_per_emulator_state;
-        alloc_emulator_state(host);
-      }
-    }
-  }
-  if (event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
-    host_render_audio(host);
-    HOOK0(audio_buffer_full);
-  }
 }
 
 void host_run_ms(struct Host* host, f64 delta_ms) {
   struct Emulator* e = host_get_emulator(host);
   Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
-  while (1) {
-    EmulatorEvent event = emulator_run_until(e, until_cycles);
-    host_handle_event(host, event);
-    if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
-      break;
-    }
-  }
-  host->last_cycles = emulator_get_cycles(e);
+  host_run_until_cycles(host, until_cycles);
 }
 
 void host_step(Host* host) {
@@ -524,8 +897,7 @@ void host_delete(Host* host) {
     SDL_DestroyWindow(host->window);
     SDL_Quit();
     host_destroy_joypad(host);
-    free(host->state_buffer.state_info);
-    free(host->state_buffer.data);
+    free(host->rewind_buffer.data_range[0].begin);
     free(host->audio.buffer);
     free(host);
   }
@@ -655,18 +1027,4 @@ Cycles host_first_cycles(Host* host) {
 
 Cycles host_last_cycles(Host* host) {
   return host->last_cycles;
-}
-
-static EmulatorStateInfo* host_find_state(Host* host, Cycles cycles) {
-  EmulatorStateInfo* begin = host->state_buffer.state_info;
-  EmulatorStateInfo* end = begin + host->state_buffer.num_states;
-  LOWER_BOUND(EmulatorStateInfo, lower_bound, begin, end, cycles, GET_CYCLES);
-  assert(lower_bound != NULL);
-  assert(lower_bound->cycles <= cycles);
-  return lower_bound;
-}
-
-Cycles host_seek_to_cycles(Host* host, Cycles cycles, f64 timeout_ms) {
-  EmulatorStateInfo* info = host_find_state(host, cycles);
-  return 0;
 }
