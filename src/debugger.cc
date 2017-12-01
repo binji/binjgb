@@ -25,6 +25,7 @@
 
 static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
+static bool s_paused_at_start;
 
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
@@ -32,7 +33,8 @@ static void usage(int argc, char** argv) {
       "  -h,--help          help\n"
       "  -t,--trace         trace each instruction\n"
       "  -f,--font-scale=F  set the global font scale factor to F\n"
-      "  -l,--log S=N       set log level for system S to N\n\n",
+      "  -l,--log S=N       set log level for system S to N\n\n"
+      "  -p,--pause         pause at start\n",
       argv[0]);
 
   emulator_print_log_systems();
@@ -44,6 +46,7 @@ void parse_arguments(int argc, char** argv) {
     {'t', "trace", 0},
     {'f', "font-scale", 1},
     {'l', "log", 1},
+    {'p', "pause", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -98,6 +101,10 @@ void parse_arguments(int argc, char** argv) {
                 break;
               }
             }
+            break;
+
+          case 'p':
+            s_paused_at_start = true;
             break;
 
           default:
@@ -360,6 +367,7 @@ class Debugger {
 
 Debugger::Debugger() {
   ZERO_MEMORY(audio_data);
+  paused = s_paused_at_start;
 }
 
 Debugger::~Debugger() {
@@ -368,7 +376,7 @@ Debugger::~Debugger() {
 }
 
 bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
-                int font_scale) {
+                    int font_scale) {
   FileData rom;
   if (!SUCCESS(file_read(filename, &rom))) {
     return false;
