@@ -257,6 +257,9 @@ int main(int argc, char** argv) {
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
   host_init.audio_volume = s_audio_volume;
+  // TODO: make these configurable?
+  host_init.frames_per_base_state = 120;  // ~2 seconds.
+  host_init.rewind_buffer_capacity = MEGABYTES(2);
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
