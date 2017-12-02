@@ -716,31 +716,23 @@ Cycles host_get_rewind_last_cycles(struct Host* host) {
   return INVALID_CYCLES;
 }
 
-size_t host_get_rewind_base_bytes(struct Host* host) {
-  return host->rewind_buffer.total_kind_bytes[RewindStateKind_Base];
-}
+HostRewindStats host_get_rewind_stats(struct Host* host) {
+  HostRewindStats stats;
+  stats.base_bytes = host->rewind_buffer.total_kind_bytes[RewindStateKind_Base];
+  stats.diff_bytes = host->rewind_buffer.total_kind_bytes[RewindStateKind_Diff];
+  stats.uncompressed_bytes = host->rewind_buffer.total_uncompressed_bytes;
+  stats.used_bytes = 0;
+  stats.capacity_bytes = host->init.rewind_buffer_capacity;
 
-size_t host_get_rewind_diff_bytes(struct Host* host) {
-  return host->rewind_buffer.total_kind_bytes[RewindStateKind_Diff];
-}
-
-size_t host_get_rewind_uncompressed_bytes(struct Host* host) {
-  return host->rewind_buffer.total_uncompressed_bytes;
-}
-
-void host_get_rewind_buffer_usage(struct Host* host, size_t* out_used,
-                                  size_t* out_capacity) {
-  size_t used = 0;
   int i;
   for (i = 0; i < 2; ++i) {
     RewindDataRange* data_range = &host->rewind_buffer.data_range[i];
     RewindStateInfoRange* info_range = &host->rewind_buffer.info_range[i];
-    used += data_range->end - data_range->begin;
-    used += (info_range->end - info_range->begin) * sizeof(RewindStateInfo);
+    stats.used_bytes += data_range->end - data_range->begin;
+    stats.used_bytes +=
+        (info_range->end - info_range->begin) * sizeof(RewindStateInfo);
   }
-
-  *out_used = used;
-  *out_capacity = host->init.rewind_buffer_capacity;
+  return stats;
 }
 
 static RewindStateInfo* find_first_base_in_range(RewindStateInfoRange range) {

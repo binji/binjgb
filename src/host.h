@@ -141,6 +141,14 @@ typedef struct HostTexture {
   intptr_t handle;
 } HostTexture;
 
+typedef struct HostRewindStats {
+  size_t base_bytes;
+  size_t diff_bytes;
+  size_t uncompressed_bytes;
+  size_t used_bytes;
+  size_t capacity_bytes;
+} HostRewindStats;
+
 struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
@@ -166,11 +174,7 @@ Cycles host_last_cycles(struct Host*);
 
 Cycles host_get_rewind_first_cycles(struct Host*);
 Cycles host_get_rewind_last_cycles(struct Host*);
-size_t host_get_rewind_base_bytes(struct Host*);
-size_t host_get_rewind_diff_bytes(struct Host*);
-size_t host_get_rewind_uncompressed_bytes(struct Host*);
-void host_get_rewind_buffer_usage(struct Host*, size_t* out_used,
-                                  size_t* out_capacity);
+HostRewindStats host_get_rewind_stats(struct Host*);
 Result host_seek_to_cycles(struct Host*, Cycles cycles);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);

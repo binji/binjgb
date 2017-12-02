@@ -675,10 +675,13 @@ void Debugger::AudioWindow() {
                      128, ImVec2(0, 80));
 
     // TODO(binji): better place for this
-    size_t base = host_get_rewind_base_bytes(host);
-    size_t diff = host_get_rewind_diff_bytes(host);
+    HostRewindStats stats = host_get_rewind_stats(host);
+    size_t base = stats.base_bytes;
+    size_t diff = stats.diff_bytes;
     size_t total = base + diff;
-    size_t uncompressed = host_get_rewind_uncompressed_bytes(host);
+    size_t uncompressed = stats.uncompressed_bytes;
+    size_t used = stats.used_bytes;
+    size_t capacity = stats.capacity_bytes;
     Cycles total_cycles = host_last_cycles(host) - host_first_cycles(host);
     float sec = (float)total_cycles / CPU_CYCLES_PER_SECOND;
 
@@ -686,8 +689,6 @@ void Debugger::AudioWindow() {
                 PrettySize(base).c_str(), PrettySize(diff).c_str(),
                 PrettySize(total).c_str(), (float)(total)*100 / uncompressed);
     ImGui::Text("rewind uncomp: %s", PrettySize(uncompressed).c_str());
-    size_t used, capacity;
-    host_get_rewind_buffer_usage(host, &used, &capacity);
     ImGui::Text("rewind used: %s/%s (%.0f%%)", PrettySize(used).c_str(),
                 PrettySize(capacity).c_str(), (float)used * 100 / capacity);
     ImGui::Text("rate: %s/sec %s/min %s/hr", PrettySize(total / sec).c_str(),
