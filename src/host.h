@@ -119,6 +119,7 @@ typedef struct HostInit {
   int render_scale;
   int audio_frequency;
   int audio_frames;
+  f32 audio_volume;
 } HostInit;
 
 typedef struct HostConfig {
@@ -145,6 +146,7 @@ void host_run_ms(struct Host*, f64 delta_ms);
 void host_step(struct Host*);
 void host_render_audio(struct Host*);
 void host_reset_audio(struct Host*);
+void host_set_audio_volume(struct Host*, f32 volume);
 f64 host_get_monitor_refresh_ms(struct Host*);
 f64 host_get_time_ms(struct Host*);
 void host_set_config(struct Host*, const HostConfig*);

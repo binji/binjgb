@@ -32,12 +32,12 @@
     ptr = NULL;                  \
   }
 
-#define AUDIO_SPEC_FORMAT AUDIO_U16
+typedef f32 HostAudioSample;
+#define AUDIO_SPEC_FORMAT AUDIO_F32
 #define AUDIO_SPEC_CHANNELS 2
 #define AUDIO_SPEC_SAMPLE_SIZE sizeof(HostAudioSample)
 #define AUDIO_FRAME_SIZE (AUDIO_SPEC_SAMPLE_SIZE * AUDIO_SPEC_CHANNELS)
-#define AUDIO_CONVERT_SAMPLE_FROM_U8(X) ((X) << 8)
-typedef u16 HostAudioSample;
+#define AUDIO_CONVERT_SAMPLE_FROM_U8(X, fvol) ((fvol) * (X) * (1 / 256.0f))
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
 #define JOYPAD_BUFFER_DEFAULT_CAPACITY 4096
@@ -66,6 +66,7 @@ typedef struct {
   SDL_AudioSpec spec;
   u8* buffer; /* Size is spec.size. */
   Bool ready;
+  f32 volume; /* [0..1] */
 } HostAudio;
 
 typedef struct Host {
@@ -125,6 +126,7 @@ f64 host_get_time_ms(Host* host) {
 
 static Result host_init_audio(Host* host) {
   host->audio.ready = FALSE;
+  host_set_audio_volume(host, host->init.audio_volume);
   SDL_AudioSpec want;
   want.freq = host->init.audio_frequency;
   want.format = AUDIO_SPEC_FORMAT;
@@ -193,6 +195,10 @@ void host_reset_audio(Host* host) {
   SDL_PauseAudioDevice(host->audio.dev, 1);
 }
 
+void host_set_audio_volume(Host* host, f32 volume) {
+  host->audio.volume = CLAMP(volume, 0, 1);
+}
+
 void host_render_audio(Host* host) {
   struct Emulator* e = host->hook_ctx.e;
   HostAudio* audio = &host->audio;
@@ -205,11 +211,12 @@ void host_render_audio(Host* host) {
   HostAudioSample* dst = (HostAudioSample*)audio->buffer;
   HostAudioSample* dst_end = dst + frames * AUDIO_SPEC_CHANNELS;
   assert((u8*)dst_end <= audio->buffer + audio->spec.size);
+  f32 volume = audio->volume;
   size_t i;
   for (i = 0; i < frames; i++) {
     assert(dst + 2 <= dst_end);
-    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
-    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++);
+    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++, volume);
+    *dst++ = AUDIO_CONVERT_SAMPLE_FROM_U8(*src++, volume);
   }
   u32 queued_size = SDL_GetQueuedAudioSize(audio->dev);
   if (queued_size < AUDIO_MAX_QUEUED_SIZE) {

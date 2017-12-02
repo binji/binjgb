@@ -19,6 +19,7 @@ extern "C" {
 #define ZERO_MEMORY(x) memset(&(x), 0, sizeof(x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define CLAMP(x, min, max) MIN(max, MAX(min, x))
 #define NEXT_MODULO(value, mod) ((mod) - (value) % (mod))
 #define KILOBYTES(x) ((size_t)(x) * 1024)
 #define MEGABYTES(x) ((size_t)(x) * 1024 * 1024)

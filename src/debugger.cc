@@ -322,6 +322,8 @@ class Debugger {
   void WriteStateToFile();
   void ReadStateFromFile();
 
+  void SetAudioVolume(f32 volume);
+
   void MainMenuBar();
   void EmulatorWindow();
   void AudioWindow();
@@ -348,6 +350,7 @@ class Debugger {
 
   static const int kAudioDataSamples = 1000;
   f32 audio_data[2][kAudioDataSamples];
+  f32 audio_volume = 0.5f;
 
   bool highlight_obj = false;
   int highlight_obj_index = 0;
@@ -395,6 +398,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   host_init.render_scale = 4;
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
+  host_init.audio_volume = audio_volume;
   host_init.hooks.user_data = this;
   host_init.hooks.audio_buffer_full = [](HostHookContext* ctx) {
     static_cast<Debugger*>(ctx->user_data)->OnAudioBufferFull();
@@ -506,6 +510,8 @@ void Debugger::OnKeyDown(HostKeycode code) {
     case HOST_KEYCODE_SPACE: Toggle(paused); break;
     case HOST_KEYCODE_ESCAPE: running = false; break;
     case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
+    case HOST_KEYCODE_MINUS: SetAudioVolume(audio_volume - 0.05f); break;
+    case HOST_KEYCODE_EQUALS: SetAudioVolume(audio_volume + 0.05f); break;
     default: return;
   }
 
@@ -531,6 +537,11 @@ void Debugger::WriteStateToFile() {
 
 void Debugger::ReadStateFromFile() {
   emulator_read_state_from_file(e, save_state_filename);
+}
+
+void Debugger::SetAudioVolume(f32 volume) {
+  audio_volume = CLAMP(volume, 0, 1);
+  host_set_audio_volume(host, audio_volume);
 }
 
 void Debugger::MainMenuBar() {
@@ -630,6 +641,10 @@ void Debugger::AudioWindow() {
     ImGui::SameLine();
     ImGui::CheckboxNot("4", &config.disable_sound[APU_CHANNEL4]);
     emulator_set_config(e, &config);
+    if (ImGui::SliderFloat("Volume", &audio_volume, 0, 1)) {
+      audio_volume = CLAMP(audio_volume, 0, 1);
+      host_set_audio_volume(host, audio_volume);
+    }
 
     ImGui::Spacing();
     ImGui::PlotLines("left", audio_data[0], kAudioDataSamples, 0, nullptr, 0,

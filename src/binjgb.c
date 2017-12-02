@@ -15,6 +15,12 @@ static const char* s_save_state_filename;
 static Bool s_running = TRUE;
 static Bool s_step_frame = FALSE;
 static Bool s_paused = FALSE;
+static f32 s_audio_volume = 0.5f;
+
+static void inc_audio_volume(struct Host* host, f32 delta) {
+  s_audio_volume = CLAMP(s_audio_volume + delta, 0, 1);
+  host_set_audio_volume(host, s_audio_volume);
+}
 
 static void key_down(HostHookContext* ctx, HostKeycode code) {
   EmulatorConfig emu_config = emulator_get_config(ctx->e);
@@ -38,6 +44,8 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_SPACE: s_paused ^= 1; break;
     case HOST_KEYCODE_ESCAPE: s_running = FALSE; break;
     case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
+    case HOST_KEYCODE_MINUS: inc_audio_volume(ctx->host, -0.05f); break;
+    case HOST_KEYCODE_EQUALS: inc_audio_volume(ctx->host, +0.05f); break;
     default: return;
   }
 
@@ -87,6 +95,7 @@ int main(int argc, char** argv) {
   host_init.render_scale = 4;
   host_init.audio_frequency = audio_frequency;
   host_init.audio_frames = audio_frames;
+  host_init.audio_volume = s_audio_volume;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
