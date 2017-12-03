@@ -155,6 +155,7 @@ void host_begin_video(struct Host*);
 void host_end_video(struct Host*);
 void host_set_palette(struct Host*, RGBA palette[4]);
 void host_enable_palette(struct Host*, Bool enabled);
+void host_render_screen_overlay(struct Host*, struct HostTexture*);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);
 HostTexture* host_create_texture(struct Host*, int w, int h, HostTextureFormat);

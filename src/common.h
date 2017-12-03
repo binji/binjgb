@@ -44,6 +44,10 @@ extern "C" {
   return ERROR
 #define UNREACHABLE(...) PRINT_ERROR(__VA_ARGS__), exit(1)
 
+#define MAKE_RGBA(r, g, b, a)                                          \
+  (((u32)(u8)(a) << 24) | ((u32)(u8)(b) << 16) | ((u32)(u8)(g) << 8) | \
+   ((u32)(u8)(r)))
+
 typedef int8_t s8;
 typedef int32_t s32;
 typedef uint8_t u8;

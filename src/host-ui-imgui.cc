@@ -415,3 +415,8 @@ void host_ui_set_palette(struct HostUI* ui, RGBA palette[4]) {
 void host_ui_enable_palette(struct HostUI* ui, Bool enabled) {
   ui->enable_palette(enabled);
 }
+
+void host_ui_render_screen_overlay(struct HostUI* ui, HostTexture* tex) {
+  // TODO(binji)
+  assert(0);
+}

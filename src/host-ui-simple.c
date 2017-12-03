@@ -117,14 +117,18 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   }
 }
 
-void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture) {
-  glClearColor(0.1f, 0.1f, 0.1f, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
+static void render_screen_texture(struct HostUI* ui, HostTexture* tex) {
   glUseProgram(ui->program);
   glUniform1i(ui->uSampler, 0);
   glBindVertexArray(ui->vao);
-  glBindTexture(GL_TEXTURE_2D, fb_texture->handle);
+  glBindTexture(GL_TEXTURE_2D, tex->handle);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture) {
+  glClearColor(0.1f, 0.1f, 0.1f, 1);
+  glClear(GL_COLOR_BUFFER_BIT);
+  render_screen_texture(ui, fb_texture);
 }
 
 void host_ui_end_frame(struct HostUI* ui) {
@@ -148,3 +152,11 @@ void host_ui_enable_palette(struct HostUI* ui, Bool enabled) {
   glUseProgram(ui->program);
   glUniform1i(ui->uUsePalette, enabled ? 1 : 0);
 }
+
+void host_ui_render_screen_overlay(struct HostUI* ui, HostTexture* tex) {
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  render_screen_texture(ui, tex);
+  glDisable(GL_BLEND);
+}
+

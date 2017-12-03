@@ -491,3 +491,8 @@ void host_destroy_texture(struct Host* host, HostTexture* texture) {
   glDeleteTextures(1, &tex);
   free(texture);
 }
+
+void host_render_screen_overlay(struct Host* host,
+                                struct HostTexture* texture) {
+  host_ui_render_screen_overlay(host->ui, texture);
+}
