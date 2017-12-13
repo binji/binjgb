@@ -33,20 +33,20 @@
 #define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET, CMP) \
   Type* var = NULL;                                                     \
   if (init_end - init_begin != 0) {                                     \
-    Type* begin = init_begin; /* Inclusive. */                          \
-    Type* end = init_end;     /* Exclusive. */                          \
-    while (end - begin > 1) {                                           \
-      Type* mid = begin + ((end - begin) / 2);                          \
-      if (to_find == GET(*mid)) {                                       \
-        begin = mid;                                                    \
+    Type* begin_ = init_begin; /* Inclusive. */                         \
+    Type* end_ = init_end;     /* Exclusive. */                         \
+    while (end_ - begin_ > 1) {                                         \
+      Type* mid_ = begin_ + ((end_ - begin_) / 2);                      \
+      if (to_find == GET(*mid_)) {                                      \
+        begin_ = mid_;                                                  \
         break;                                                          \
-      } else if (CMP(to_find, GET(*mid))) {                             \
-        end = mid;                                                      \
+      } else if (CMP(to_find, GET(*mid_))) {                            \
+        end_ = mid_;                                                    \
       } else {                                                          \
-        begin = mid + 1;                                                \
+        begin_ = mid_;                                                  \
       }                                                                 \
     }                                                                   \
-    var = begin;                                                        \
+    var = begin_;                                                       \
   }
 
 #define CHECK_WRITE(count, dst, dst_max_end) \
@@ -65,45 +65,46 @@
   do {                                                                  \
     u8* dst = dst_begin;                                                \
     assert(src_size > 0);                                               \
-    size_t src_left = src_size - 1;                                     \
-                                                                        \
+    const u8* src_end = src + src_size;                                 \
     /* Always write the first byte. */                                  \
     u8 last = READ();                                                   \
     CHECK_WRITE(1, dst, dst_max_end);                                   \
     *dst++ = last;                                                      \
-                                                                        \
-    u32 count = 1;                                                      \
-    for (; src_left > 0; src_left--) {                                  \
+    while (src < src_end) {                                             \
       u8 next = READ();                                                 \
       if (next == last) {                                               \
-        count++;                                                        \
-        continue;                                                       \
-      }                                                                 \
-      CHECK_WRITE(1, dst, dst_max_end);                                 \
-      *dst++ = last;                                                    \
-      if (count >= 2) {                                                 \
-        dst = write_varint(count - 2, dst, dst_max_end);                \
+        u32 count = 0;                                                  \
+        while (src < src_end) {                                         \
+          next = READ();                                                \
+          if (next != last) {                                           \
+            break;                                                      \
+          }                                                             \
+          count++;                                                      \
+        }                                                               \
+        CHECK_WRITE(1, dst, dst_max_end);                               \
+        *dst++ = last;                                                  \
+        dst = write_varint(count, dst, dst_max_end);                    \
         if (!dst) {                                                     \
           return NULL;                                                  \
         }                                                               \
+        if (src == src_end) {                                           \
+          break;                                                        \
+        }                                                               \
       }                                                                 \
-                                                                        \
+      CHECK_WRITE(1, dst, dst_max_end);                                 \
+      *dst++ = next;                                                    \
       last = next;                                                      \
-      count = 1;                                                        \
     }                                                                   \
-                                                                        \
-    dst_new_end =                                                       \
-        count >= 2 ? write_varint(count - 2, dst, dst_max_end) : dst;   \
+    dst_new_end = dst;                                                  \
   } while (0)
 
 #define DECODE_RLE(WRITE, src, src_size)   \
   do {                                     \
     assert(src_size > 0);                  \
-    size_t src_left = src_size - 1;        \
-                                           \
+    const u8* src_end = src + src_size;    \
     u8 last = *src++;                      \
     WRITE(last);                           \
-    for (; src_left > 0; src_left--) {     \
+    while (src < src_end) {                \
       u8 next = *src++;                    \
       if (next == last) {                  \
         u32 count = read_varint(&src) + 1; \
@@ -148,10 +149,10 @@ typedef struct JoypadBuffer {
   struct JoypadBuffer *next, *prev;
 } JoypadBuffer;
 
-typedef struct JoypadSearchResult {
+typedef struct JoypadStateIter {
   JoypadBuffer* buffer;
   JoypadState* state;
-} JoypadSearchResult;
+} JoypadStateIter;
 
 typedef enum RewindStateKind {
   RewindStateKind_Base,
@@ -176,14 +177,31 @@ typedef struct RewindDataRange {
 } RewindDataRange;
 
 typedef struct RewindBuffer {
- /* All RewindStateInfo elements and their associated data are stored in the
-  * same buffer. The data grows from lower addresses to higher addresses
-  * starting from the beginning of the buffer. The info grows in the opposite
-  * direction, from the opposite end. When the buffer fills, the older values
-  * are overwritten. When this happens, there may be a gap in the used data;
-  * this is why there are two data_ranges. Thus, there are two info_ranges to
-  * maintain symmetry. All RewindStateInfo elements in info_range[i] have data
-  * in data_range[i]. */
+ /*
+  * |                  rewind buffer                      |
+  * |                                                     |
+  * | dr[0] | ... | dr[1] | ....... | ir[0] | ... | ir[1] |
+  *
+  * (dr == data_range, ir == info_range)
+  *
+  * All RewindStateInfo in ir[1] has a corresponding data range in dr[0].
+  * Similarly, all RewindStateInfo in ir[0] has a corresponding data range in
+  * dr[1].
+  *
+  * When new data is written, ir[1].begin moves left, which my overwrite old
+  * data in ir[0]. The data is written after dr[0].end. If the newly written
+  * data overlaps the beginning of dr[1], the associated RewindStateInfo in
+  * ir[0] is removed.
+  *
+  * When ir[0].begin and dr[1].end cross, the buffer is filled. At this point,
+  * dr[0] is moved to dr[1], and ir[1] is moved to ir[0]. (Just the pointers
+  * move, not the actual data). Then dr[0] is reset to an empty data range and
+  * ir[1] is reset to an empty info range.
+  *
+  * TODO(binji):: you can always recalculate the data ranges from the
+  * information in the info ranges. Remove?
+  *
+  */
   RewindDataRange data_range[2];
   RewindStateInfoRange info_range[2];
   FileData last_state;
@@ -192,7 +210,6 @@ typedef struct RewindBuffer {
   int frames_until_next_base;
 
   /* Data is decompressed into these states when seeking. */
-  FileData seek_base_state;
   FileData seek_diff_state;
 
   /* Stats */
@@ -400,6 +417,19 @@ static u8 pack_buttons(JoypadButtons* buttons) {
          (buttons->select << 2) | (buttons->B << 1) | (buttons->A << 0);
 }
 
+static JoypadButtons unpack_buttons(u8 packed) {
+  JoypadButtons buttons;
+  buttons.A = packed & 1;
+  buttons.B = (packed >> 1) & 1;
+  buttons.select = (packed >> 2) & 1;
+  buttons.start = (packed >> 3) & 1;
+  buttons.right = (packed >> 4) & 1;
+  buttons.left = (packed >> 5) & 1;
+  buttons.up = (packed >> 6) & 1;
+  buttons.down = (packed >> 7) & 1;
+  return buttons;
+}
+
 static Bool joypad_buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
   return lhs->down == rhs->down && lhs->up == rhs->up &&
          lhs->left == rhs->left && lhs->right == rhs->right &&
@@ -414,9 +444,30 @@ static void host_store_joypad(Host* host, JoypadButtons* buttons) {
   host->last_joypad_buttons = *buttons;
 }
 
-static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
+static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
+  if (!joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
+    host_store_joypad(host, buttons);
+  }
+}
+
+static void joypad_callback(JoypadButtons* joyp, void* user_data) {
+  Host* host = user_data;
+  const u8* state = SDL_GetKeyboardState(NULL);
+  joyp->up = state[SDL_SCANCODE_UP];
+  joyp->down = state[SDL_SCANCODE_DOWN];
+  joyp->left = state[SDL_SCANCODE_LEFT];
+  joyp->right = state[SDL_SCANCODE_RIGHT];
+  joyp->B = state[SDL_SCANCODE_Z];
+  joyp->A = state[SDL_SCANCODE_X];
+  joyp->start = state[SDL_SCANCODE_RETURN];
+  joyp->select = state[SDL_SCANCODE_BACKSPACE];
+
+  host_store_joypad_if_new(host, joyp);
+}
+
+static JoypadStateIter host_find_joypad(Host* host, Cycles cycles) {
   /* TODO(binji): Use a skip list if this is too slow? */
-  JoypadSearchResult result;
+  JoypadStateIter result;
   JoypadBuffer* first_buffer = host->joypad_buffer_sentinel.next;
   JoypadBuffer* last_buffer = host->joypad_buffer_sentinel.prev;
   assert(first_buffer->size != 0 && last_buffer->size != 0);
@@ -442,8 +493,8 @@ static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
   } else {
     /* Closer to the end. */
     JoypadBuffer* buffer = last_buffer;
-    while (cycles < buffer->data[buffer->size - 1].cycles) {
-      buffer = buffer->next;
+    while (cycles < buffer->data[0].cycles) {
+      buffer = buffer->prev;
     }
     result.buffer = buffer;
   }
@@ -458,25 +509,31 @@ static JoypadSearchResult host_find_joypad(Host* host, Cycles cycles) {
   return result;
 }
 
-static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
-  if (!joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
-    host_store_joypad(host, buttons);
+static JoypadStateIter host_get_next_joypad_state(JoypadStateIter iter) {
+  size_t index = iter.state - iter.buffer->data;
+  if (index < iter.buffer->size) {
+    ++iter.state;
+    return iter;
   }
+
+  iter.buffer = iter.buffer->next;
+  iter.state = iter.buffer ? iter.buffer->data : NULL;
+  return iter;
 }
 
-static void joypad_callback(JoypadButtons* joyp, void* user_data) {
-  Host* host = user_data;
-  const u8* state = SDL_GetKeyboardState(NULL);
-  joyp->up = state[SDL_SCANCODE_UP];
-  joyp->down = state[SDL_SCANCODE_DOWN];
-  joyp->left = state[SDL_SCANCODE_LEFT];
-  joyp->right = state[SDL_SCANCODE_RIGHT];
-  joyp->B = state[SDL_SCANCODE_Z];
-  joyp->A = state[SDL_SCANCODE_X];
-  joyp->start = state[SDL_SCANCODE_RETURN];
-  joyp->select = state[SDL_SCANCODE_BACKSPACE];
-
-  host_store_joypad_if_new(host, joyp);
+static void host_delete_after_joypad_state(Host* host, JoypadStateIter iter) {
+  size_t index = iter.state - iter.buffer->data;
+  iter.buffer->size = index + 1;
+  JoypadBuffer* buffer = iter.buffer->next;
+  JoypadBuffer* sentinel = &host->joypad_buffer_sentinel;
+  while (buffer != sentinel) {
+    JoypadBuffer* temp = buffer->next;
+    free(buffer->data);
+    free(buffer);
+    buffer = temp;
+  }
+  iter.buffer->next = sentinel;
+  sentinel->prev = iter.buffer;
 }
 
 static void host_init_joypad(Host* host, struct Emulator* e) {
@@ -512,11 +569,14 @@ static u32 read_varint(const u8** src) {
   const u8* s = *src;
   u32 result = 0;
   if ((s[0] & 0x80) == 0) {
+    *src += 1;
     return s[0];
   } else if ((s[1] & 0x80) == 0) {
+    *src += 2;
     return (s[1] << 7) | (s[0] & 0x7f);
   } else {
     assert((s[2] & 0x80) == 0);
+    *src += 3;
     return (s[2] << 14) | ((s[1] & 0x7f) << 7) | (s[0] & 0x7f);
   }
 }
@@ -662,7 +722,6 @@ static void host_init_rewind_buffer(Host* host) {
   RewindBuffer* buf = &host->rewind_buffer;
   emulator_init_state_file_data(&buf->last_state);
   emulator_init_state_file_data(&buf->last_base_state);
-  emulator_init_state_file_data(&buf->seek_base_state);
   emulator_init_state_file_data(&buf->seek_diff_state);
   buf->last_base_state_cycles = INVALID_CYCLES;
   buf->data_range[0].begin = buf->data_range[0].end = data;
@@ -684,7 +743,7 @@ static Bool is_in_rewind_range(RewindStateInfoRange* range, Cycles cycles) {
   }
 
   /* begin is inclusive and end is exclusive. */
-  return range->begin->cycles <= cycles && cycles <= range->end[-1].cycles;
+  return range->begin->cycles >= cycles && cycles >= range->end[-1].cycles;
 }
 
 Cycles host_get_rewind_first_cycles(struct Host* host) {
@@ -704,13 +763,12 @@ Cycles host_get_rewind_first_cycles(struct Host* host) {
 
 Cycles host_get_rewind_last_cycles(struct Host* host) {
   RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
-  /* info_range[1] is always newer than info_range[0]. There's no need to check
-   * info_range[0], because if info_range[1] doesn't exist, then info_range[0]
-   * won't exist either. */
-  if (!is_rewind_range_empty(&info_range[1])) {
-    return info_range[1].begin->cycles;
-  } else {
-    assert(is_rewind_range_empty(&info_range[0]));
+
+  int i;
+  for (i = 1; i >= 0; --i) {
+    if (!is_rewind_range_empty(&info_range[i])) {
+      return info_range[i].begin[0].cycles;
+    }
   }
 
   return INVALID_CYCLES;
@@ -761,6 +819,7 @@ static void host_handle_event(Host* host, EmulatorEvent event) {
 
 static void host_run_until_cycles(struct Host* host, Cycles cycles) {
   struct Emulator* e = host_get_emulator(host);
+  assert(emulator_get_cycles(e) <= cycles);
   while (1) {
     EmulatorEvent event = emulator_run_until(e, cycles);
     host_handle_event(host, event);
@@ -769,6 +828,24 @@ static void host_run_until_cycles(struct Host* host, Cycles cycles) {
     }
   }
   host->last_cycles = emulator_get_cycles(e);
+}
+
+typedef struct {
+  struct Emulator* e;
+  JoypadStateIter current;
+  JoypadStateIter next;
+} HostSeekJoypadCallbackInfo;
+
+static void host_seek_joypad_callback(struct JoypadButtons* joyp,
+                                      void* user_data) {
+  HostSeekJoypadCallbackInfo* info = user_data;
+  Cycles cycles = emulator_get_cycles(info->e);
+  while (info->next.state && info->next.state->cycles <= cycles) {
+    info->current = info->next;
+    info->next = host_get_next_joypad_state(info->next);
+  }
+
+  *joyp = unpack_buttons(info->current.state->buttons);
 }
 
 Result host_seek_to_cycles(Host* host, Cycles cycles) {
@@ -789,20 +866,26 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
   RewindStateInfo* end = info_range[i].end;
   LOWER_BOUND(RewindStateInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
   assert(found);
+  /* We actually want upper bound, so increment if it wasn't an exact match. */
+  if (found->cycles != cycles) {
+    ++found;
+  }
+
   assert(found->cycles <= cycles);
 
-  FileData* file_data;
+  FileData* file_data = NULL;
   if (found->kind == RewindStateKind_Base) {
-    file_data = &buf->seek_base_state;
+    file_data = &buf->last_base_state;
     decode_rle(found->data, found->size, file_data->data,
                file_data->data + file_data->size);
+    buf->last_base_state_cycles = found->cycles;
   } else {
     assert(found->kind == RewindStateKind_Diff);
     /* Find the previous base state. */
     RewindStateInfoRange range = {found, end};
     RewindStateInfo* base_info = find_first_base_in_range(range);
     if (!base_info) {
-      if (info_range == &buf->info_range[0]) {
+      if (i == 0) {
         /* No previous base state, can't decode. */
         return ERROR;
       }
@@ -814,9 +897,10 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
       }
     }
 
-    FileData* base = &buf->seek_base_state;
+    FileData* base = &buf->last_base_state;
     decode_rle(base_info->data, base_info->size, base->data,
                base->data + base->size);
+    buf->last_base_state_cycles = base_info->cycles;
 
     file_data = &buf->seek_diff_state;
     decode_diff(found->data, found->size, base->data, file_data->data,
@@ -825,8 +909,35 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
 
   struct Emulator* e = host_get_emulator(host);
   CHECK(SUCCESS(emulator_read_state(e, file_data)));
-  // TODO remove states from rewind buffer that are now invalid.
-  host_run_until_cycles(host, cycles);
+  assert(emulator_get_cycles(e) == found->cycles);
+
+  /* Remove states from rewind buffer that are now invalid. */
+  RewindDataRange* data_range = buf->data_range;
+  info_range[i].begin = found;
+  data_range[1 - i].end = found->data + found->size;
+  if (i == 0) {
+    info_range[1].begin = info_range[1].end;
+    data_range[0].end = data_range[0].begin;
+  }
+
+  if (emulator_get_cycles(e) < cycles) {
+    JoypadStateIter iter = host_find_joypad(host, found->cycles);
+    HostSeekJoypadCallbackInfo hsjci;
+    hsjci.e = e;
+    hsjci.current = iter;
+    hsjci.next = host_get_next_joypad_state(iter);
+
+    /* Save old joypad callback. */
+    JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
+    emulator_set_joypad_callback(e, host_seek_joypad_callback, &hsjci);
+
+    host_run_until_cycles(host, cycles);
+
+    /* Restore old joypad callback. */
+    emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
+
+    host_delete_after_joypad_state(host, hsjci.current);
+  }
 
   return OK;
   ON_ERROR_RETURN;

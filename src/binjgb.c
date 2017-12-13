@@ -6,6 +6,7 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -199,6 +200,19 @@ static void load_state(void) {
   }
 }
 
+static void rewind_by(Cycles delta) {
+  Cycles now = emulator_get_cycles(e);
+  if (now >= delta) {
+    Cycles then = now - delta;
+    if (SUCCESS(host_seek_to_cycles(host, then))) {
+      set_status_text("now: %" PRIu64 " -> %" PRIu64, now, then);
+      return;
+    }
+  }
+
+  set_status_text("sorry :(");
+}
+
 static void key_down(HostHookContext* ctx, HostKeycode code) {
   switch (code) {
     case HOST_KEYCODE_1: toggle_audio_channel(APU_CHANNEL1); break;
@@ -216,6 +230,7 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_TAB: set_no_sync(TRUE); break;
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
+    case HOST_KEYCODE_BACKSPACE: rewind_by(70224 * 60); break;
     default: break;
   }
 }
