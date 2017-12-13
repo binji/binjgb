@@ -49,6 +49,7 @@ static const char* s_save_state_filename;
 static Bool s_running = TRUE;
 static Bool s_step_frame = FALSE;
 static Bool s_paused = FALSE;
+static Bool s_rewinding = FALSE;
 static f32 s_audio_volume = 0.5f;
 
 static Overlay s_overlay;
@@ -205,12 +206,9 @@ static void rewind_by(Cycles delta) {
   if (now >= delta) {
     Cycles then = now - delta;
     if (SUCCESS(host_seek_to_cycles(host, then))) {
-      set_status_text("now: %" PRIu64 " -> %" PRIu64, now, then);
-      return;
+      s_rewinding = TRUE;
     }
   }
-
-  set_status_text("sorry :(");
 }
 
 static void key_down(HostHookContext* ctx, HostKeycode code) {
@@ -230,7 +228,7 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_TAB: set_no_sync(TRUE); break;
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
-    case HOST_KEYCODE_BACKSPACE: rewind_by(70224 * 60); break;
+    case HOST_KEYCODE_GRAVE: s_paused = s_rewinding = TRUE; break;
     default: break;
   }
 }
@@ -239,6 +237,7 @@ static void key_up(HostHookContext* ctx, HostKeycode code) {
   switch (code) {
     case HOST_KEYCODE_TAB: set_no_sync(FALSE); break;
     case HOST_KEYCODE_F11: toggle_fullscreen(); break;
+    case HOST_KEYCODE_GRAVE: s_paused = s_rewinding = FALSE; break;
     default: break;
   }
 }
@@ -294,6 +293,12 @@ int main(int argc, char** argv) {
         s_paused = TRUE;
         s_step_frame = FALSE;
       }
+    } else if (s_rewinding) {
+      Cycles total_cycles = host_get_rewind_last_cycles(host) -
+                            host_get_rewind_first_cycles(host);
+      f32 sec = (f32)total_cycles / CPU_CYCLES_PER_SECOND;
+      set_status_text("%.1f sec", sec);
+      rewind_by(70224 * 3 / 2);
     }
 
     host_begin_video(host);

@@ -737,15 +737,6 @@ static Bool is_rewind_range_empty(RewindStateInfoRange* r) {
   return r->end == r->begin;
 }
 
-static Bool is_in_rewind_range(RewindStateInfoRange* range, Cycles cycles) {
-  if (is_rewind_range_empty(range)) {
-    return FALSE;
-  }
-
-  /* begin is inclusive and end is exclusive. */
-  return range->begin->cycles >= cycles && cycles >= range->end[-1].cycles;
-}
-
 Cycles host_get_rewind_first_cycles(struct Host* host) {
   RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
   /* info_range[0] is always older than info_range[1], if it exists, so check
@@ -851,14 +842,17 @@ static void host_seek_joypad_callback(struct JoypadButtons* joyp,
 Result host_seek_to_cycles(Host* host, Cycles cycles) {
   RewindBuffer* buf = &host->rewind_buffer;
   RewindStateInfoRange* info_range = buf->info_range;
-  int i;
-  for (i = 0; i < 2; ++i) {
-    if (is_in_rewind_range(&info_range[i], cycles)) {
-      break;
-    }
-  }
 
-  if (i == 2) {
+  int i;
+  if (cycles > host->last_cycles) {
+    return ERROR;
+  } else if (cycles == host->last_cycles) {
+    return OK;
+  } else if (cycles >= info_range[1].end[-1].cycles) {
+    i = 1;
+  } else if (cycles >= info_range[0].end[-1].cycles) {
+    i = 0;
+  } else {
     return ERROR;
   }
 
@@ -866,9 +860,17 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
   RewindStateInfo* end = info_range[i].end;
   LOWER_BOUND(RewindStateInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
   assert(found);
+  assert(found >= begin && found < end);
+
   /* We actually want upper bound, so increment if it wasn't an exact match. */
   if (found->cycles != cycles) {
+    assert(found + 1 != end);
     ++found;
+    // HACK: Rewind one more, if available -- this way we'll render frames when
+    // rewinding.
+    if (found + 1 < end) {
+      ++found;
+    }
   }
 
   assert(found->cycles <= cycles);
@@ -920,8 +922,9 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
     data_range[0].end = data_range[0].begin;
   }
 
+  JoypadStateIter iter = host_find_joypad(host, emulator_get_cycles(e));
+
   if (emulator_get_cycles(e) < cycles) {
-    JoypadStateIter iter = host_find_joypad(host, found->cycles);
     HostSeekJoypadCallbackInfo hsjci;
     hsjci.e = e;
     hsjci.current = iter;
@@ -930,14 +933,14 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
     emulator_set_joypad_callback(e, host_seek_joypad_callback, &hsjci);
-
     host_run_until_cycles(host, cycles);
-
     /* Restore old joypad callback. */
     emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
-
-    host_delete_after_joypad_state(host, hsjci.current);
+    iter = hsjci.current;
   }
+
+  host_delete_after_joypad_state(host, iter);
+  host->last_cycles = emulator_get_cycles(e);
 
   return OK;
   ON_ERROR_RETURN;

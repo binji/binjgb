@@ -62,6 +62,7 @@ extern "C" {
   _(BACKSLASH)                  \
   _(SEMICOLON)                  \
   _(APOSTROPHE)                 \
+  _(GRAVE)                      \
   _(COMMA)                      \
   _(PERIOD)                     \
   _(SLASH)                      \
