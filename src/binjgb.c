@@ -18,7 +18,7 @@
 
 #define GLYPH_WIDTH 3
 #define GLYPH_HEIGHT 5
-#define GLYPHS_PER_LINE (SCREEN_WIDTH / (GLYPH_WIDTH + 1))
+#define GLYPHS_PER_LINE ((SCREEN_WIDTH / (GLYPH_WIDTH + 1)) - 1)
 
 #define STATUS_TEXT_X 2
 #define STATUS_TEXT_Y (SCREEN_HEIGHT - GLYPH_HEIGHT - 2)
@@ -47,10 +47,11 @@ static struct Host* host;
 
 static const char* s_save_state_filename;
 static Bool s_running = TRUE;
-static Bool s_step_frame = FALSE;
-static Bool s_paused = FALSE;
-static Bool s_rewinding = FALSE;
+static Bool s_step_frame;
+static Bool s_paused;
 static f32 s_audio_volume = 0.5f;
+static Bool s_rewinding;
+static Cycles s_rewind_start;
 
 static Overlay s_overlay;
 static StatusText s_status_text;
@@ -201,14 +202,50 @@ static void load_state(void) {
   }
 }
 
+static void start_rewind(void) {
+  if (!s_rewinding) {
+    s_paused = s_rewinding = TRUE;
+    s_rewind_start = emulator_get_cycles(e);
+  }
+}
+
 static void rewind_by(Cycles delta) {
   Cycles now = emulator_get_cycles(e);
+  Cycles then = now;
   if (now >= delta) {
-    Cycles then = now - delta;
-    if (SUCCESS(host_seek_to_cycles(host, then))) {
-      s_rewinding = TRUE;
-    }
+    then = now - delta;
+    host_seek_to_cycles(host, then);
   }
+
+  Cycles first = host_get_rewind_first_cycles(host);
+  Cycles total = s_rewind_start - first;
+  Cycles then_diff = then - first;
+  int num_ticks = then_diff * (GLYPHS_PER_LINE - 2) / total;
+
+  char buffer[GLYPHS_PER_LINE + 1];
+  buffer[0] = '|';
+  int i;
+  for (i = 1; i < GLYPHS_PER_LINE - 1; ++i) {
+    buffer[i] = i < num_ticks ? '=' : ' ';
+  }
+  buffer[GLYPHS_PER_LINE - 1] = '|';
+  buffer[GLYPHS_PER_LINE] = 0;
+
+  u32 total_csec = (u32)(((f64)then * 100) / CPU_CYCLES_PER_SECOND);
+  u32 hr = total_csec / 360000;
+  u32 min = (total_csec / 6000) % 60;
+  u32 sec = (total_csec / 100) % 60;
+  u32 csec = total_csec % 100;
+  char time[64];
+  snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", hr, min, sec, csec);
+  size_t len = strlen(time);
+  memcpy(&buffer[(GLYPHS_PER_LINE - len) / 2], time, len);
+
+  set_status_text("%s", buffer);
+}
+
+static void stop_rewind(void) {
+  s_paused = s_rewinding = FALSE;
 }
 
 static void key_down(HostHookContext* ctx, HostKeycode code) {
@@ -228,7 +265,7 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_TAB: set_no_sync(TRUE); break;
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
-    case HOST_KEYCODE_GRAVE: s_paused = s_rewinding = TRUE; break;
+    case HOST_KEYCODE_GRAVE: start_rewind(); break;
     default: break;
   }
 }
@@ -237,7 +274,7 @@ static void key_up(HostHookContext* ctx, HostKeycode code) {
   switch (code) {
     case HOST_KEYCODE_TAB: set_no_sync(FALSE); break;
     case HOST_KEYCODE_F11: toggle_fullscreen(); break;
-    case HOST_KEYCODE_GRAVE: s_paused = s_rewinding = FALSE; break;
+    case HOST_KEYCODE_GRAVE: stop_rewind(); break;
     default: break;
   }
 }
@@ -294,10 +331,6 @@ int main(int argc, char** argv) {
         s_step_frame = FALSE;
       }
     } else if (s_rewinding) {
-      Cycles total_cycles = host_get_rewind_last_cycles(host) -
-                            host_get_rewind_first_cycles(host);
-      f32 sec = (f32)total_cycles / CPU_CYCLES_PER_SECOND;
-      set_status_text("%.1f sec", sec);
       rewind_by(70224 * 3 / 2);
     }
 
