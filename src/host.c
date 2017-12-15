@@ -149,29 +149,29 @@ typedef struct JoypadBuffer {
   struct JoypadBuffer *next, *prev;
 } JoypadBuffer;
 
-typedef struct JoypadStateIter {
+typedef struct {
   JoypadBuffer* buffer;
   JoypadState* state;
 } JoypadStateIter;
 
-typedef enum RewindStateKind {
-  RewindStateKind_Base,
-  RewindStateKind_Diff,
-} RewindStateKind;
+typedef enum {
+  RewindInfoKind_Base,
+  RewindInfoKind_Diff,
+} RewindInfoKind;
 
-typedef struct RewindStateInfo {
+typedef struct {
   Cycles cycles;
   u8* data;
   size_t size;
-  RewindStateKind kind;
-} RewindStateInfo;
+  RewindInfoKind kind;
+} RewindInfo;
 
-typedef struct RewindStateInfoRange {
-  RewindStateInfo* begin; /* begin <= end; if begin == end range is empty. */
-  RewindStateInfo* end;   /* end is exclusive. */
-} RewindStateInfoRange;
+typedef struct {
+  RewindInfo* begin; /* begin <= end; if begin == end range is empty. */
+  RewindInfo* end;   /* end is exclusive. */
+} RewindInfoRange;
 
-typedef struct RewindDataRange {
+typedef struct {
   u8* begin;
   u8* end;
 } RewindDataRange;
@@ -184,14 +184,13 @@ typedef struct RewindBuffer {
   *
   * (dr == data_range, ir == info_range)
   *
-  * All RewindStateInfo in ir[1] has a corresponding data range in dr[0].
-  * Similarly, all RewindStateInfo in ir[0] has a corresponding data range in
-  * dr[1].
+  * All RewindInfo in ir[1] has a corresponding data range in dr[0]. Similarly,
+  * all RewindInfo in ir[0] has a corresponding data range in dr[1].
   *
   * When new data is written, ir[1].begin moves left, which my overwrite old
   * data in ir[0]. The data is written after dr[0].end. If the newly written
-  * data overlaps the beginning of dr[1], the associated RewindStateInfo in
-  * ir[0] is removed.
+  * data overlaps the beginning of dr[1], the associated RewindInfo in ir[0] is
+  * removed.
   *
   * When ir[0].begin and dr[1].end cross, the buffer is filled. At this point,
   * dr[0] is moved to dr[1], and ir[1] is moved to ir[0]. (Just the pointers
@@ -203,19 +202,26 @@ typedef struct RewindBuffer {
   *
   */
   RewindDataRange data_range[2];
-  RewindStateInfoRange info_range[2];
+  RewindInfoRange info_range[2];
   FileData last_state;
   FileData last_base_state;
   Cycles last_base_state_cycles;
   int frames_until_next_base;
 
-  /* Data is decompressed into these states when seeking. */
-  FileData seek_diff_state;
+  /* Data is decompressed into these states when rewinding. */
+  FileData rewind_diff_state;
 
   /* Stats */
   size_t total_kind_bytes[2];
   size_t total_uncompressed_bytes;
 } RewindBuffer;
+
+typedef struct {
+  size_t info_range_index;
+  RewindInfo* info;
+  JoypadStateIter joypad_iter;
+  Bool rewinding;
+} RewindState;
 
 typedef struct {
   SDL_AudioDeviceID dev;
@@ -238,6 +244,7 @@ typedef struct Host {
   HostTexture* fb_texture;
   JoypadBuffer joypad_buffer_sentinel;
   RewindBuffer rewind_buffer;
+  RewindState rewind_state;
   JoypadButtons last_joypad_buttons;
   Cycles last_cycles;
 } Host;
@@ -614,7 +621,7 @@ static void decode_diff(const u8* src, size_t src_size, const u8* base, u8* dst,
   assert(dst == dst_end);
 }
 
-static RewindStateInfo* append_rewind_state(Host* host) {
+static RewindInfo* append_rewind_state(Host* host) {
   RewindBuffer* buf = &host->rewind_buffer;
   struct Emulator* e = host_get_emulator(host);
   Cycles cycles = emulator_get_cycles(e);
@@ -623,20 +630,20 @@ static RewindStateInfo* append_rewind_state(Host* host) {
   /* The new state must be written in sorted order; if it is out of order (from
    * a rewind), then the subsequent saved states should have been cleared
    * first. */
-  assert(host_get_rewind_last_cycles(host) == INVALID_CYCLES ||
-         cycles > host_get_rewind_first_cycles(host));
+  assert(host_get_rewind_newest_cycles(host) == INVALID_CYCLES ||
+         cycles > host_get_rewind_oldest_cycles(host));
 
-  RewindStateKind kind;
+  RewindInfoKind kind;
   if (buf->frames_until_next_base-- == 0) {
-    kind = RewindStateKind_Base;
+    kind = RewindInfoKind_Base;
     buf->frames_until_next_base = host->init.frames_per_base_state;
   } else {
-    kind = RewindStateKind_Diff;
+    kind = RewindInfoKind_Diff;
   }
 
   RewindDataRange* data_range = buf->data_range;
-  RewindStateInfoRange* info_range = buf->info_range;
-  RewindStateInfo* new_info = --info_range[1].begin;
+  RewindInfoRange* info_range = buf->info_range;
+  RewindInfo* new_info = --info_range[1].begin;
   if ((u8 *)new_info <= data_range[1].end) {
   wrap:
     /* Need to wrap, roll back decrement and swap ranges. */
@@ -654,7 +661,7 @@ static RewindStateInfo* append_rewind_state(Host* host) {
   u8* data_end_max = (u8*)MIN(info_range[0].begin, new_info);
   u8* data_end;
   switch (kind) {
-    case RewindStateKind_Diff:
+    case RewindInfoKind_Diff:
       if (buf->last_base_state_cycles != INVALID_CYCLES) {
         data_end = encode_diff(buf->last_state.data, buf->last_base_state.data,
                                buf->last_state.size, data_begin, data_end_max);
@@ -663,8 +670,8 @@ static RewindStateInfo* append_rewind_state(Host* host) {
       /* There is no previous base state, so we can't diff. Fallthrough to
        * writing a base state. */
 
-    case RewindStateKind_Base:
-      kind = RewindStateKind_Base;
+    case RewindInfoKind_Base:
+      kind = RewindInfoKind_Base;
       data_end = encode_rle(buf->last_state.data, buf->last_state.size,
                             data_begin, data_end_max);
       memcpy(buf->last_base_state.data, buf->last_state.data,
@@ -682,7 +689,7 @@ static RewindStateInfo* append_rewind_state(Host* host) {
   data_range[0].end = data_end;
 
   /* Check to see how many data chunks we overwrote. */
-  RewindStateInfo* new_end = info_range[0].end;
+  RewindInfo* new_end = info_range[0].end;
   while (info_range[0].begin < new_end && new_end[-1].data < data_end) {
     --new_end;
   }
@@ -722,23 +729,23 @@ static void host_init_rewind_buffer(Host* host) {
   RewindBuffer* buf = &host->rewind_buffer;
   emulator_init_state_file_data(&buf->last_state);
   emulator_init_state_file_data(&buf->last_base_state);
-  emulator_init_state_file_data(&buf->seek_diff_state);
+  emulator_init_state_file_data(&buf->rewind_diff_state);
   buf->last_base_state_cycles = INVALID_CYCLES;
   buf->data_range[0].begin = buf->data_range[0].end = data;
   buf->data_range[1] = buf->data_range[0];
-  RewindStateInfo* info = (RewindStateInfo*)(data + capacity);
+  RewindInfo* info = (RewindInfo*)(data + capacity);
   buf->info_range[1].begin = buf->info_range[1].end = info;
   buf->info_range[0] = buf->info_range[1];
   buf->frames_until_next_base = 0;
   append_rewind_state(host);
 }
 
-static Bool is_rewind_range_empty(RewindStateInfoRange* r) {
+static Bool is_rewind_range_empty(RewindInfoRange* r) {
   return r->end == r->begin;
 }
 
-Cycles host_get_rewind_first_cycles(struct Host* host) {
-  RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
+Cycles host_get_rewind_oldest_cycles(struct Host* host) {
+  RewindInfoRange* info_range = host->rewind_buffer.info_range;
   /* info_range[0] is always older than info_range[1], if it exists, so check
    * that first. */
   int i;
@@ -752,8 +759,8 @@ Cycles host_get_rewind_first_cycles(struct Host* host) {
   return INVALID_CYCLES;
 }
 
-Cycles host_get_rewind_last_cycles(struct Host* host) {
-  RewindStateInfoRange* info_range = host->rewind_buffer.info_range;
+Cycles host_get_rewind_newest_cycles(struct Host* host) {
+  RewindInfoRange* info_range = host->rewind_buffer.info_range;
 
   int i;
   for (i = 1; i >= 0; --i) {
@@ -767,8 +774,8 @@ Cycles host_get_rewind_last_cycles(struct Host* host) {
 
 HostRewindStats host_get_rewind_stats(struct Host* host) {
   HostRewindStats stats;
-  stats.base_bytes = host->rewind_buffer.total_kind_bytes[RewindStateKind_Base];
-  stats.diff_bytes = host->rewind_buffer.total_kind_bytes[RewindStateKind_Diff];
+  stats.base_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Base];
+  stats.diff_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Diff];
   stats.uncompressed_bytes = host->rewind_buffer.total_uncompressed_bytes;
   stats.used_bytes = 0;
   stats.capacity_bytes = host->init.rewind_buffer_capacity;
@@ -776,18 +783,18 @@ HostRewindStats host_get_rewind_stats(struct Host* host) {
   int i;
   for (i = 0; i < 2; ++i) {
     RewindDataRange* data_range = &host->rewind_buffer.data_range[i];
-    RewindStateInfoRange* info_range = &host->rewind_buffer.info_range[i];
+    RewindInfoRange* info_range = &host->rewind_buffer.info_range[i];
     stats.used_bytes += data_range->end - data_range->begin;
     stats.used_bytes +=
-        (info_range->end - info_range->begin) * sizeof(RewindStateInfo);
+        (info_range->end - info_range->begin) * sizeof(RewindInfo);
   }
   return stats;
 }
 
-static RewindStateInfo* find_first_base_in_range(RewindStateInfoRange range) {
-  RewindStateInfo* base = range.begin;
+static RewindInfo* find_first_base_in_range(RewindInfoRange range) {
+  RewindInfo* base = range.begin;
   for (; base < range.end; base++) {
-    if (base->kind == RewindStateKind_Base) {
+    if (base->kind == RewindInfoKind_Base) {
       return base;
     }
   }
@@ -825,11 +832,11 @@ typedef struct {
   struct Emulator* e;
   JoypadStateIter current;
   JoypadStateIter next;
-} HostSeekJoypadCallbackInfo;
+} HostRewindJoypadCallbackInfo;
 
-static void host_seek_joypad_callback(struct JoypadButtons* joyp,
-                                      void* user_data) {
-  HostSeekJoypadCallbackInfo* info = user_data;
+static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
+                                        void* user_data) {
+  HostRewindJoypadCallbackInfo* info = user_data;
   Cycles cycles = emulator_get_cycles(info->e);
   while (info->next.state && info->next.state->cycles <= cycles) {
     info->current = info->next;
@@ -839,26 +846,33 @@ static void host_seek_joypad_callback(struct JoypadButtons* joyp,
   *joyp = unpack_buttons(info->current.state->buttons);
 }
 
-Result host_seek_to_cycles(Host* host, Cycles cycles) {
-  RewindBuffer* buf = &host->rewind_buffer;
-  RewindStateInfoRange* info_range = buf->info_range;
+void host_begin_rewind(Host* host) {
+  assert(!host->rewind_state.rewinding);
+  host->rewind_state.rewinding = TRUE;
+}
 
-  int i;
+Result host_rewind_to_cycles(Host* host, Cycles cycles) {
+  RewindBuffer* buf = &host->rewind_buffer;
+  RewindInfoRange* info_range = buf->info_range;
+
+  assert(host->rewind_state.rewinding);
+
+  int info_range_index;
   if (cycles > host->last_cycles) {
     return ERROR;
   } else if (cycles == host->last_cycles) {
     return OK;
   } else if (cycles >= info_range[1].end[-1].cycles) {
-    i = 1;
+    info_range_index = 1;
   } else if (cycles >= info_range[0].end[-1].cycles) {
-    i = 0;
+    info_range_index = 0;
   } else {
     return ERROR;
   }
 
-  RewindStateInfo* begin = info_range[i].begin;
-  RewindStateInfo* end = info_range[i].end;
-  LOWER_BOUND(RewindStateInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
+  RewindInfo* begin = info_range[info_range_index].begin;
+  RewindInfo* end = info_range[info_range_index].end;
+  LOWER_BOUND(RewindInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
   assert(found);
   assert(found >= begin && found < end);
 
@@ -876,18 +890,18 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
   assert(found->cycles <= cycles);
 
   FileData* file_data = NULL;
-  if (found->kind == RewindStateKind_Base) {
+  if (found->kind == RewindInfoKind_Base) {
     file_data = &buf->last_base_state;
     decode_rle(found->data, found->size, file_data->data,
                file_data->data + file_data->size);
     buf->last_base_state_cycles = found->cycles;
   } else {
-    assert(found->kind == RewindStateKind_Diff);
+    assert(found->kind == RewindInfoKind_Diff);
     /* Find the previous base state. */
-    RewindStateInfoRange range = {found, end};
-    RewindStateInfo* base_info = find_first_base_in_range(range);
+    RewindInfoRange range = {found, end};
+    RewindInfo* base_info = find_first_base_in_range(range);
     if (!base_info) {
-      if (i == 0) {
+      if (info_range_index == 0) {
         /* No previous base state, can't decode. */
         return ERROR;
       }
@@ -904,7 +918,7 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
                base->data + base->size);
     buf->last_base_state_cycles = base_info->cycles;
 
-    file_data = &buf->seek_diff_state;
+    file_data = &buf->rewind_diff_state;
     decode_diff(found->data, found->size, base->data, file_data->data,
                 file_data->data + file_data->size);
   }
@@ -913,37 +927,54 @@ Result host_seek_to_cycles(Host* host, Cycles cycles) {
   CHECK(SUCCESS(emulator_read_state(e, file_data)));
   assert(emulator_get_cycles(e) == found->cycles);
 
-  /* Remove states from rewind buffer that are now invalid. */
-  RewindDataRange* data_range = buf->data_range;
-  info_range[i].begin = found;
-  data_range[1 - i].end = found->data + found->size;
-  if (i == 0) {
-    info_range[1].begin = info_range[1].end;
-    data_range[0].end = data_range[0].begin;
-  }
-
   JoypadStateIter iter = host_find_joypad(host, emulator_get_cycles(e));
 
   if (emulator_get_cycles(e) < cycles) {
-    HostSeekJoypadCallbackInfo hsjci;
+    HostRewindJoypadCallbackInfo hsjci;
     hsjci.e = e;
     hsjci.current = iter;
     hsjci.next = host_get_next_joypad_state(iter);
 
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
-    emulator_set_joypad_callback(e, host_seek_joypad_callback, &hsjci);
+    emulator_set_joypad_callback(e, host_rewind_joypad_callback, &hsjci);
     host_run_until_cycles(host, cycles);
     /* Restore old joypad callback. */
     emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
     iter = hsjci.current;
   }
 
-  host_delete_after_joypad_state(host, iter);
-  host->last_cycles = emulator_get_cycles(e);
+  /* Save state for host_end_rewind. */
+  host->rewind_state.info_range_index = info_range_index;
+  host->rewind_state.info = found;
+  host->rewind_state.joypad_iter = iter;
 
   return OK;
   ON_ERROR_RETURN;
+}
+
+void host_end_rewind(Host* host) {
+  assert(host->rewind_state.rewinding);
+
+  /* Remove data from rewind buffer that are now invalid. */
+  size_t info_range_index = host->rewind_state.info_range_index;
+  RewindDataRange* data_range = host->rewind_buffer.data_range;
+  RewindInfoRange* info_range = host->rewind_buffer.info_range;
+  RewindInfo* info = host->rewind_state.info;
+  info_range[info_range_index].begin = info;
+  data_range[1 - info_range_index].end = info->data + info->size;
+  if (info_range_index == 0) {
+    info_range[1].begin = info_range[1].end;
+    data_range[0].end = data_range[0].begin;
+  }
+
+  host_delete_after_joypad_state(host, host->rewind_state.joypad_iter);
+  host->last_cycles = emulator_get_cycles(host_get_emulator(host));
+  host->rewind_state.rewinding = FALSE;
+}
+
+Bool host_is_rewinding(Host* host) {
+  return host->rewind_state.rewinding;
 }
 
 Result host_init(Host* host, struct Emulator* e) {
@@ -960,6 +991,7 @@ Result host_init(Host* host, struct Emulator* e) {
 }
 
 void host_run_ms(struct Host* host, f64 delta_ms) {
+  assert(!host->rewind_state.rewinding);
   struct Emulator* e = host_get_emulator(host);
   Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
@@ -967,6 +999,7 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
 }
 
 void host_step(Host* host) {
+  assert(!host->rewind_state.rewinding);
   struct Emulator* e = host_get_emulator(host);
   EmulatorEvent event = emulator_step(e);
   host_handle_event(host, event);
@@ -1127,10 +1160,10 @@ void host_render_screen_overlay(struct Host* host,
   host_ui_render_screen_overlay(host->ui, texture);
 }
 
-Cycles host_first_cycles(Host* host) {
+Cycles host_oldest_cycles(Host* host) {
   return host->joypad_buffer_sentinel.next->data[0].cycles;
 }
 
-Cycles host_last_cycles(Host* host) {
+Cycles host_newest_cycles(Host* host) {
   return host->last_cycles;
 }

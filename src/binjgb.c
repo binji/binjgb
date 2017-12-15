@@ -204,6 +204,7 @@ static void load_state(void) {
 
 static void start_rewind(void) {
   if (!s_rewinding) {
+    host_begin_rewind(host);
     s_paused = s_rewinding = TRUE;
     s_rewind_start = emulator_get_cycles(e);
   }
@@ -214,12 +215,12 @@ static void rewind_by(Cycles delta) {
   Cycles then = now;
   if (now >= delta) {
     then = now - delta;
-    host_seek_to_cycles(host, then);
+    host_rewind_to_cycles(host, then);
   }
 
-  Cycles first = host_get_rewind_first_cycles(host);
-  Cycles total = s_rewind_start - first;
-  Cycles then_diff = then - first;
+  Cycles oldest = host_get_rewind_oldest_cycles(host);
+  Cycles total = s_rewind_start - oldest;
+  Cycles then_diff = then - oldest;
   int num_ticks = then_diff * (GLYPHS_PER_LINE - 2) / total;
 
   char buffer[GLYPHS_PER_LINE + 1];
@@ -245,6 +246,7 @@ static void rewind_by(Cycles delta) {
 }
 
 static void stop_rewind(void) {
+  host_end_rewind(host);
   s_paused = s_rewinding = FALSE;
 }
 

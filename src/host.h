@@ -170,13 +170,17 @@ void host_render_screen_overlay(struct Host*, struct HostTexture*);
 
 /* Rewind support. */
 
-Cycles host_first_cycles(struct Host*);
-Cycles host_last_cycles(struct Host*);
+Cycles host_oldest_cycles(struct Host*);
+Cycles host_newest_cycles(struct Host*);
 
-Cycles host_get_rewind_first_cycles(struct Host*);
-Cycles host_get_rewind_last_cycles(struct Host*);
+Cycles host_get_rewind_oldest_cycles(struct Host*);
+Cycles host_get_rewind_newest_cycles(struct Host*);
 HostRewindStats host_get_rewind_stats(struct Host*);
-Result host_seek_to_cycles(struct Host*, Cycles cycles);
+
+void host_begin_rewind(struct Host*);
+Result host_rewind_to_cycles(struct Host*, Cycles cycles);
+void host_end_rewind(struct Host*);
+Bool host_is_rewinding(struct Host*);
 
 HostTexture* host_get_frame_buffer_texture(struct Host*);
 HostTexture* host_create_texture(struct Host*, int w, int h, HostTextureFormat);

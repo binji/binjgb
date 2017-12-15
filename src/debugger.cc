@@ -682,7 +682,7 @@ void Debugger::AudioWindow() {
     size_t uncompressed = stats.uncompressed_bytes;
     size_t used = stats.used_bytes;
     size_t capacity = stats.capacity_bytes;
-    Cycles total_cycles = host_last_cycles(host) - host_first_cycles(host);
+    Cycles total_cycles = host_newest_cycles(host) - host_oldest_cycles(host);
     float sec = (float)total_cycles / CPU_CYCLES_PER_SECOND;
 
     ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
@@ -695,10 +695,10 @@ void Debugger::AudioWindow() {
                 PrettySize(total / sec * 60).c_str(),
                 PrettySize(total / sec * 60 * 60).c_str());
 
-    Cycles first = host_get_rewind_first_cycles(host);
-    Cycles last = host_get_rewind_last_cycles(host);
-    float range = (float)(last - first) / CPU_CYCLES_PER_SECOND;
-    ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", first, last,
+    Cycles oldest = host_get_rewind_oldest_cycles(host);
+    Cycles newest = host_get_rewind_newest_cycles(host);
+    float range = (float)(newest - oldest) / CPU_CYCLES_PER_SECOND;
+    ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", oldest, newest,
                 range);
   }
   ImGui::EndDock();
