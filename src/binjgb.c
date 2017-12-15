@@ -202,10 +202,10 @@ static void load_state(void) {
   }
 }
 
-static void start_rewind(void) {
+static void begin_rewind(void) {
   if (!s_rewinding) {
     host_begin_rewind(host);
-    s_paused = s_rewinding = TRUE;
+    s_rewinding = TRUE;
     s_rewind_start = emulator_get_cycles(e);
   }
 }
@@ -245,9 +245,9 @@ static void rewind_by(Cycles delta) {
   set_status_text("%s", buffer);
 }
 
-static void stop_rewind(void) {
+static void end_rewind(void) {
   host_end_rewind(host);
-  s_paused = s_rewinding = FALSE;
+  s_rewinding = FALSE;
 }
 
 static void key_down(HostHookContext* ctx, HostKeycode code) {
@@ -267,7 +267,7 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_TAB: set_no_sync(TRUE); break;
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
-    case HOST_KEYCODE_GRAVE: start_rewind(); break;
+    case HOST_KEYCODE_GRAVE: begin_rewind(); break;
     default: break;
   }
 }
@@ -276,7 +276,7 @@ static void key_up(HostHookContext* ctx, HostKeycode code) {
   switch (code) {
     case HOST_KEYCODE_TAB: set_no_sync(FALSE); break;
     case HOST_KEYCODE_F11: toggle_fullscreen(); break;
-    case HOST_KEYCODE_GRAVE: stop_rewind(); break;
+    case HOST_KEYCODE_GRAVE: end_rewind(); break;
     default: break;
   }
 }
@@ -325,15 +325,15 @@ int main(int argc, char** argv) {
 
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
   while (s_running && host_poll_events(host)) {
-    if (!s_paused) {
+    if (s_rewinding) {
+      rewind_by(70224 * 3 / 2);
+    } else if (!s_paused) {
       host_run_ms(host, refresh_ms);
       if (s_step_frame) {
         host_reset_audio(host);
         s_paused = TRUE;
         s_step_frame = FALSE;
       }
-    } else if (s_rewinding) {
-      rewind_by(70224 * 3 / 2);
     }
 
     host_begin_video(host);

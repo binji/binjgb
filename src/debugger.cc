@@ -319,6 +319,11 @@ class Debugger {
   void OnKeyDown(HostKeycode);
   void OnKeyUp(HostKeycode);
 
+  void StepFrame();
+  void TogglePause();
+  void Pause();
+  void Exit();
+
   void WriteStateToFile();
   void ReadStateFromFile();
 
@@ -332,6 +337,13 @@ class Debugger {
   void MapWindow();
   void DisassemblyWindow();
   void MemoryWindow();
+  void RewindWindow();
+
+  void BeginRewind();
+  void EndRewind();
+  void BeginAutoRewind();
+  void EndAutoRewind();
+  void AutoRewind(f64 ms);
 
   u8 MemoryEditorRead(Address addr);
   void MemoryEditorWrite(Address addr, u8 value);
@@ -342,9 +354,16 @@ class Debugger {
   Host* host = nullptr;
   const char* save_filename = nullptr;
   const char* save_state_filename = nullptr;
-  bool running = true;
-  bool paused = false;
-  bool step_frame = false;
+
+  enum RunState {
+    Exiting,
+    Running,
+    Paused,
+    Stepping,
+    Rewinding,
+    AutoRewinding,
+  };
+  RunState run_state;
 
   TileImage tiledata_image;
 
@@ -367,11 +386,12 @@ class Debugger {
   bool map_window_open = true;
   bool disassembly_window_open = true;
   bool memory_window_open = true;
+  bool rewind_window_open = true;
 };
 
 Debugger::Debugger() {
   ZERO_MEMORY(audio_data);
-  paused = s_paused_at_start;
+  run_state = s_paused_at_start ? Paused : Running;
 }
 
 Debugger::~Debugger() {
@@ -439,15 +459,26 @@ void Debugger::Run() {
   emulator_read_ext_ram_from_file(e, save_filename);
 
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
-  while (running && host_poll_events(host)) {
+  while (run_state != Exiting && host_poll_events(host)) {
     host_begin_video(host);
-    if (!paused) {
-      host_run_ms(host, refresh_ms);
-      if (step_frame) {
-        host_reset_audio(host);
-        step_frame = false;
-        paused = true;
-      }
+    switch (run_state) {
+      case Running:
+      case Stepping:
+        host_run_ms(host, refresh_ms);
+        if (run_state == Stepping) {
+          host_reset_audio(host);
+          run_state = Paused;
+        }
+        break;
+
+      case AutoRewinding:
+        AutoRewind(refresh_ms);
+        break;
+
+      case Exiting:
+      case Paused:
+      case Rewinding:
+        break;
     }
 
     tiledata_image.Upload(e);
@@ -466,6 +497,7 @@ void Debugger::Run() {
       ImGui::BeginWorkspace();
       EmulatorWindow();
       AudioWindow();
+      RewindWindow();
       TiledataWindow();
       ObjWindow();
       MapWindow();
@@ -510,12 +542,13 @@ void Debugger::OnKeyDown(HostKeycode code) {
     case HOST_KEYCODE_O: Toggle(emu_config.disable_obj); break;
     case HOST_KEYCODE_F6: WriteStateToFile(); break;
     case HOST_KEYCODE_F9: ReadStateFromFile(); break;
-    case HOST_KEYCODE_N: step_frame = true; paused = false; break;
-    case HOST_KEYCODE_SPACE: Toggle(paused); break;
-    case HOST_KEYCODE_ESCAPE: running = false; break;
+    case HOST_KEYCODE_N: StepFrame(); break;
+    case HOST_KEYCODE_SPACE: TogglePause(); break;
+    case HOST_KEYCODE_ESCAPE: Exit(); break;
     case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
     case HOST_KEYCODE_MINUS: SetAudioVolume(audio_volume - 0.05f); break;
     case HOST_KEYCODE_EQUALS: SetAudioVolume(audio_volume + 0.05f); break;
+    case HOST_KEYCODE_GRAVE: BeginAutoRewind(); break;
     default: return;
   }
 
@@ -529,10 +562,35 @@ void Debugger::OnKeyUp(HostKeycode code) {
   switch (code) {
     case HOST_KEYCODE_TAB: host_config.no_sync = FALSE; break;
     case HOST_KEYCODE_F11: Toggle(host_config.fullscreen); break;
+    case HOST_KEYCODE_GRAVE: EndAutoRewind(); break;
     default: return;
   }
 
   host_set_config(host, &host_config);
+}
+
+void Debugger::StepFrame() {
+  if (run_state == Running || run_state == Paused) {
+    run_state = Stepping;
+  }
+}
+
+void Debugger::TogglePause() {
+  if (run_state == Running) {
+    run_state = Paused;
+  } else if (run_state == Paused) {
+    run_state = Running;
+  }
+}
+
+void Debugger::Pause() {
+  if (run_state == Running) {
+    run_state = Paused;
+  }
+}
+
+void Debugger::Exit() {
+  run_state = Exiting;
 }
 
 void Debugger::WriteStateToFile() {
@@ -552,7 +610,7 @@ void Debugger::MainMenuBar() {
   if (ImGui::BeginMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       if (ImGui::MenuItem("Exit")) {
-        running = false;
+        Exit();
       }
       ImGui::EndMenu();
     }
@@ -576,6 +634,7 @@ void Debugger::MainMenuBar() {
       ImGui::MenuItem("Map", NULL, &map_window_open);
       ImGui::MenuItem("Disassembly", NULL, &disassembly_window_open);
       ImGui::MenuItem("Memory", NULL, &memory_window_open);
+      ImGui::MenuItem("Rewind", NULL, &rewind_window_open);
       ImGui::EndMenu();
     }
     ImGui::EndMenuBar();
@@ -674,32 +733,6 @@ void Debugger::AudioWindow() {
     ImGui::PlotLines("right", audio_data[1], kAudioDataSamples, 0, nullptr, 0,
                      128, ImVec2(0, 80));
 
-    // TODO(binji): better place for this
-    HostRewindStats stats = host_get_rewind_stats(host);
-    size_t base = stats.base_bytes;
-    size_t diff = stats.diff_bytes;
-    size_t total = base + diff;
-    size_t uncompressed = stats.uncompressed_bytes;
-    size_t used = stats.used_bytes;
-    size_t capacity = stats.capacity_bytes;
-    Cycles total_cycles = host_newest_cycles(host) - host_oldest_cycles(host);
-    float sec = (float)total_cycles / CPU_CYCLES_PER_SECOND;
-
-    ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
-                PrettySize(base).c_str(), PrettySize(diff).c_str(),
-                PrettySize(total).c_str(), (float)(total)*100 / uncompressed);
-    ImGui::Text("rewind uncomp: %s", PrettySize(uncompressed).c_str());
-    ImGui::Text("rewind used: %s/%s (%.0f%%)", PrettySize(used).c_str(),
-                PrettySize(capacity).c_str(), (float)used * 100 / capacity);
-    ImGui::Text("rate: %s/sec %s/min %s/hr", PrettySize(total / sec).c_str(),
-                PrettySize(total / sec * 60).c_str(),
-                PrettySize(total / sec * 60 * 60).c_str());
-
-    Cycles oldest = host_get_rewind_oldest_cycles(host);
-    Cycles newest = host_get_rewind_newest_cycles(host);
-    float range = (float)(newest - oldest) / CPU_CYCLES_PER_SECOND;
-    ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", oldest, newest,
-                range);
   }
   ImGui::EndDock();
 }
@@ -1031,7 +1064,7 @@ void Debugger::DisassemblyWindow() {
     ImGui::PushButtonRepeat(true);
     if (ImGui::Button("step")) {
       host_step(host);
-      paused = true;
+      Pause();
     }
     ImGui::PopButtonRepeat();
 
@@ -1096,6 +1129,96 @@ void Debugger::MemoryWindow() {
     memory_editor.DrawContents(nullptr, size, memory_editor_base);
   }
   ImGui::EndDock();
+}
+
+void Debugger::RewindWindow() {
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  if (ImGui::BeginDock("Rewind", &rewind_window_open)) {
+    bool rewinding = host_is_rewinding(host);
+    if (ImGui::Checkbox("Rewind", &rewinding)) {
+      if (rewinding) {
+        BeginRewind();
+      } else {
+        EndRewind();
+      }
+    }
+
+    if (rewinding) {
+      Cycles oldest = host_get_rewind_oldest_cycles(host);
+      Cycles newest = host_newest_cycles(host);
+      u32 range = newest - oldest;
+      int value = emulator_get_cycles(e) - oldest;
+      if (ImGui::SliderInt("Cycles", &value, 0, range)) {
+        value = CLAMP(value, 0, range);
+        host_rewind_to_cycles(host, oldest + value);
+        host_reset_audio(host);
+      }
+    }
+
+    ImGui::Separator();
+    HostRewindStats stats = host_get_rewind_stats(host);
+    size_t base = stats.base_bytes;
+    size_t diff = stats.diff_bytes;
+    size_t total = base + diff;
+    size_t uncompressed = stats.uncompressed_bytes;
+    size_t used = stats.used_bytes;
+    size_t capacity = stats.capacity_bytes;
+    Cycles total_cycles = host_newest_cycles(host) - host_oldest_cycles(host);
+    f64 sec = (f64)total_cycles / CPU_CYCLES_PER_SECOND;
+
+    ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
+                PrettySize(base).c_str(), PrettySize(diff).c_str(),
+                PrettySize(total).c_str(), (f64)(total)*100 / uncompressed);
+    ImGui::Text("rewind uncomp: %s", PrettySize(uncompressed).c_str());
+    ImGui::Text("rewind used: %s/%s (%.0f%%)", PrettySize(used).c_str(),
+                PrettySize(capacity).c_str(), (f64)used * 100 / capacity);
+    ImGui::Text("rate: %s/sec %s/min %s/hr", PrettySize(total / sec).c_str(),
+                PrettySize(total / sec * 60).c_str(),
+                PrettySize(total / sec * 60 * 60).c_str());
+
+    Cycles oldest = host_get_rewind_oldest_cycles(host);
+    Cycles newest = host_get_rewind_newest_cycles(host);
+    f64 range = (f64)(newest - oldest) / CPU_CYCLES_PER_SECOND;
+    ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", oldest, newest,
+                range);
+  }
+  ImGui::EndDock();
+}
+
+void Debugger::BeginRewind() {
+  if (run_state == Running || run_state == Paused) {
+    host_begin_rewind(host);
+    run_state = Rewinding;
+  }
+}
+
+void Debugger::EndRewind() {
+  if (run_state == Rewinding) {
+    host_end_rewind(host);
+    run_state = Running;
+  }
+}
+
+void Debugger::BeginAutoRewind() {
+  if (run_state == Running || run_state == Paused) {
+    host_begin_rewind(host);
+    run_state = AutoRewinding;
+  }
+}
+
+void Debugger::EndAutoRewind() {
+  if (run_state == AutoRewinding) {
+    host_end_rewind(host);
+    run_state = Running;
+  }
+}
+
+void Debugger::AutoRewind(f64 delta_ms) {
+  assert(run_state == AutoRewinding);
+  Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
+  Cycles now = emulator_get_cycles(e);
+  Cycles then = now >= delta_cycles ? now - delta_cycles : 0;
+  host_rewind_to_cycles(host, then);
 }
 
 u8 Debugger::MemoryEditorRead(Address addr) {

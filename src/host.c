@@ -621,7 +621,11 @@ static void decode_diff(const u8* src, size_t src_size, const u8* base, u8* dst,
   assert(dst == dst_end);
 }
 
-static RewindInfo* append_rewind_state(Host* host) {
+static void append_rewind_state(Host* host) {
+  if (host->rewind_state.rewinding) {
+    return;
+  }
+
   RewindBuffer* buf = &host->rewind_buffer;
   struct Emulator* e = host_get_emulator(host);
   Cycles cycles = emulator_get_cycles(e);
@@ -715,8 +719,6 @@ static RewindInfo* append_rewind_state(Host* host) {
   /* Update stats. */
   buf->total_kind_bytes[kind] += new_info->size;
   buf->total_uncompressed_bytes += buf->last_state.size;
-
-  return new_info;
 }
 
 static void host_init_rewind_buffer(Host* host) {
@@ -825,7 +827,6 @@ static void host_run_until_cycles(struct Host* host, Cycles cycles) {
       break;
     }
   }
-  host->last_cycles = emulator_get_cycles(e);
 }
 
 typedef struct {
@@ -860,8 +861,6 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
   int info_range_index;
   if (cycles > host->last_cycles) {
     return ERROR;
-  } else if (cycles == host->last_cycles) {
-    return OK;
   } else if (cycles >= info_range[1].end[-1].cycles) {
     info_range_index = 1;
   } else if (cycles >= info_range[0].end[-1].cycles) {
@@ -956,21 +955,24 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
 void host_end_rewind(Host* host) {
   assert(host->rewind_state.rewinding);
 
-  /* Remove data from rewind buffer that are now invalid. */
-  size_t info_range_index = host->rewind_state.info_range_index;
-  RewindDataRange* data_range = host->rewind_buffer.data_range;
-  RewindInfoRange* info_range = host->rewind_buffer.info_range;
-  RewindInfo* info = host->rewind_state.info;
-  info_range[info_range_index].begin = info;
-  data_range[1 - info_range_index].end = info->data + info->size;
-  if (info_range_index == 0) {
-    info_range[1].begin = info_range[1].end;
-    data_range[0].end = data_range[0].begin;
+  if (host->rewind_state.info) {
+    /* Remove data from rewind buffer that are now invalid. */
+    size_t info_range_index = host->rewind_state.info_range_index;
+    RewindDataRange* data_range = host->rewind_buffer.data_range;
+    RewindInfoRange* info_range = host->rewind_buffer.info_range;
+    RewindInfo* info = host->rewind_state.info;
+    info_range[info_range_index].begin = info;
+    data_range[1 - info_range_index].end = info->data + info->size;
+    if (info_range_index == 0) {
+      info_range[1].begin = info_range[1].end;
+      data_range[0].end = data_range[0].begin;
+    }
+
+    host_delete_after_joypad_state(host, host->rewind_state.joypad_iter);
+    host->last_cycles = emulator_get_cycles(host_get_emulator(host));
   }
 
-  host_delete_after_joypad_state(host, host->rewind_state.joypad_iter);
-  host->last_cycles = emulator_get_cycles(host_get_emulator(host));
-  host->rewind_state.rewinding = FALSE;
+  memset(&host->rewind_state, 0, sizeof(host->rewind_state));
 }
 
 Bool host_is_rewinding(Host* host) {
@@ -996,6 +998,7 @@ void host_run_ms(struct Host* host, f64 delta_ms) {
   Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
   host_run_until_cycles(host, until_cycles);
+  host->last_cycles = emulator_get_cycles(e);
 }
 
 void host_step(Host* host) {
