@@ -174,11 +174,10 @@ ImVec2 get_obj_size_vec2(ObjSize obj_size, f32 scale) {
 
 namespace ImGui {
 
-template <typename T>
-bool Combo(const char* label, T* value, const char* const* names,
-           int name_count) {
+template <typename T, size_t N>
+bool Combo(const char* label, T* value, const char* (&names)[N]) {
   int int_value = static_cast<int>(*value);
-  bool result = Combo(label, &int_value, names, name_count);
+  bool result = Combo(label, &int_value, names, N);
   *value = static_cast<T>(int_value);
   return result;
 }
@@ -358,6 +357,7 @@ class Debugger {
   int highlight_tile_index = 0;
 
   MemoryEditor memory_editor;
+  Address memory_editor_base = 0;
 
   bool emulator_window_open = true;
   bool audio_window_open = true;
@@ -670,7 +670,7 @@ void Debugger::TiledataWindow() {
     static int palette_type = PALETTE_TYPE_BGP;
 
     ImGui::SliderInt("Scale", &scale, 1, 5);
-    ImGui::Combo("Palette", &palette_type, palette_names, 4);
+    ImGui::Combo("Palette", &palette_type, palette_names);
     PaletteRGBA palette_rgba;
 
     if (palette_type == kPaletteCustom) {
@@ -691,10 +691,10 @@ void Debugger::TiledataWindow() {
           "Dark Gray",
           "Black",
       };
-      ImGui::Combo("Color 0", &custom_palette.color[0], color_names, 4);
-      ImGui::Combo("Color 1", &custom_palette.color[1], color_names, 4);
-      ImGui::Combo("Color 2", &custom_palette.color[2], color_names, 4);
-      ImGui::Combo("Color 3", &custom_palette.color[3], color_names, 4);
+      ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
+      ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
+      ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
+      ImGui::Combo("Color 3", &custom_palette.color[3], color_names);
       palette_rgba = palette_to_palette_rgba(custom_palette);
     } else {
       palette_rgba = emulator_get_palette_rgba(e, (PaletteType)palette_type);
@@ -828,7 +828,7 @@ void Debugger::MapWindow() {
     static bool highlight = true;
 
     ImGui::SliderInt("Scale", &scale, 1, 5);
-    ImGui::Combo("Layer", &layer_type, layer_names, 2);
+    ImGui::Combo("Layer", &layer_type, layer_names);
     ImGui::Checkbox("Highlight", &highlight);
     ImGui::Separator();
 
@@ -1023,17 +1023,38 @@ void Debugger::DisassemblyWindow() {
 void Debugger::MemoryWindow() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Memory", &memory_window_open)) {
-    memory_editor.DrawContents(nullptr, 0x10000);
+    static const char* region_names[] = {
+      "ALL",
+      "ROM",
+      "VRAM",
+      "EXT RAM",
+      "WRAM",
+      "OAM",
+      "I/O",
+    };
+    static int region = 0;
+    ImGui::Combo("Region", &region, region_names);
+    size_t size = 0x10000;
+    switch (region) {
+      case 0: memory_editor_base = 0;      size = 0x10000; break; /* ALL */
+      case 1: memory_editor_base = 0;      size = 0x08000; break; /* ROM */
+      case 2: memory_editor_base = 0x8000; size = 0x02000; break; /* VRAM */
+      case 3: memory_editor_base = 0xa000; size = 0x02000; break; /* EXT RAM */
+      case 4: memory_editor_base = 0xc000; size = 0x02000; break; /* WRAM */
+      case 5: memory_editor_base = 0xfe00; size = 0x000a0; break; /* OAM */
+      case 6: memory_editor_base = 0xff00; size = 0x00100; break; /* I/O */
+    }
+    memory_editor.DrawContents(nullptr, size, memory_editor_base);
   }
   ImGui::EndDock();
 }
 
 u8 Debugger::MemoryEditorRead(Address addr) {
-  return emulator_read_u8_raw(e, addr);
+  return emulator_read_u8_raw(e, memory_editor_base + addr);
 }
 
 void Debugger::MemoryEditorWrite(Address addr, u8 value) {
-  return emulator_write_u8_raw(e, addr, value);
+  return emulator_write_u8_raw(e, memory_editor_base + addr, value);
 }
 
 int main(int argc, char** argv) {
