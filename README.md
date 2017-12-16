@@ -11,6 +11,7 @@ A simple GB emulator.
 * Save/load battery backup
 * Save/load emulator state to file
 * Fast-forward, pause and step one frame
+* Rewind and seek to specific cycle
 * Disable/enable each audio channel
 * Disable/enable BG, Window and Sprite layers
 * Convenient Python test harness using hashes to validate
@@ -30,6 +31,7 @@ A simple GB emulator.
 
 ## Debugger Screenshots
 
+![Debugger](/images/debugger.png)
 ![OBJ](/images/obj-window.png)
 ![Map](/images/map-window.png)
 ![Tile Data](/images/tiledata-window.png)
@@ -113,6 +115,7 @@ Keys:
 | Disable Window layer | <kbd>W</kbd> |
 | Disable OBJ (sprites) | <kbd>O</kbd> |
 | Fast-forward | <kbd>Tab</kbd> |
+| Rewind | <kbd>`</kbd> |
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
 
