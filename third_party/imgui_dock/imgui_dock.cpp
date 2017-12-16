@@ -599,9 +599,9 @@ struct DockContext {
         draw_list->PathBezierCurveTo(pos + ImVec2(size.x + 5, 0),
                                      pos + ImVec2(size.x + 10, size.y),
                                      pos + ImVec2(size.x + 15, size.y), 10);
-        draw_list->PathFill(hovered
-                                ? color_hovered
-                                : (dock_tab->active ? color_active : color));
+        draw_list->PathFillConvex(
+            hovered ? color_hovered
+                    : (dock_tab->active ? color_active : color));
         draw_list->AddText(pos + ImVec2(0, 1), text_color, dock_tab->label,
                            text_end);
 
@@ -815,8 +815,7 @@ struct DockContext {
       SetNextWindowPos(dock.pos);
       SetNextWindowSize(dock.size);
       bool ret = Begin(label, opened, dock.size, -1.0f,
-                       ImGuiWindowFlags_NoCollapse |
-                           ImGuiWindowFlags_ShowBorders | extra_flags);
+                       ImGuiWindowFlags_NoCollapse | extra_flags);
       m_end_action = EndAction_End;
       dock.pos = GetWindowPos();
       dock.size = GetWindowSize();

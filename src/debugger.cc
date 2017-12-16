@@ -141,8 +141,8 @@ static const ImVec2 kTileSize(8, 8);
 static const ImVec2 k8x16OBJSize(8, 16);
 static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
 static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
-static const ImColor kHighlightColor(IM_COL32(0, 255, 0, 192));
-static const ImColor kPCColor(IM_COL32(0, 255, 0, 192));
+static const ImU32 kHighlightColor(IM_COL32(0, 255, 0, 192));
+static const ImVec4 kPCColor(0, 255, 0, 192);
 
 ImVec2 operator +(const ImVec2& lhs, const ImVec2& rhs) {
   return ImVec2(lhs.x + rhs.x, lhs.y + rhs.y);
@@ -784,7 +784,7 @@ void Debugger::ObjWindow() {
           }
           clicked = ImGui::InvisibleButton(label, button_size);
         } else {
-          ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0));
+          ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32_BLACK);
           clicked = ImGui::Button(label, button_size);
           ImGui::PopStyleColor();
         }
