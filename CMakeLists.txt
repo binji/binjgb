@@ -6,16 +6,22 @@ cmake_minimum_required(VERSION 2.8)
 project(binjgb)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
+option(WERROR "Build with warnings as errors" OFF)
 option(WASM "Build for WebAssembly" OFF)
 
 if (MSVC)
   add_definitions(-W3 -D_CRT_SECURE_NO_WARNINGS)
+  if (WERROR)
+    add_definitions(-WX)
+  endif ()
 else ()
   add_definitions(
-    -Wall -Wextra -Werror -Wpointer-arith -Wno-unused-parameter -g
-    -Wno-unused-function
-    -Wno-unused-variable
+    -Wall -Wextra -Wpointer-arith -Wno-unused-parameter -g
+    -Wno-unused-function -Wno-unused-variable
   )
+  if (WERROR)
+    add_definitions(-Werror)
+  endif ()
 endif ()
 
 function (target_copy_to_bin name)
