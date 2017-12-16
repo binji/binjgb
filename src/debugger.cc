@@ -572,14 +572,28 @@ void Debugger::OnKeyUp(HostKeycode code) {
 void Debugger::StepFrame() {
   if (run_state == Running || run_state == Paused) {
     run_state = Stepping;
+  } else if (run_state == Rewinding) {
+    host_rewind_to_cycles(host, emulator_get_cycles(e) + PPU_FRAME_CYCLES);
+    host_reset_audio(host);
   }
 }
 
 void Debugger::TogglePause() {
-  if (run_state == Running) {
-    run_state = Paused;
-  } else if (run_state == Paused) {
-    run_state = Running;
+  switch (run_state) {
+    case Running:
+      run_state = Paused;
+      break;
+
+    case Paused:
+      run_state = Running;
+      break;
+
+    case Rewinding:
+      EndRewind();
+      break;
+
+    default:
+      break;
   }
 }
 
@@ -1144,13 +1158,38 @@ void Debugger::RewindWindow() {
     }
 
     if (rewinding) {
-      Cycles oldest = host_get_rewind_oldest_cycles(host);
-      Cycles newest = host_newest_cycles(host);
-      u32 range = newest - oldest;
-      int value = emulator_get_cycles(e) - oldest;
-      if (ImGui::SliderInt("Cycles", &value, 0, range)) {
-        value = CLAMP(value, 0, range);
-        host_rewind_to_cycles(host, oldest + value);
+      Cycles oldest_cy = host_get_rewind_oldest_cycles(host);
+      Cycles rel_cur_cy = emulator_get_cycles(e) - oldest_cy;
+      u32 range_fr = (host_newest_cycles(host) - oldest_cy) / PPU_FRAME_CYCLES;
+
+      // Frames.
+      int frame = rel_cur_cy / PPU_FRAME_CYCLES;
+
+      ImGui::PushButtonRepeat(true);
+      if (ImGui::Button("-1")) { --frame; }
+      ImGui::SameLine();
+      if (ImGui::Button("+1")) { ++frame; }
+      ImGui::PopButtonRepeat();
+      ImGui::SameLine();
+      ImGui::SliderInt("Frames", &frame, 0, range_fr);
+
+      frame = CLAMP(frame, 0, static_cast<int>(range_fr));
+
+      // Cycles.
+      int offset_cy = rel_cur_cy % PPU_FRAME_CYCLES;
+
+      ImGui::PushButtonRepeat(true);
+      if (ImGui::Button("-10")) { offset_cy -= 10; }
+      ImGui::SameLine();
+      if (ImGui::Button("+10")) { offset_cy += 10; }
+      ImGui::PopButtonRepeat();
+      ImGui::SameLine();
+      ImGui::SliderInt("Cycle Offset", &offset_cy, 0, PPU_FRAME_CYCLES - 1);
+
+      Cycles rel_seek_cy = (Cycles)frame * PPU_FRAME_CYCLES + offset_cy;
+
+      if (rel_cur_cy != rel_seek_cy) {
+        host_rewind_to_cycles(host, oldest_cy + rel_seek_cy);
         host_reset_audio(host);
       }
     }
