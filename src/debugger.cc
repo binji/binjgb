@@ -319,6 +319,7 @@ class Debugger {
   void OnKeyDown(HostKeycode);
   void OnKeyUp(HostKeycode);
 
+  void StepInstruction();
   void StepFrame();
   void TogglePause();
   void Pause();
@@ -344,6 +345,7 @@ class Debugger {
   void BeginAutoRewind();
   void EndAutoRewind();
   void AutoRewind(f64 ms);
+  void RewindTo(Cycles cycles);
 
   u8 MemoryEditorRead(Address addr);
   void MemoryEditorWrite(Address addr, u8 value);
@@ -359,7 +361,8 @@ class Debugger {
     Exiting,
     Running,
     Paused,
-    Stepping,
+    SteppingFrame,
+    SteppingInstruction,
     Rewinding,
     AutoRewinding,
   };
@@ -463,12 +466,17 @@ void Debugger::Run() {
     host_begin_video(host);
     switch (run_state) {
       case Running:
-      case Stepping:
+      case SteppingFrame:
         host_run_ms(host, refresh_ms);
-        if (run_state == Stepping) {
+        if (run_state == SteppingFrame) {
           host_reset_audio(host);
           run_state = Paused;
         }
+        break;
+
+      case SteppingInstruction:
+        host_step(host);
+        run_state = Paused;
         break;
 
       case AutoRewinding:
@@ -569,12 +577,19 @@ void Debugger::OnKeyUp(HostKeycode code) {
   host_set_config(host, &host_config);
 }
 
+void Debugger::StepInstruction() {
+  if (run_state == Running || run_state == Paused) {
+    run_state = SteppingInstruction;
+  } else if (run_state == Rewinding) {
+    RewindTo(emulator_get_cycles(e) + 1);
+  }
+}
+
 void Debugger::StepFrame() {
   if (run_state == Running || run_state == Paused) {
-    run_state = Stepping;
+    run_state = SteppingFrame;
   } else if (run_state == Rewinding) {
-    host_rewind_to_cycles(host, emulator_get_cycles(e) + PPU_FRAME_CYCLES);
-    host_reset_audio(host);
+    RewindTo(emulator_get_cycles(e) + PPU_FRAME_CYCLES);
   }
 }
 
@@ -1077,8 +1092,7 @@ void Debugger::DisassemblyWindow() {
 
     ImGui::PushButtonRepeat(true);
     if (ImGui::Button("step")) {
-      host_step(host);
-      Pause();
+      StepInstruction();
     }
     ImGui::PopButtonRepeat();
 
@@ -1189,8 +1203,7 @@ void Debugger::RewindWindow() {
       Cycles rel_seek_cy = (Cycles)frame * PPU_FRAME_CYCLES + offset_cy;
 
       if (rel_cur_cy != rel_seek_cy) {
-        host_rewind_to_cycles(host, oldest_cy + rel_seek_cy);
-        host_reset_audio(host);
+        RewindTo(oldest_cy + rel_seek_cy);
       }
     }
 
@@ -1257,7 +1270,12 @@ void Debugger::AutoRewind(f64 delta_ms) {
   Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
   Cycles now = emulator_get_cycles(e);
   Cycles then = now >= delta_cycles ? now - delta_cycles : 0;
-  host_rewind_to_cycles(host, then);
+  RewindTo(then);
+}
+
+void Debugger::RewindTo(Cycles cycles) {
+  host_rewind_to_cycles(host, cycles);
+  host_reset_audio(host);
 }
 
 u8 Debugger::MemoryEditorRead(Address addr) {
