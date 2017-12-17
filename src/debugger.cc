@@ -434,8 +434,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
   };
   // TODO: make these configurable?
-  host_init.frames_per_base_state = 120;  // ~2 seconds.
-  host_init.rewind_buffer_capacity = MEGABYTES(2);
+  host_init.frames_per_base_state = 45;
+  host_init.rewind_buffer_capacity = MEGABYTES(32);
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -723,7 +723,10 @@ static std::string PrettySize(size_t size) {
   char buffer[1000];
   const char* suffix;
   float fsize;
-  if (size > MEGABYTES(1)) {
+  if (size > GIGABYTES(1)) {
+    suffix = "Gib";
+    fsize = size / (float)(GIGABYTES(1));
+  } else if (size > MEGABYTES(1)) {
     suffix = "Mib";
     fsize = size / (float)(MEGABYTES(1));
   } else if (size > KILOBYTES(1)) {
@@ -1052,9 +1055,13 @@ void Debugger::DisassemblyWindow() {
   if (ImGui::BeginDock("Disassembly", &disassembly_window_open)) {
     static bool track_pc = true;
     static Address start_addr = 0;
+    Cycles now = emulator_get_cycles(e);
+    u32 hr, min, sec, ms;
+    emulator_cycles_to_time(now, &hr, &min, &sec, &ms);
 
     Registers regs = emulator_get_registers(e);
-    ImGui::Text("Cycles: %" PRIu64 "", emulator_get_cycles(e));
+    ImGui::Text("Cycles: %" PRIu64 " Time: %u:%02u:%02u.%02u", now, hr, min,
+                sec, ms / 10);
     ImGui::Text("A: %02X", regs.A);
     ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
     ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);

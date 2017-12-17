@@ -3710,3 +3710,11 @@ void emulator_delete(Emulator* e) {
     free(e);
   }
 }
+
+void emulator_cycles_to_time(Cycles cycles, u32* hr, u32* min, u32* sec,
+                             u32* ms) {
+  *hr = cycles / (60 * 60 * (Cycles)CPU_CYCLES_PER_SECOND);
+  *min = (cycles / (60 * (Cycles)CPU_CYCLES_PER_SECOND)) % 60;
+  *sec = (cycles / (Cycles)CPU_CYCLES_PER_SECOND) % 60;
+  *ms = (cycles / ((Cycles)CPU_CYCLES_PER_SECOND / 1000)) % 1000;
+}

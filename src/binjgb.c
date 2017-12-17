@@ -232,13 +232,10 @@ static void rewind_by(Cycles delta) {
   buffer[GLYPHS_PER_LINE - 1] = '|';
   buffer[GLYPHS_PER_LINE] = 0;
 
-  u32 total_csec = (u32)(((f64)then * 100) / CPU_CYCLES_PER_SECOND);
-  u32 hr = total_csec / 360000;
-  u32 min = (total_csec / 6000) % 60;
-  u32 sec = (total_csec / 100) % 60;
-  u32 csec = total_csec % 100;
+  u32 hr, min, sec, ms;
+  emulator_cycles_to_time(then, &hr, &min, &sec, &ms);
   char time[64];
-  snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", hr, min, sec, csec);
+  snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", hr, min, sec, ms / 10);
   size_t len = strlen(time);
   memcpy(&buffer[(GLYPHS_PER_LINE - len) / 2], time, len);
 
@@ -311,8 +308,8 @@ int main(int argc, char** argv) {
   host_init.audio_frames = audio_frames;
   host_init.audio_volume = s_audio_volume;
   // TODO: make these configurable?
-  host_init.frames_per_base_state = 120;  // ~2 seconds.
-  host_init.rewind_buffer_capacity = MEGABYTES(2);
+  host_init.frames_per_base_state = 45;
+  host_init.rewind_buffer_capacity = MEGABYTES(32);
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 

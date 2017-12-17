@@ -23,6 +23,7 @@ extern "C" {
 #define NEXT_MODULO(value, mod) ((mod) - (value) % (mod))
 #define KILOBYTES(x) ((size_t)(x) * 1024)
 #define MEGABYTES(x) ((size_t)(x) * 1024 * 1024)
+#define GIGABYTES(x) ((size_t)(x) * 1024 * 1024 * 1024)
 
 #define SUCCESS(x) ((x) == OK)
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
