@@ -23,6 +23,7 @@
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
+#define ROM_USAGE_EXTENSION ".romusage"
 
 static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
@@ -357,6 +358,7 @@ class Debugger {
   Host* host = nullptr;
   const char* save_filename = nullptr;
   const char* save_state_filename = nullptr;
+  const char* rom_usage_filename = nullptr;
 
   enum RunState {
     Exiting,
@@ -467,6 +469,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
+  rom_usage_filename = replace_extension(filename, ROM_USAGE_EXTENSION);
   ImGui::GetIO().FontGlobalScale = s_font_scale;
 
   memory_editor.UserData = this;
@@ -1312,7 +1315,37 @@ void Debugger::ROMWindow() {
     PaletteRGBA palette = {
         {0xff000000u, 0xff00ff00u, 0xffff0000u, 0xffff00ffu}};
 
+    size_t rom_size = emulator_get_rom_size(e);
+    u8* rom_usage = emulator_get_rom_usage(e);
+
+    if (ImGui::Button("Dump")) {
+      FileData file_data;
+      file_data.data = rom_usage;
+      file_data.size = rom_size;
+      file_write(rom_usage_filename, &file_data);
+    }
     ImGui::SliderInt("Scale", &scale, 1, 10);
+
+    static int counter = 60;
+    static size_t usage_bytes[4];
+
+    if (--counter <= 0) {
+      counter = 60;
+      ZERO_MEMORY(usage_bytes);
+      for (size_t i = 0; i < rom_size; ++i) {
+        usage_bytes[rom_usage[i]]++;
+      }
+    }
+
+    ImGui::Text("Unknown: %s (%.0f%%)", PrettySize(usage_bytes[0]).c_str(),
+                (f64)usage_bytes[0] * 100 / rom_size);
+    ImGui::Text("Code: %s (%.0f%%)", PrettySize(usage_bytes[1]).c_str(),
+                (f64)usage_bytes[1] * 100 / rom_size);
+    ImGui::Text("Data: %s (%.0f%%)", PrettySize(usage_bytes[2]).c_str(),
+                (f64)usage_bytes[2] * 100 / rom_size);
+    ImGui::Text("Code+Data: %s (%.0f%%)", PrettySize(usage_bytes[3]).c_str(),
+                (f64)usage_bytes[3] * 100 / rom_size);
+
     ImGui::Separator();
     ImGui::BeginChild("Data", ImVec2(0, 0), false,
                       ImGuiWindowFlags_HorizontalScrollbar);
