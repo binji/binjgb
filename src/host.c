@@ -776,6 +776,18 @@ Cycles host_get_rewind_newest_cycles(struct Host* host) {
 
 HostRewindStats host_get_rewind_stats(struct Host* host) {
   HostRewindStats stats;
+  stats.joypad_used_bytes = 0;
+  stats.joypad_capacity_bytes = 0;
+  JoypadBuffer* sentinel = &host->joypad_buffer_sentinel;
+  JoypadBuffer* cur = sentinel->next;
+  while (cur != sentinel) {
+    size_t overhead = sizeof(*cur);
+    stats.joypad_used_bytes += cur->size * sizeof(JoypadState) + overhead;
+    stats.joypad_capacity_bytes +=
+        cur->capacity * sizeof(JoypadState) + overhead;
+    cur = cur->next;
+  }
+
   stats.base_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Base];
   stats.diff_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Diff];
   stats.uncompressed_bytes = host->rewind_buffer.total_uncompressed_bytes;

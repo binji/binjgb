@@ -143,6 +143,8 @@ typedef struct HostTexture {
 } HostTexture;
 
 typedef struct HostRewindStats {
+  size_t joypad_used_bytes;
+  size_t joypad_capacity_bytes;
   size_t base_bytes;
   size_t diff_bytes;
   size_t uncompressed_bytes;
