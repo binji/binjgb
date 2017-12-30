@@ -180,22 +180,22 @@ typedef struct RewindBuffer {
  /*
   * |                  rewind buffer                      |
   * |                                                     |
-  * | dr[0] | ... | dr[1] | ....... | ir[0] | ... | ir[1] |
+  * | dr[0] | ... | dr[1] | ....... | ir[1] | ... | ir[0] |
   *
   * (dr == data_range, ir == info_range)
   *
-  * All RewindInfo in ir[1] has a corresponding data range in dr[0]. Similarly,
-  * all RewindInfo in ir[0] has a corresponding data range in dr[1].
+  * All RewindInfo in ir[0] has a corresponding data range in dr[0]. Similarly,
+  * all RewindInfo in ir[1] has a corresponding data range in dr[1].
   *
-  * When new data is written, ir[1].begin moves left, which my overwrite old
-  * data in ir[0]. The data is written after dr[0].end. If the newly written
-  * data overlaps the beginning of dr[1], the associated RewindInfo in ir[0] is
+  * When new data is written, ir[0].begin moves left, which my overwrite old
+  * data in ir[1]. The data is written after dr[0].end. If the newly written
+  * data overlaps the beginning of dr[1], the associated RewindInfo in ir[1] is
   * removed.
   *
-  * When ir[0].begin and dr[1].end cross, the buffer is filled. At this point,
-  * dr[0] is moved to dr[1], and ir[1] is moved to ir[0]. (Just the pointers
+  * When ir[1].begin and dr[1].end cross, the buffer is filled. At this point,
+  * dr[0] is moved to dr[1], and ir[0] is moved to ir[1]. (Just the pointers
   * move, not the actual data). Then dr[0] is reset to an empty data range and
-  * ir[1] is reset to an empty info range.
+  * ir[0] is reset to an empty info range.
   *
   * TODO(binji):: you can always recalculate the data ranges from the
   * information in the info ranges. Remove?
@@ -647,22 +647,22 @@ static void append_rewind_state(Host* host) {
 
   RewindDataRange* data_range = buf->data_range;
   RewindInfoRange* info_range = buf->info_range;
-  RewindInfo* new_info = --info_range[1].begin;
+  RewindInfo* new_info = --info_range[0].begin;
   if ((u8 *)new_info <= data_range[1].end) {
   wrap:
     /* Need to wrap, roll back decrement and swap ranges. */
-    info_range[1].begin++;
-    info_range[0] = info_range[1];
-    info_range[1].begin = info_range[1].end;
+    info_range[0].begin++;
+    info_range[1] = info_range[0];
+    info_range[0].begin = info_range[0].end;
     data_range[1] = data_range[0];
     data_range[0].end = data_range[0].begin;
 
-    new_info = --info_range[1].begin;
+    new_info = --info_range[0].begin;
     assert((u8*)new_info > data_range[1].end);
   }
 
   u8* data_begin = data_range[0].end;
-  u8* data_end_max = (u8*)MIN(info_range[0].begin, new_info);
+  u8* data_end_max = (u8*)MIN(info_range[1].begin, new_info);
   u8* data_end;
   switch (kind) {
     case RewindInfoKind_Diff:
@@ -693,27 +693,27 @@ static void append_rewind_state(Host* host) {
   data_range[0].end = data_end;
 
   /* Check to see how many data chunks we overwrote. */
-  RewindInfo* new_end = info_range[0].end;
-  while (info_range[0].begin < new_end && new_end[-1].data < data_end) {
+  RewindInfo* new_end = info_range[1].end;
+  while (info_range[1].begin < new_end && new_end[-1].data < data_end) {
     --new_end;
   }
 
   new_end = MIN(new_end, new_info);
 
-  info_range[0].end = new_end;
-  info_range[0].begin = MIN(info_range[0].begin, info_range[0].end);
+  info_range[1].end = new_end;
+  info_range[1].begin = MIN(info_range[1].begin, info_range[1].end);
 
   new_info->cycles = cycles;
   new_info->data = data_begin;
   new_info->size = data_end - data_begin;
   new_info->kind = kind;
 
-  if (info_range[0].begin < info_range[0].end) {
-    data_range[1].begin = info_range[0].end[-1].data;
-    data_range[1].end = info_range[0].begin->data + info_range[0].begin->size;
+  if (info_range[1].begin < info_range[1].end) {
+    data_range[1].begin = info_range[1].end[-1].data;
+    data_range[1].end = info_range[1].begin->data + info_range[1].begin->size;
   } else {
     data_range[1].begin = data_range[1].end =
-        info_range[1].begin->data + info_range[1].begin->size;
+        info_range[0].begin->data + info_range[0].begin->size;
   }
 
   /* Update stats. */
@@ -736,8 +736,8 @@ static void host_init_rewind_buffer(Host* host) {
   buf->data_range[0].begin = buf->data_range[0].end = data;
   buf->data_range[1] = buf->data_range[0];
   RewindInfo* info = (RewindInfo*)(data + capacity);
-  buf->info_range[1].begin = buf->info_range[1].end = info;
-  buf->info_range[0] = buf->info_range[1];
+  buf->info_range[0].begin = buf->info_range[0].end = info;
+  buf->info_range[1] = buf->info_range[0];
   buf->frames_until_next_base = 0;
   append_rewind_state(host);
 }
@@ -748,10 +748,10 @@ static Bool is_rewind_range_empty(RewindInfoRange* r) {
 
 Cycles host_get_rewind_oldest_cycles(struct Host* host) {
   RewindInfoRange* info_range = host->rewind_buffer.info_range;
-  /* info_range[0] is always older than info_range[1], if it exists, so check
+  /* info_range[1] is always older than info_range[0], if it exists, so check
    * that first. */
   int i;
-  for (i = 0; i < 2; ++i) {
+  for (i = 1; i >= 0; --i) {
     if (!is_rewind_range_empty(&info_range[i])) {
       /* end is exclusive. */
       return info_range[i].end[-1].cycles;
@@ -765,7 +765,7 @@ Cycles host_get_rewind_newest_cycles(struct Host* host) {
   RewindInfoRange* info_range = host->rewind_buffer.info_range;
 
   int i;
-  for (i = 1; i >= 0; --i) {
+  for (i = 0; i < 2; ++i) {
     if (!is_rewind_range_empty(&info_range[i])) {
       return info_range[i].begin[0].cycles;
     }
@@ -873,10 +873,10 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
   int info_range_index;
   if (cycles > host->last_cycles) {
     return ERROR;
-  } else if (cycles >= info_range[1].end[-1].cycles) {
-    info_range_index = 1;
   } else if (cycles >= info_range[0].end[-1].cycles) {
     info_range_index = 0;
+  } else if (cycles >= info_range[1].end[-1].cycles) {
+    info_range_index = 1;
   } else {
     return ERROR;
   }
@@ -912,13 +912,13 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
     RewindInfoRange range = {found, end};
     RewindInfo* base_info = find_first_base_in_range(range);
     if (!base_info) {
-      if (info_range_index == 0) {
+      if (info_range_index == 1) {
         /* No previous base state, can't decode. */
         return ERROR;
       }
 
       /* Search the previous range. */
-      base_info = find_first_base_in_range(info_range[0]);
+      base_info = find_first_base_in_range(info_range[1]);
       if (!base_info) {
         return ERROR;
       }
@@ -974,9 +974,9 @@ void host_end_rewind(Host* host) {
     RewindInfoRange* info_range = host->rewind_buffer.info_range;
     RewindInfo* info = host->rewind_state.info;
     info_range[info_range_index].begin = info;
-    data_range[1 - info_range_index].end = info->data + info->size;
-    if (info_range_index == 0) {
-      info_range[1].begin = info_range[1].end;
+    data_range[info_range_index].end = info->data + info->size;
+    if (info_range_index == 1) {
+      info_range[0].begin = info_range[0].end;
       data_range[0].end = data_range[0].begin;
     }
 
