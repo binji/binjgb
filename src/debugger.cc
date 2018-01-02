@@ -1244,6 +1244,33 @@ void Debugger::RewindWindow() {
     f64 range = (f64)(newest - oldest) / CPU_CYCLES_PER_SECOND;
     ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", oldest, newest,
                 range);
+
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImVec2 avail_size = ImGui::GetContentRegionAvail();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    f32 w = avail_size.x, h = 64;
+    ImVec2 ul_pos = cursor;
+    ImVec2 br_pos = ul_pos + ImVec2(w, h);
+    ImVec2 margin(4, 4);
+    draw_list->AddRectFilled(ul_pos, br_pos, IM_COL32_BLACK);
+    draw_list->AddRectFilled(ul_pos + margin, br_pos - margin, IM_COL32_WHITE);
+
+    auto xoffset = [&](size_t x) -> f32 {
+      return (f32)x * (w - margin.x * 2) / (f32)capacity;
+    };
+
+    auto draw_bar = [&](size_t l, size_t r, ImU32 col) {
+      ImVec2 ul = ul_pos + margin + ImVec2(xoffset(l), 0);
+      ImVec2 br = ul_pos + margin + ImVec2(xoffset(r), h - margin.y * 2);
+      draw_list->AddRectFilled(ul, br, col);
+    };
+
+    draw_bar(stats.data_ranges[0], stats.data_ranges[1], 0xfff38bff);
+    draw_bar(stats.data_ranges[2], stats.data_ranges[3], 0xffac5eb5);
+    draw_bar(stats.info_ranges[0], stats.info_ranges[1], 0xff64ea54);
+    draw_bar(stats.info_ranges[2], stats.info_ranges[3], 0xff3eab32);
+    ImGui::Dummy(ImVec2(w, h));
   }
   ImGui::EndDock();
 }

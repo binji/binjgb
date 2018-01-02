@@ -150,6 +150,9 @@ typedef struct HostRewindStats {
   size_t uncompressed_bytes;
   size_t used_bytes;
   size_t capacity_bytes;
+
+  size_t data_ranges[4];
+  size_t info_ranges[4];
 } HostRewindStats;
 
 struct Host* host_new(const HostInit*, struct Emulator*);

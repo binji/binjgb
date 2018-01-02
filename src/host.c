@@ -794,6 +794,7 @@ HostRewindStats host_get_rewind_stats(struct Host* host) {
   stats.used_bytes = 0;
   stats.capacity_bytes = host->init.rewind_buffer_capacity;
 
+  u8* buffer = host->rewind_buffer.data_range[0].begin;
   int i;
   for (i = 0; i < 2; ++i) {
     RewindDataRange* data_range = &host->rewind_buffer.data_range[i];
@@ -801,7 +802,13 @@ HostRewindStats host_get_rewind_stats(struct Host* host) {
     stats.used_bytes += data_range->end - data_range->begin;
     stats.used_bytes +=
         (info_range->end - info_range->begin) * sizeof(RewindInfo);
+
+    stats.data_ranges[i*2+0] = data_range->begin - buffer;
+    stats.data_ranges[i*2+1] = data_range->end - buffer;
+    stats.info_ranges[i*2+0] = (u8*)info_range->begin - buffer;
+    stats.info_ranges[i*2+1] = (u8*)info_range->end - buffer;
   }
+
   return stats;
 }
 
