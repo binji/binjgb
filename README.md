@@ -16,6 +16,7 @@ A simple GB emulator.
 * Disable/enable BG, Window and Sprite layers
 * Convenient Python test harness using hashes to validate
 * (WIP) Debugger with various visualizations (see below)
+* [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
 
 ## Screenshots
 
