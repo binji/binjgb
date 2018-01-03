@@ -14,8 +14,8 @@
 #define MAXIMUM_ROM_SIZE MEGABYTES(8)
 #define MINIMUM_ROM_SIZE KILOBYTES(32)
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
-#define VIDEO_RAM_SIZE KILOBYTES(8)
-#define WORK_RAM_SIZE KILOBYTES(8)
+#define VIDEO_RAM_SIZE KILOBYTES(16)
+#define WORK_RAM_SIZE KILOBYTES(32)
 #define EXT_RAM_MAX_SIZE KILOBYTES(32)
 #define WAVE_RAM_SIZE 16
 #define HIGH_RAM_SIZE 127
@@ -24,28 +24,41 @@
 #define OBJ_PALETTE_COUNT 2
 
 /* Addresses are relative to IO_START_ADDR (0xff00). */
-#define FOREACH_IO_REG(V)                     \
-  V(JOYP, 0x00) /* Joypad */                  \
-  V(SB, 0x01)   /* Serial transfer data */    \
-  V(SC, 0x02)   /* Serial transfer control */ \
-  V(DIV, 0x04)  /* Divider */                 \
-  V(TIMA, 0x05) /* Timer counter */           \
-  V(TMA, 0x06)  /* Timer modulo */            \
-  V(TAC, 0x07)  /* Timer control */           \
-  V(IF, 0x0f)   /* Interrupt request */       \
-  V(LCDC, 0x40) /* LCD control */             \
-  V(STAT, 0x41) /* LCD status */              \
-  V(SCY, 0x42)  /* Screen Y */                \
-  V(SCX, 0x43)  /* Screen X */                \
-  V(LY, 0x44)   /* Y Line */                  \
-  V(LYC, 0x45)  /* Y Line compare */          \
-  V(DMA, 0x46)  /* DMA transfer to OAM */     \
-  V(BGP, 0x47)  /* BG palette */              \
-  V(OBP0, 0x48) /* OBJ palette 0 */           \
-  V(OBP1, 0x49) /* OBJ palette 1 */           \
-  V(WY, 0x4a)   /* Window Y */                \
-  V(WX, 0x4b)   /* Window X */                \
-  V(IE, 0xff)   /* Interrupt enable */
+#define FOREACH_IO_REG(V)                           \
+  V(JOYP, 0x00)  /* Joypad */                       \
+  V(SB, 0x01)    /* Serial transfer data */         \
+  V(SC, 0x02)    /* Serial transfer control */      \
+  V(DIV, 0x04)   /* Divider */                      \
+  V(TIMA, 0x05)  /* Timer counter */                \
+  V(TMA, 0x06)   /* Timer modulo */                 \
+  V(TAC, 0x07)   /* Timer control */                \
+  V(IF, 0x0f)    /* Interrupt request */            \
+  V(LCDC, 0x40)  /* LCD control */                  \
+  V(STAT, 0x41)  /* LCD status */                   \
+  V(SCY, 0x42)   /* Screen Y */                     \
+  V(SCX, 0x43)   /* Screen X */                     \
+  V(LY, 0x44)    /* Y Line */                       \
+  V(LYC, 0x45)   /* Y Line compare */               \
+  V(DMA, 0x46)   /* DMA transfer to OAM */          \
+  V(BGP, 0x47)   /* BG palette */                   \
+  V(OBP0, 0x48)  /* OBJ palette 0 */                \
+  V(OBP1, 0x49)  /* OBJ palette 1 */                \
+  V(WY, 0x4a)    /* Window Y */                     \
+  V(WX, 0x4b)    /* Window X */                     \
+  V(KEY1, 0x4d)  /* Prepare speed switch X */       \
+  V(VBK, 0x4f)   /* VRAM bank */                    \
+  V(HDMA1, 0x51) /* HDMA 1 */                       \
+  V(HDMA2, 0x52) /* HDMA 2 */                       \
+  V(HDMA3, 0x53) /* HDMA 3 */                       \
+  V(HDMA4, 0x54) /* HDMA 4 */                       \
+  V(HDMA5, 0x55) /* HDMA 5 */                       \
+  V(RP, 0x56)    /* Infrared communications port */ \
+  V(BCPS, 0x68)  /* Background palette index */     \
+  V(BCPD, 0x69)  /* Background palette data */      \
+  V(OCPS, 0x6a)  /* Obj palette index */            \
+  V(OCPD, 0x6b)  /* Obj palette data */             \
+  V(SVBK, 0x70)  /* WRAM bank */                    \
+  V(IE, 0xff)    /* Interrupt enable */
 
 /* Addresses are relative to APU_START_ADDR (0xff10). */
 #define FOREACH_APU_REG(V)                                   \
@@ -818,6 +831,19 @@ typedef struct Emulator {
 #define NR52_SOUND3_ON(X) BIT(X, 2)
 #define NR52_SOUND2_ON(X) BIT(X, 1)
 #define NR52_SOUND1_ON(X) BIT(X, 0)
+
+#define KEY1_CURRENT_SPEED(X) BIT(X, 7, 7)
+#define KEY1_PREPARE_SPEED_SWITCH(X) BIT(X, 0)
+#define RP_DATA_READ_ENABLE(X) BITS(X, 7, 6)
+#define RP_READ_DATA(X) BIT(X, 1)
+#define RP_WRITE_DATA(X) BIT(X, 0)
+#define VBK_VRAM_BANK(X) BIT(X, 0)
+#define XCPS_AUTO_INCREMENT(X) BIT(X, 7)
+#define XCPS_INDEX(X) BITS(X, 5, 0)
+#define XCPD_BLUE_INTENSITY(X) BITS(X, 14, 10)
+#define XCPD_GREEN_INTENSITY(X) BITS(X, 9, 5)
+#define XCPD_RED_INTENSITY(X) BITS(X, 0, 4)
+#define SVBK_WRAM_BANK(X) BITS(X, 2, 0)
 
 #define OBJ_PRIORITY(X) BIT(X, 7)
 #define OBJ_YFLIP(X) BIT(X, 6)
