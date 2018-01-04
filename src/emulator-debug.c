@@ -474,8 +474,8 @@ void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
           (ty * TILE_WIDTH) * TILE_DATA_TEXTURE_WIDTH + (tx * TILE_HEIGHT);
       for (my = 0; my < TILE_HEIGHT; ++my) {
         for (mx = 0; mx < TILE_WIDTH; ++mx) {
-          u8 lo = e->state.vram[addr];
-          u8 hi = e->state.vram[addr + 1];
+          u8 lo = e->state.vram.data[addr];
+          u8 hi = e->state.vram.data[addr + 1];
           u8 shift = 7 - (mx & 7);
           u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
           out_tile_data[offset + mx] = palette_index;
@@ -490,7 +490,7 @@ void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
 void emulator_get_tile_map(struct Emulator* e, TileMapSelect map_select,
                            TileMap out_tile_map) {
   size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
-  memcpy(out_tile_map, &e->state.vram[offset], TILE_MAP_SIZE);
+  memcpy(out_tile_map, &e->state.vram.data[offset], TILE_MAP_SIZE);
 }
 
 void emulator_get_bg_scroll(struct Emulator* e, u8* x, u8* y) {

@@ -322,6 +322,16 @@ typedef enum {
   DMA_ACTIVE = 2,
 } DmaState;
 
+typedef enum {
+  HDMA_TRANSFER_MODE_GDMA = 0,
+  HDMA_TRANSFER_MODE_HDMA = 1,
+} HdmaTransferMode;
+
+typedef enum {
+  SPEED_NORMAL = 0,
+  SPEED_DOUBLE = 1,
+} Speed;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -516,6 +526,17 @@ typedef struct {
 } Stat;
 
 typedef struct {
+  RGBA color[PALETTE_COLOR_COUNT];
+} ColorPalette;
+
+typedef struct {
+  ColorPalette palettes[8];
+  u8 data[64];
+  u8 index;
+  Bool auto_increment;
+} ColorPalettes;
+
+typedef struct {
   Lcdc lcdc;                      /* LCD control */
   Stat stat;                      /* LCD status */
   u8 scy;                         /* Screen Y */
@@ -526,6 +547,8 @@ typedef struct {
   u8 wx;                          /* Window X */
   Palette bgp;                    /* BG Palette */
   Palette obp[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
+  ColorPalettes bgcp;             /* BG Color Palettes */
+  ColorPalettes obcp;             /* OBJ Color Palettes */
   PPUState state;
   u32 state_cycles;
   u32 line_cycles;                /* Counts cycles until line_y changes. */
@@ -550,13 +573,39 @@ typedef struct {
 } Dma;
 
 typedef struct {
+  Speed speed;
+  Bool switching;
+} CpuSpeed;
+
+typedef struct {
+  u8 data[VIDEO_RAM_SIZE];
+  Address offset;
+  u8 bank;
+} Vram;
+
+typedef struct {
+  u8 data[WORK_RAM_SIZE];
+  Address offset;
+  u8 bank;
+} Wram;
+
+typedef struct {
+  DmaState state;
+  Address source;
+  Address dest;
+  HdmaTransferMode mode;
+  u8 blocks;
+  u8 block_bytes;
+} Hdma;
+
+typedef struct {
   u32 header; /* Set to SAVE_STATE_HEADER; makes it easier to save state. */
   u8 cart_info_index;
   MemoryMapState memory_map_state;
   Registers reg;
-  u8 vram[VIDEO_RAM_SIZE];
+  Vram vram;
   ExtRam ext_ram;
-  u8 wram[WORK_RAM_SIZE];
+  Wram wram;
   Interrupt interrupt;
   Obj oam[OBJ_COUNT];
   Joypad joyp;
@@ -565,6 +614,8 @@ typedef struct {
   Apu apu;
   Ppu ppu;
   Dma dma;
+  Hdma hdma;
+  CpuSpeed cpu_speed;
   u8 hram[HIGH_RAM_SIZE];
   Cycles cycles;
   Bool is_cgb;
@@ -594,10 +645,12 @@ typedef struct Emulator {
 #define CHANNEL3 CHANNEL(3)
 #define CHANNEL4 CHANNEL(4)
 #define CHANNEL(i) (APU.channel[APU_CHANNEL##i])
+#define CPU_SPEED (e->state.cpu_speed)
 #define CYCLES (e->state.cycles)
 #define DMA (e->state.dma)
 #define EXT_RAM (e->state.ext_ram)
 #define HRAM (e->state.hram)
+#define HDMA (e->state.hdma)
 #define INTR (e->state.interrupt)
 #define JOYP (e->state.joyp)
 #define LCDC (PPU.lcdc)
@@ -832,17 +885,22 @@ typedef struct Emulator {
 #define NR52_SOUND2_ON(X) BIT(X, 1)
 #define NR52_SOUND1_ON(X) BIT(X, 0)
 
-#define KEY1_CURRENT_SPEED(X) BIT(X, 7, 7)
+#define KEY1_UNUSED 0x7f
+#define KEY1_CURRENT_SPEED(X) BIT(X, 7)
 #define KEY1_PREPARE_SPEED_SWITCH(X) BIT(X, 0)
 #define RP_DATA_READ_ENABLE(X) BITS(X, 7, 6)
 #define RP_READ_DATA(X) BIT(X, 1)
 #define RP_WRITE_DATA(X) BIT(X, 0)
+#define VBK_UNUSED 0xfe
 #define VBK_VRAM_BANK(X) BIT(X, 0)
+#define HDMA5_TRANSFER_MODE(X) BIT(X, 7)
+#define HDMA5_BLOCKS(X) BITS(X, 6, 0)
 #define XCPS_AUTO_INCREMENT(X) BIT(X, 7)
 #define XCPS_INDEX(X) BITS(X, 5, 0)
 #define XCPD_BLUE_INTENSITY(X) BITS(X, 14, 10)
 #define XCPD_GREEN_INTENSITY(X) BITS(X, 9, 5)
-#define XCPD_RED_INTENSITY(X) BITS(X, 0, 4)
+#define XCPD_RED_INTENSITY(X) BITS(X, 4, 0)
+#define SVBK_UNUSED 0xf8
 #define SVBK_WRAM_BANK(X) BITS(X, 2, 0)
 
 #define OBJ_PRIORITY(X) BIT(X, 7)
@@ -935,6 +993,23 @@ static MemoryTypeAddressPair map_address(Address addr) {
               return make_pair(MEMORY_MAP_HIGH_RAM, addr - HIGH_RAM_START_ADDR);
           }
       }
+  }
+}
+
+static MemoryTypeAddressPair map_hdma_source_address(Address addr) {
+  switch (addr >> 12) {
+    case 0x0: case 0x1: case 0x2: case 0x3:
+      return make_pair(MEMORY_MAP_ROM0, addr & ADDR_MASK_16K);
+    case 0x4: case 0x5: case 0x6: case 0x7:
+      return make_pair(MEMORY_MAP_ROM1, addr & ADDR_MASK_16K);
+    case 0x8: case 0x9:
+      return make_pair(MEMORY_MAP_VRAM, addr & ADDR_MASK_8K);
+    default: case 0xA: case 0xB: case 0xE: case 0xF:
+      return make_pair(MEMORY_MAP_EXT_RAM, addr & ADDR_MASK_8K);
+    case 0xC:
+      return make_pair(MEMORY_MAP_WORK_RAM0, addr & ADDR_MASK_4K);
+    case 0xD:
+      return make_pair(MEMORY_MAP_WORK_RAM1, addr & ADDR_MASK_4K);
   }
 }
 
@@ -1324,7 +1399,7 @@ static u8 read_vram(Emulator* e, MaskedAddress addr) {
     return INVALID_READ_BYTE;
   } else {
     assert(addr <= ADDR_MASK_8K);
-    return VRAM[addr];
+    return VRAM.data[VRAM.offset + addr];
   }
 }
 
@@ -1446,9 +1521,17 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return PPU.wy;
     case IO_WX_ADDR:
       return PPU.wx;
+    case IO_KEY1_ADDR:
+      return KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED);
+    case IO_VBK_ADDR:
+      return VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK);
+    case IO_SVBK_ADDR:
+      return SVBK_UNUSED | PACK(WRAM.bank, SVBK_WRAM_BANK);
     case IO_IE_ADDR:
       return INTR.ie;
     default:
+      printf("invalid read [%02x] (%s)\n", addr, get_io_reg_string(addr));
+      assert(0);
       HOOK(read_io_ignored_as, addr, get_io_reg_string(addr));
       return INVALID_READ_BYTE;
   }
@@ -1571,9 +1654,9 @@ static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair, Bool raw) {
     case MEMORY_MAP_EXT_RAM:
       return e->memory_map.read_ext_ram(e, pair.addr);
     case MEMORY_MAP_WORK_RAM0:
-      return WRAM[pair.addr];
+      return WRAM.data[pair.addr];
     case MEMORY_MAP_WORK_RAM1:
-      return WRAM[0x1000 + pair.addr];
+      return WRAM.data[WRAM.offset + pair.addr];
     case MEMORY_MAP_OAM:
       return read_oam(e, pair.addr);
     case MEMORY_MAP_UNUSED:
@@ -1616,7 +1699,7 @@ static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   }
 
   assert(addr <= ADDR_MASK_8K);
-  VRAM[addr] = value;
+  VRAM.data[VRAM.offset + addr] = value;
 }
 
 static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1890,10 +1973,79 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_WX_ADDR:
       PPU.wx = value;
       break;
+    case IO_KEY1_ADDR:
+      CPU_SPEED.switching = UNPACK(value, KEY1_PREPARE_SPEED_SWITCH);
+      break;
+    case IO_VBK_ADDR:
+      VRAM.bank = UNPACK(value, VBK_VRAM_BANK);
+      VRAM.offset = VRAM.bank << 13;
+      break;
+    case IO_HDMA1_ADDR:
+      HDMA.source = (HDMA.source & 0x00ff) | (value << 8);
+      break;
+    case IO_HDMA2_ADDR:
+      HDMA.source = (HDMA.source & 0xff00) | (value & 0xf0);
+      break;
+    case IO_HDMA3_ADDR:
+      HDMA.dest = (HDMA.dest & 0x00ff) | (value << 8);
+      break;
+    case IO_HDMA4_ADDR:
+      HDMA.dest = (HDMA.dest & 0xff00) | (value & 0xf0);
+      break;
+    case IO_HDMA5_ADDR: {
+      HdmaTransferMode new_mode = UNPACK(value, HDMA5_TRANSFER_MODE);
+      u8 new_blocks = UNPACK(value, HDMA5_BLOCKS);
+      if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+          (HDMA.blocks & 0x80) == 0) { /* HDMA Active */
+        if (new_mode == HDMA_TRANSFER_MODE_GDMA) {
+          /* Stop HDMA copy. */
+          HDMA.blocks |= 0x80 | new_blocks;
+        } else {
+          HDMA.blocks = new_blocks;
+        }
+      } else {
+        HDMA.mode = new_mode;
+        HDMA.blocks = new_blocks;
+      }
+      if (HDMA.mode == HDMA_TRANSFER_MODE_GDMA) {
+        HDMA.state = DMA_ACTIVE;
+      }
+      break;
+    }
+    case IO_BCPS_ADDR:
+    case IO_OCPS_ADDR: {
+      ColorPalettes* cp = addr == IO_BCPS_ADDR ? &PPU.bgcp : &PPU.obcp;
+      cp->index = UNPACK(value, XCPS_INDEX);
+      cp->auto_increment = UNPACK(value, XCPS_AUTO_INCREMENT);
+      break;
+    }
+    case IO_BCPD_ADDR:
+    case IO_OCPD_ADDR: {
+      ColorPalettes* cp = addr == IO_BCPD_ADDR ? &PPU.bgcp : &PPU.obcp;
+      cp->data[cp->index] = value;
+      u8 palette_index = (cp->index >> 3) & 7;
+      u8 color_index = (cp->index >> 1) & 3;
+      u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
+      RGBA color = MAKE_RGBA(UNPACK(color16, XCPD_RED_INTENSITY) << 3,
+                             UNPACK(color16, XCPD_GREEN_INTENSITY) << 3,
+                             UNPACK(color16, XCPD_BLUE_INTENSITY) << 3, 255);
+      cp->palettes[palette_index].color[color_index] = color;
+      if (cp->auto_increment) {
+        cp->index = (cp->index + 1) & 0x3f;
+      }
+      break;
+    }
+    case IO_SVBK_ADDR:
+      WRAM.bank = UNPACK(value, SVBK_WRAM_BANK);
+      WRAM.offset = WRAM.bank == 0 ? 0x1000 : (WRAM.bank << 12);
+      break;
     case IO_IE_ADDR:
       INTR.ie = value;
       break;
     default:
+      printf("invalid write [%02x] (%s), %02x\n", addr, get_io_reg_string(addr),
+             value);
+      assert(0);
       HOOK(write_io_ignored_as, addr, get_io_reg_string(addr), value);
       break;
   }
@@ -2245,10 +2397,10 @@ static void write_u8_pair(Emulator* e, MemoryTypeAddressPair pair, u8 value) {
       e->memory_map.write_ext_ram(e, pair.addr, value);
       break;
     case MEMORY_MAP_WORK_RAM0:
-      WRAM[pair.addr] = value;
+      WRAM.data[pair.addr] = value;
       break;
     case MEMORY_MAP_WORK_RAM1:
-      WRAM[0x1000 + pair.addr] = value;
+      WRAM.data[WRAM.offset + pair.addr] = value;
       break;
     case MEMORY_MAP_OAM:
       write_oam(e, pair.addr, value);
@@ -2378,14 +2530,14 @@ static void ppu_mode3_mcycle(Emulator* e) {
         mx = PPU.scx + xi;
         my = PPU.scy + y;
       }
-      u8* map = &VRAM[map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00];
+      u8* map = &VRAM.data[map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00];
       u16 tile_index = map[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
       if (data_select == TILE_DATA_8800_97FF) {
         tile_index = 256 + (s8)tile_index;
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + (my & 7)) * TILE_ROW_BYTES;
-      u8 lo = VRAM[tile_addr];
-      u8 hi = VRAM[tile_addr + 1];
+      u8 lo = VRAM.data[tile_addr];
+      u8 hi = VRAM.data[tile_addr + 1];
       u8 shift = 7 - (mx & 7);
       u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
       pixels[i] = PPU.bgp.color[palette_index];
@@ -2423,8 +2575,8 @@ static void ppu_mode3_mcycle(Emulator* e) {
         }
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + (oy & 7)) * TILE_ROW_BYTES;
-      u8 lo = VRAM[tile_addr];
-      u8 hi = VRAM[tile_addr + 1];
+      u8 lo = VRAM.data[tile_addr];
+      u8 hi = VRAM.data[tile_addr + 1];
       if (!o->xflip) {
         lo = reverse_bits_u8(lo);
         hi = reverse_bits_u8(hi);
@@ -2502,6 +2654,10 @@ static void ppu_mcycle(Emulator* e) {
             STAT.trigger_mode = PPU_MODE_MODE2;
             if (PPU.rendering_window) {
               PPU.win_y++;
+            }
+            if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+                (HDMA.blocks & 0x80) == 0) {
+              HDMA.state = DMA_ACTIVE;
             }
           }
         } else {
@@ -2855,6 +3011,47 @@ static void dma_mcycle(Emulator* e) {
   }
 }
 
+static void hdma_copy_byte(Emulator* e) {
+  if (HDMA.blocks & 0x80) {
+    return;
+  }
+  MemoryTypeAddressPair source_pair = map_hdma_source_address(HDMA.source++);
+  u8 value;
+  if (source_pair.type == MEMORY_MAP_VRAM) {
+    /* TODO(binji): According to TCAGBD this should read "two unknown bytes",
+     * then 0xff for the rest. */
+    value = INVALID_READ_BYTE;
+  } else {
+    value = read_u8_pair(e, source_pair);
+  }
+  MemoryTypeAddressPair dest_pair = {MEMORY_MAP_VRAM,
+                                     HDMA.dest++ & ADDR_MASK_8K};
+  write_u8_pair(e, dest_pair, value);
+  HDMA.block_bytes++;
+  if (VALUE_WRAPPED(HDMA.block_bytes, 16)) {
+    --HDMA.blocks;
+    if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA) {
+      if (HDMA.blocks == 0xff) {
+        HDMA.state = DMA_INACTIVE;
+      }
+    } else {
+      HDMA.state = DMA_INACTIVE;
+    }
+  }
+}
+
+static void hdma_mcycle(Emulator* e) {
+  if (HDMA.state == DMA_INACTIVE) {
+    return;
+  }
+  if (HDMA.state == DMA_TRIGGERED) {
+    DMA.state = DMA_ACTIVE;
+    return;
+  }
+  hdma_copy_byte(e);
+  hdma_copy_byte(e);
+}
+
 static void timer_mcycle(Emulator* e) {
   if (TIMER.on) {
     if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
@@ -2888,6 +3085,7 @@ static void serial_mcycle(Emulator* e) {
 static void mcycle(Emulator* e) {
   INTR.if_ = INTR.new_if;
   dma_mcycle(e);
+  hdma_mcycle(e);
   ppu_mcycle(e);
   timer_mcycle(e);
   serial_mcycle(e);
@@ -3199,7 +3397,14 @@ static void execute_instruction(Emulator* e) {
       (INTR.ime || INTR.halt) && ((INTR.new_if & INTR.ie & IF_ALL) != 0);
 
   if (INTR.stop && !should_dispatch) {
-    return;
+    // TODO(binji): proper timing of speed switching.
+    if (CPU_SPEED.switching) {
+      CPU_SPEED.switching = FALSE;
+      CPU_SPEED.speed = SPEED_DOUBLE;
+      INTR.stop = FALSE;
+    } else {
+      return;
+    }
   }
 
   if (INTR.enable) {
@@ -3436,7 +3641,11 @@ static void execute_instruction(Emulator* e) {
 
 static void emulator_step_internal(Emulator* e) {
   HOOK0(emulator_step);
-  execute_instruction(e);
+  if (HDMA.state == DMA_INACTIVE) {
+    execute_instruction(e);
+  } else {
+    mcycle(e);
+  }
 }
 
 EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
@@ -3528,7 +3737,9 @@ Result init_emulator(Emulator* e) {
   log_cart_info(e->cart_info);
   MMAP_STATE.rom_base[0] = 0;
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
-  set_af_reg(e, 0x01b0);
+  e->state.is_cgb = e->cart_info->cgb_flag != 0;
+  set_af_reg(e, 0xb0);
+  REG.A = e->state.is_cgb ? 0x11 : 0x01;
   REG.BC = 0x0013;
   REG.DE = 0x00d8;
   REG.HL = 0x014d;
@@ -3536,6 +3747,7 @@ Result init_emulator(Emulator* e) {
   REG.PC = 0x0100;
   INTR.ime = FALSE;
   TIMER.div_counter = 0xAC00;
+  WRAM.offset = 0x1000;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
