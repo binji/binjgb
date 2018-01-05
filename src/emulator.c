@@ -276,6 +276,11 @@ typedef enum {
   SERIAL_CLOCK_INTERNAL = 1,
 } SerialClock;
 
+typedef enum {
+  DATA_READ_DISABLE = 0,
+  DATA_READ_ENABLE = 3,
+} DataReadEnable;
+
 enum {
   SOUND1,
   SOUND2,
@@ -419,6 +424,12 @@ typedef struct {
   u8 transferred_bits;
   Cycles cycles;
 } Serial;
+
+typedef struct {
+  Bool write;
+  Bool read;
+  DataReadEnable enabled;
+} Infrared;
 
 typedef struct {
   u8 period;
@@ -610,6 +621,7 @@ typedef struct {
   Obj oam[OBJ_COUNT];
   Joypad joyp;
   Serial serial;
+  Infrared infrared;
   Timer timer;
   Apu apu;
   Ppu ppu;
@@ -651,6 +663,7 @@ typedef struct Emulator {
 #define EXT_RAM (e->state.ext_ram)
 #define HRAM (e->state.hram)
 #define HDMA (e->state.hdma)
+#define INFRARED (e->state.infrared)
 #define INTR (e->state.interrupt)
 #define JOYP (e->state.joyp)
 #define LCDC (PPU.lcdc)
@@ -888,6 +901,7 @@ typedef struct Emulator {
 #define KEY1_UNUSED 0x7f
 #define KEY1_CURRENT_SPEED(X) BIT(X, 7)
 #define KEY1_PREPARE_SPEED_SWITCH(X) BIT(X, 0)
+#define RP_UNUSED 0x3c
 #define RP_DATA_READ_ENABLE(X) BITS(X, 7, 6)
 #define RP_READ_DATA(X) BIT(X, 1)
 #define RP_WRITE_DATA(X) BIT(X, 0)
@@ -1525,6 +1539,10 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED);
     case IO_VBK_ADDR:
       return VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK);
+    case IO_RP_ADDR:
+      return RP_UNUSED | PACK(INFRARED.enabled, RP_DATA_READ_ENABLE) |
+             PACK(INFRARED.read, RP_READ_DATA) |
+             PACK(INFRARED.write, RP_WRITE_DATA);
     case IO_SVBK_ADDR:
       return SVBK_UNUSED | PACK(WRAM.bank, SVBK_WRAM_BANK);
     case IO_IE_ADDR:
@@ -2012,6 +2030,10 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       }
       break;
     }
+    case IO_RP_ADDR:
+      INFRARED.write = UNPACK(value, RP_WRITE_DATA);
+      INFRARED.enabled = UNPACK(value, RP_DATA_READ_ENABLE);
+      break;
     case IO_BCPS_ADDR:
     case IO_OCPS_ADDR: {
       ColorPalettes* cp = addr == IO_BCPS_ADDR ? &PPU.bgcp : &PPU.obcp;
