@@ -922,6 +922,8 @@ typedef struct Emulator {
 #define OBJ_YFLIP(X) BIT(X, 6)
 #define OBJ_XFLIP(X) BIT(X, 5)
 #define OBJ_PALETTE(X) BIT(X, 4)
+#define OBJ_BANK(X) BIT(X, 3)
+#define OBJ_CGB_PALETTE(X) BITS(X, 2, 0)
 
 static u32 s_rom_bank_count[] = {
 #define V(name, code, bank_count) [code] = bank_count,
@@ -1735,6 +1737,8 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
       obj->yflip = UNPACK(value, OBJ_YFLIP);
       obj->xflip = UNPACK(value, OBJ_XFLIP);
       obj->palette = UNPACK(value, OBJ_PALETTE);
+      obj->bank = UNPACK(value, OBJ_BANK);
+      obj->cgb_palette = UNPACK(value, OBJ_CGB_PALETTE);
       break;
   }
 }
@@ -2546,7 +2550,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
     return;
   }
   /* Each M-cycle writes 4 pixels. */
-  Color pixels[4];
+  RGBA pixels[4];
   ZERO_MEMORY(pixels);
   Bool bg_is_zero[4];
   memset(bg_is_zero, TRUE, sizeof(bg_is_zero));
@@ -2571,17 +2575,37 @@ static void ppu_mode3_mcycle(Emulator* e) {
         mx = PPU.scx + xi;
         my = PPU.scy + y;
       }
-      u8* map = &VRAM.data[map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00];
-      u16 tile_index = map[((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3)];
+      u16 map_start = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00;
+      u16 map_addr = map_start + (((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3));
+      u16 tile_index = VRAM.data[map_addr];
+      mx &= 7;
+      my &= 7;
       if (data_select == TILE_DATA_8800_97FF) {
         tile_index = 256 + (s8)tile_index;
       }
-      u16 tile_addr = (tile_index * TILE_HEIGHT + (my & 7)) * TILE_ROW_BYTES;
+      u8 attr = 0;
+      ColorPalette* cp = NULL;
+      if (IS_CGB) {
+        attr = VRAM.data[0x2000 + map_addr];
+        cp = &PPU.bgcp.palettes[attr & 0x7];
+        if (attr & 0x08) { tile_index += 0x200; }
+        if (attr & 0x40) { my = 7 - my; }
+        /* TODO(binji): BG priority attribute */
+      }
+      u16 tile_addr = (tile_index * TILE_HEIGHT + my) * TILE_ROW_BYTES;
       u8 lo = VRAM.data[tile_addr];
       u8 hi = VRAM.data[tile_addr + 1];
-      u8 shift = 7 - (mx & 7);
+      if (IS_CGB && (attr & 0x20)) {
+        lo = reverse_bits_u8(lo);
+        hi = reverse_bits_u8(hi);
+      }
+      u8 shift = 7 - mx;
       u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
-      pixels[i] = PPU.bgp.color[palette_index];
+      if (IS_CGB) {
+        pixels[i] = cp->color[palette_index];
+      } else {
+        pixels[i] = s_color_to_rgba[PPU.bgp.color[palette_index]];
+      }
       bg_is_zero[i] = palette_index == 0;
     }
   }
@@ -2604,7 +2628,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
         oy = obj_height - 1 - oy;
       }
 
-      u8 tile_index = o->tile;
+      u16 tile_index = o->tile;
       if (obj_height == 16) {
         if (oy < 8) {
           /* Top tile of 8x16 sprite. */
@@ -2614,6 +2638,11 @@ static void ppu_mode3_mcycle(Emulator* e) {
           tile_index |= 0x01;
           oy -= 8;
         }
+      }
+      ColorPalette* cp = NULL;
+      if (IS_CGB) {
+        cp = &PPU.obcp.palettes[o->cgb_palette & 0x7];
+        if (o->bank) { tile_index += 0x200; }
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + (oy & 7)) * TILE_ROW_BYTES;
       u8 lo = VRAM.data[tile_addr];
@@ -2636,7 +2665,12 @@ static void ppu_mode3_mcycle(Emulator* e) {
         u8 palette_index = ((hi & 1) << 1) | (lo & 1);
         if (palette_index != 0 &&
             (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
-          pixels[i] = PPU.obp[o->palette].color[palette_index];
+          if (IS_CGB) {
+            pixels[i] = cp->color[palette_index];
+          } else {
+            pixels[i] =
+                s_color_to_rgba[PPU.obp[o->palette].color[palette_index]];
+          }
         }
       }
     }
@@ -2644,7 +2678,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
 
   RGBA* rgba_pixels = &e->frame_buffer[y * SCREEN_WIDTH + x];
   for (i = 0; i < 4; ++i) {
-    rgba_pixels[i] = s_color_to_rgba[pixels[i]];
+    rgba_pixels[i] = pixels[i];
   }
 
   PPU.render_x += 4;

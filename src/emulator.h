@@ -102,6 +102,8 @@ typedef struct Obj {
   Bool yflip;
   Bool xflip;
   u8 palette;
+  u8 bank;
+  u8 cgb_palette;
 } Obj;
 
 typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
