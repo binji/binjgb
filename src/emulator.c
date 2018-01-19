@@ -3087,9 +3087,6 @@ static void dma_mcycle(Emulator* e) {
 }
 
 static void hdma_copy_byte(Emulator* e) {
-  if (HDMA.blocks & 0x80) {
-    return;
-  }
   MemoryTypeAddressPair source_pair = map_hdma_source_address(HDMA.source++);
   u8 value;
   if (source_pair.type == MEMORY_MAP_VRAM) {
@@ -3105,7 +3102,7 @@ static void hdma_copy_byte(Emulator* e) {
   HDMA.block_bytes++;
   if (VALUE_WRAPPED(HDMA.block_bytes, 16)) {
     --HDMA.blocks;
-    if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA) {
+    if (HDMA.mode == HDMA_TRANSFER_MODE_GDMA) {
       if (HDMA.blocks == 0xff) {
         HDMA.state = DMA_INACTIVE;
       }
@@ -3116,15 +3113,10 @@ static void hdma_copy_byte(Emulator* e) {
 }
 
 static void hdma_mcycle(Emulator* e) {
-  if (HDMA.state == DMA_INACTIVE) {
-    return;
+  if (HDMA.state == DMA_ACTIVE) {
+    hdma_copy_byte(e);
+    hdma_copy_byte(e);
   }
-  if (HDMA.state == DMA_TRIGGERED) {
-    DMA.state = DMA_ACTIVE;
-    return;
-  }
-  hdma_copy_byte(e);
-  hdma_copy_byte(e);
 }
 
 static void timer_mcycle(Emulator* e) {
