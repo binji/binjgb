@@ -910,6 +910,7 @@ typedef struct Emulator {
 #define VBK_VRAM_BANK(X) BIT(X, 0)
 #define HDMA5_TRANSFER_MODE(X) BIT(X, 7)
 #define HDMA5_BLOCKS(X) BITS(X, 6, 0)
+#define XCPS_UNUSED 0x40
 #define XCPS_AUTO_INCREMENT(X) BIT(X, 7)
 #define XCPS_INDEX(X) BITS(X, 5, 0)
 #define XCPD_BLUE_INTENSITY(X) BITS(X, 14, 10)
@@ -1549,6 +1550,23 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
                        PACK(INFRARED.read, RP_READ_DATA) |
                        PACK(INFRARED.write, RP_WRITE_DATA))
                     : INVALID_READ_BYTE;
+    case IO_BCPS_ADDR:
+    case IO_OCPS_ADDR:
+      if (IS_CGB) {
+        ColorPalettes* cp = addr == IO_BCPS_ADDR ? &PPU.bgcp : &PPU.obcp;
+        return XCPS_UNUSED | PACK(cp->index, XCPS_INDEX) |
+               PACK(cp->auto_increment, XCPS_AUTO_INCREMENT);
+      } else {
+        return INVALID_READ_BYTE;
+      }
+    case IO_BCPD_ADDR:
+    case IO_OCPD_ADDR:
+      if (IS_CGB) {
+        ColorPalettes* cp = addr == IO_BCPD_ADDR ? &PPU.bgcp : &PPU.obcp;
+        return cp->data[cp->index];
+      } else {
+        return INVALID_READ_BYTE;
+      }
     case IO_SVBK_ADDR:
       return IS_CGB ? (SVBK_UNUSED | PACK(WRAM.bank, SVBK_WRAM_BANK))
                     : INVALID_READ_BYTE;
