@@ -665,6 +665,7 @@ typedef struct Emulator {
 #define HDMA (e->state.hdma)
 #define INFRARED (e->state.infrared)
 #define INTR (e->state.interrupt)
+#define IS_CGB (e->state.is_cgb)
 #define JOYP (e->state.joyp)
 #define LCDC (PPU.lcdc)
 #define MMAP_STATE (e->state.memory_map_state)
@@ -1536,20 +1537,22 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_WX_ADDR:
       return PPU.wx;
     case IO_KEY1_ADDR:
-      return KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED);
+      return IS_CGB ? (KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED))
+                    : INVALID_READ_BYTE;
     case IO_VBK_ADDR:
-      return VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK);
+      return IS_CGB ? (VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK))
+                    : INVALID_READ_BYTE;
     case IO_RP_ADDR:
-      return RP_UNUSED | PACK(INFRARED.enabled, RP_DATA_READ_ENABLE) |
-             PACK(INFRARED.read, RP_READ_DATA) |
-             PACK(INFRARED.write, RP_WRITE_DATA);
+      return IS_CGB ? (RP_UNUSED | PACK(INFRARED.enabled, RP_DATA_READ_ENABLE) |
+                       PACK(INFRARED.read, RP_READ_DATA) |
+                       PACK(INFRARED.write, RP_WRITE_DATA))
+                    : INVALID_READ_BYTE;
     case IO_SVBK_ADDR:
-      return SVBK_UNUSED | PACK(WRAM.bank, SVBK_WRAM_BANK);
+      return IS_CGB ? (SVBK_UNUSED | PACK(WRAM.bank, SVBK_WRAM_BANK))
+                    : INVALID_READ_BYTE;
     case IO_IE_ADDR:
       return INTR.ie;
     default:
-      printf("invalid read [%02x] (%s)\n", addr, get_io_reg_string(addr));
-      assert(0);
       HOOK(read_io_ignored_as, addr, get_io_reg_string(addr));
       return INVALID_READ_BYTE;
   }
@@ -1635,7 +1638,7 @@ static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel. */
     u8 result;
-    if (e->state.is_cgb || CYCLES == WAVE.sample_time) {
+    if (IS_CGB || CYCLES == WAVE.sample_time) {
       result = WAVE.ram[WAVE.position >> 1];
       HOOK(read_wave_ram_while_playing_ab, addr, result);
     } else {
@@ -1992,82 +1995,98 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       PPU.wx = value;
       break;
     case IO_KEY1_ADDR:
-      CPU_SPEED.switching = UNPACK(value, KEY1_PREPARE_SPEED_SWITCH);
+      if (IS_CGB) {
+        CPU_SPEED.switching = UNPACK(value, KEY1_PREPARE_SPEED_SWITCH);
+      }
       break;
     case IO_VBK_ADDR:
-      VRAM.bank = UNPACK(value, VBK_VRAM_BANK);
-      VRAM.offset = VRAM.bank << 13;
+      if (IS_CGB) {
+        VRAM.bank = UNPACK(value, VBK_VRAM_BANK);
+        VRAM.offset = VRAM.bank << 13;
+      }
       break;
     case IO_HDMA1_ADDR:
-      HDMA.source = (HDMA.source & 0x00ff) | (value << 8);
+      if (IS_CGB) {
+        HDMA.source = (HDMA.source & 0x00ff) | (value << 8);
+      }
       break;
     case IO_HDMA2_ADDR:
-      HDMA.source = (HDMA.source & 0xff00) | (value & 0xf0);
+      if (IS_CGB) {
+        HDMA.source = (HDMA.source & 0xff00) | (value & 0xf0);
+      }
       break;
     case IO_HDMA3_ADDR:
-      HDMA.dest = (HDMA.dest & 0x00ff) | (value << 8);
+      if (IS_CGB) {
+        HDMA.dest = (HDMA.dest & 0x00ff) | (value << 8);
+      }
       break;
     case IO_HDMA4_ADDR:
-      HDMA.dest = (HDMA.dest & 0xff00) | (value & 0xf0);
+      if (IS_CGB) {
+        HDMA.dest = (HDMA.dest & 0xff00) | (value & 0xf0);
+      }
       break;
-    case IO_HDMA5_ADDR: {
-      HdmaTransferMode new_mode = UNPACK(value, HDMA5_TRANSFER_MODE);
-      u8 new_blocks = UNPACK(value, HDMA5_BLOCKS);
-      if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
-          (HDMA.blocks & 0x80) == 0) { /* HDMA Active */
-        if (new_mode == HDMA_TRANSFER_MODE_GDMA) {
-          /* Stop HDMA copy. */
-          HDMA.blocks |= 0x80 | new_blocks;
+    case IO_HDMA5_ADDR:
+      if (IS_CGB) {
+        HdmaTransferMode new_mode = UNPACK(value, HDMA5_TRANSFER_MODE);
+        u8 new_blocks = UNPACK(value, HDMA5_BLOCKS);
+        if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+            (HDMA.blocks & 0x80) == 0) { /* HDMA Active */
+          if (new_mode == HDMA_TRANSFER_MODE_GDMA) {
+            /* Stop HDMA copy. */
+            HDMA.blocks |= 0x80 | new_blocks;
+          } else {
+            HDMA.blocks = new_blocks;
+          }
         } else {
+          HDMA.mode = new_mode;
           HDMA.blocks = new_blocks;
         }
-      } else {
-        HDMA.mode = new_mode;
-        HDMA.blocks = new_blocks;
-      }
-      if (HDMA.mode == HDMA_TRANSFER_MODE_GDMA) {
-        HDMA.state = DMA_ACTIVE;
+        if (HDMA.mode == HDMA_TRANSFER_MODE_GDMA) {
+          HDMA.state = DMA_ACTIVE;
+        }
       }
       break;
-    }
     case IO_RP_ADDR:
-      INFRARED.write = UNPACK(value, RP_WRITE_DATA);
-      INFRARED.enabled = UNPACK(value, RP_DATA_READ_ENABLE);
+      if (IS_CGB) {
+        INFRARED.write = UNPACK(value, RP_WRITE_DATA);
+        INFRARED.enabled = UNPACK(value, RP_DATA_READ_ENABLE);
+      }
       break;
     case IO_BCPS_ADDR:
-    case IO_OCPS_ADDR: {
-      ColorPalettes* cp = addr == IO_BCPS_ADDR ? &PPU.bgcp : &PPU.obcp;
-      cp->index = UNPACK(value, XCPS_INDEX);
-      cp->auto_increment = UNPACK(value, XCPS_AUTO_INCREMENT);
-      break;
-    }
-    case IO_BCPD_ADDR:
-    case IO_OCPD_ADDR: {
-      ColorPalettes* cp = addr == IO_BCPD_ADDR ? &PPU.bgcp : &PPU.obcp;
-      cp->data[cp->index] = value;
-      u8 palette_index = (cp->index >> 3) & 7;
-      u8 color_index = (cp->index >> 1) & 3;
-      u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
-      RGBA color = MAKE_RGBA(UNPACK(color16, XCPD_RED_INTENSITY) << 3,
-                             UNPACK(color16, XCPD_GREEN_INTENSITY) << 3,
-                             UNPACK(color16, XCPD_BLUE_INTENSITY) << 3, 255);
-      cp->palettes[palette_index].color[color_index] = color;
-      if (cp->auto_increment) {
-        cp->index = (cp->index + 1) & 0x3f;
+    case IO_OCPS_ADDR:
+      if (IS_CGB) {
+        ColorPalettes* cp = addr == IO_BCPS_ADDR ? &PPU.bgcp : &PPU.obcp;
+        cp->index = UNPACK(value, XCPS_INDEX);
+        cp->auto_increment = UNPACK(value, XCPS_AUTO_INCREMENT);
       }
       break;
-    }
+    case IO_BCPD_ADDR:
+    case IO_OCPD_ADDR:
+      if (IS_CGB) {
+        ColorPalettes* cp = addr == IO_BCPD_ADDR ? &PPU.bgcp : &PPU.obcp;
+        cp->data[cp->index] = value;
+        u8 palette_index = (cp->index >> 3) & 7;
+        u8 color_index = (cp->index >> 1) & 3;
+        u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
+        RGBA color = MAKE_RGBA(UNPACK(color16, XCPD_RED_INTENSITY) << 3,
+                               UNPACK(color16, XCPD_GREEN_INTENSITY) << 3,
+                               UNPACK(color16, XCPD_BLUE_INTENSITY) << 3, 255);
+        cp->palettes[palette_index].color[color_index] = color;
+        if (cp->auto_increment) {
+          cp->index = (cp->index + 1) & 0x3f;
+        }
+      }
+      break;
     case IO_SVBK_ADDR:
-      WRAM.bank = UNPACK(value, SVBK_WRAM_BANK);
-      WRAM.offset = WRAM.bank == 0 ? 0x1000 : (WRAM.bank << 12);
+      if (IS_CGB) {
+        WRAM.bank = UNPACK(value, SVBK_WRAM_BANK);
+        WRAM.offset = WRAM.bank == 0 ? 0x1000 : (WRAM.bank << 12);
+      }
       break;
     case IO_IE_ADDR:
       INTR.ie = value;
       break;
     default:
-      printf("invalid write [%02x] (%s), %02x\n", addr, get_io_reg_string(addr),
-             value);
-      assert(0);
       HOOK(write_io_ignored_as, addr, get_io_reg_string(addr), value);
       break;
   }
@@ -2208,8 +2227,8 @@ static void write_noise_period(Emulator* e) {
 
 static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
   if (!APU.enabled) {
-    if (!e->state.is_cgb && (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
-                             addr == APU_NR31_ADDR || addr == APU_NR41_ADDR)) {
+    if (!IS_CGB && (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
+                    addr == APU_NR31_ADDR || addr == APU_NR41_ADDR)) {
       /* DMG allows writes to the length counters when power is disabled. */
     } else if (addr == APU_NR52_ADDR) {
       /* Always can write to NR52; it's necessary to re-enable power to APU. */
@@ -2300,7 +2319,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       Bool trigger = write_nrx4_reg(e, &CHANNEL3, addr, value, NR31_MAX_LENGTH);
       write_wave_period(e, &CHANNEL3);
       if (trigger) {
-        if (!e->state.is_cgb && WAVE.playing) {
+        if (!IS_CGB && WAVE.playing) {
           /* Triggering the wave channel while it is already playing will
            * corrupt the wave RAM on DMG. */
           if (WAVE.cycles == WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES) {
@@ -2394,7 +2413,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    if (e->state.is_cgb || CYCLES == WAVE.sample_time) {
+    if (IS_CGB || CYCLES == WAVE.sample_time) {
       WAVE.ram[WAVE.position >> 1] = value;
       HOOK(write_wave_ram_while_playing_ab, addr, value);
     }
@@ -3759,9 +3778,9 @@ Result init_emulator(Emulator* e) {
   log_cart_info(e->cart_info);
   MMAP_STATE.rom_base[0] = 0;
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
-  e->state.is_cgb = e->cart_info->cgb_flag != 0;
+  IS_CGB = e->cart_info->cgb_flag != 0;
   set_af_reg(e, 0xb0);
-  REG.A = e->state.is_cgb ? 0x11 : 0x01;
+  REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
   REG.DE = 0x00d8;
   REG.HL = 0x014d;
