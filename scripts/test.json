@@ -75,6 +75,9 @@
   ["mooneye", "test/mooneye-gb/build/emulator-only/mbc1/rom_512Kb.gb", 4, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
   ["mooneye", "test/mooneye-gb/build/emulator-only/mbc1/rom_8Mb.gb", 4, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
   ["mooneye", "test/mooneye-gb/build/manual-only/sprite_priority.gb", 20, "e055a00339efdde563ba1d0698809abfbed8ff82"],
+  ["mooneye", "test/mooneye-gb/build/misc/boot_hwio-C.gb", 1, "!87a87d3553eeba35b23449ec2df113d37d106dd6"],
+  ["mooneye", "test/mooneye-gb/build/misc/bits/unused_hwio-C.gb", 1, "!55492c1a1107380ad4bb537590b3789153faf57f"],
+  ["mooneye", "test/mooneye-gb/build/misc/gpu/vblank_stat_intr-C.gb", 9, "!b247fc1486c8da8d58c322d91507c03c7a774492"],
 
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/hblank_ly_scx_timing_nops.gb", 60, "!c7bbd6909c521887dde6b5262119397403e8a282"],
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb", 71, "!c2f65fa92647b554cb0e69ebb9693fcd4136be20"],
