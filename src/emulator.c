@@ -2058,6 +2058,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
             HDMA.blocks |= 0x80 | new_blocks;
           } else {
             HDMA.blocks = new_blocks;
+            HDMA.mode = new_mode;
           }
         } else {
           HDMA.mode = new_mode;
