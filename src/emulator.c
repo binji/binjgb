@@ -2921,6 +2921,7 @@ static u8 s_opcode_bytes[] = {
 #define FH REG.F.H
 #define FN REG.F.N
 #define FZ_EQ0(X) FZ = (u8)(X) == 0
+#define SHIFT_FLAGS FZ_EQ0(u); FN = FH = 0
 #define MASK8(X) ((X) & 0xf)
 #define MASK16(X) ((X) & 0xfff)
 #define READ8(X) read_u8_cy(e, X)
@@ -3041,41 +3042,34 @@ static u8 s_opcode_bytes[] = {
 #define RET_F(COND) CY; if (COND) { RET; }
 #define RETI INTR.enable = FALSE; INTR.ime = TRUE; RET
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
-#define RL_FLAGS FZ_EQ0(u); FN = FH = 0
 #define RLA BASIC_OP_R(A, RL); FZ = FN = FH = 0
-#define RL_R(R) BASIC_OP_R(R, RL); RL_FLAGS
-#define RL_MR(MR) BASIC_OP_MR(MR, RL); RL_FLAGS
+#define RL_R(R) BASIC_OP_R(R, RL); SHIFT_FLAGS
+#define RL_MR(MR) BASIC_OP_MR(MR, RL); SHIFT_FLAGS
 #define RLC c = (u >> 7) & 1; u = (u << 1) | c; FC = c
-#define RLC_FLAGS FZ_EQ0(u); FN = FH = 0
 #define RLCA BASIC_OP_R(A, RLC); FZ = FN = FH = 0
-#define RLC_R(R) BASIC_OP_R(R, RLC); RLC_FLAGS
-#define RLC_MR(MR) BASIC_OP_MR(MR, RLC); RLC_FLAGS
+#define RLC_R(R) BASIC_OP_R(R, RLC); SHIFT_FLAGS
+#define RLC_MR(MR) BASIC_OP_MR(MR, RLC); SHIFT_FLAGS
 #define RR c = u & 1; u = (FC << 7) | (u >> 1); FC = c
-#define RR_FLAGS FZ_EQ0(u); FN = FH = 0
 #define RRA BASIC_OP_R(A, RR); FZ = FN = FH = 0
-#define RR_R(R) BASIC_OP_R(R, RR); RR_FLAGS
-#define RR_MR(MR) BASIC_OP_MR(MR, RR); RR_FLAGS
+#define RR_R(R) BASIC_OP_R(R, RR); SHIFT_FLAGS
+#define RR_MR(MR) BASIC_OP_MR(MR, RR); SHIFT_FLAGS
 #define RRC c = u & 1; u = (c << 7) | (u >> 1); FC = c
-#define RRC_FLAGS FZ_EQ0(u); FN = FH = 0
 #define RRCA BASIC_OP_R(A, RRC); FZ = FN = FH = 0
-#define RRC_R(R) BASIC_OP_R(R, RRC); RRC_FLAGS
-#define RRC_MR(MR) BASIC_OP_MR(MR, RRC); RRC_FLAGS
+#define RRC_R(R) BASIC_OP_R(R, RRC); SHIFT_FLAGS
+#define RRC_MR(MR) BASIC_OP_MR(MR, RRC); SHIFT_FLAGS
 #define SCF FC = 1; FN = FH = 0
 #define SET(BIT) u |= (1 << BIT)
 #define SET_R(BIT, R) BASIC_OP_R(R, SET(BIT))
 #define SET_MR(BIT, MR) BASIC_OP_MR(MR, SET(BIT))
 #define SLA FC = (u >> 7) & 1; u <<= 1
-#define SLA_FLAGS FZ_EQ0(u); FN = FH = 0
-#define SLA_R(R) BASIC_OP_R(R, SLA); SLA_FLAGS
-#define SLA_MR(MR) BASIC_OP_MR(MR, SLA); SLA_FLAGS
+#define SLA_R(R) BASIC_OP_R(R, SLA); SHIFT_FLAGS
+#define SLA_MR(MR) BASIC_OP_MR(MR, SLA); SHIFT_FLAGS
 #define SRA FC = u & 1; u = (s8)u >> 1
-#define SRA_FLAGS FZ_EQ0(u); FN = FH = 0
-#define SRA_R(R) BASIC_OP_R(R, SRA); SRA_FLAGS
-#define SRA_MR(MR) BASIC_OP_MR(MR, SRA); SRA_FLAGS
+#define SRA_R(R) BASIC_OP_R(R, SRA); SHIFT_FLAGS
+#define SRA_MR(MR) BASIC_OP_MR(MR, SRA); SHIFT_FLAGS
 #define SRL FC = u & 1; u >>= 1
-#define SRL_FLAGS FZ_EQ0(u); FN = FH = 0
-#define SRL_R(R) BASIC_OP_R(R, SRL); SRL_FLAGS
-#define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SRL_FLAGS
+#define SRL_R(R) BASIC_OP_R(R, SRL); SHIFT_FLAGS
+#define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SHIFT_FLAGS
 #define STOP INTR.stop = TRUE;
 #define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
 #define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
