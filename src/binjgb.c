@@ -25,6 +25,14 @@
 #define STATUS_TEXT_RGBA MAKE_RGBA(255, 0, 0, 255)
 #define STATUS_TEXT_TIMEOUT 120 /* Frames */
 
+// TODO: make these configurable?
+#define RENDER_SCALE 4
+#define AUDIO_FREQUENCY 44100
+#define AUDIO_FRAMES 2048 /* ~46ms of latency at 44.1kHz */
+#define REWIND_FRAMES_PER_BASE_STATE 45
+#define REWIND_BUFFER_CAPACITY MEGABYTES(32)
+#define REWIND_CYCLES_PER_FRAME (70224 * 3 / 2) /* Rewind at 1.5x */
+
 typedef enum Layer {
   LAYER_BG,
   LAYER_WINDOW,
@@ -279,9 +287,6 @@ static void key_up(HostHookContext* ctx, HostKeycode code) {
 }
 
 int main(int argc, char** argv) {
-  const int audio_frequency = 44100;
-  const int audio_frames = 2048;
-
   --argc; ++argv;
   int result = 1;
 
@@ -294,8 +299,8 @@ int main(int argc, char** argv) {
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);
   emulator_init.rom = rom;
-  emulator_init.audio_frequency = audio_frequency;
-  emulator_init.audio_frames = audio_frames;
+  emulator_init.audio_frequency = AUDIO_FREQUENCY;
+  emulator_init.audio_frames = AUDIO_FRAMES;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 
@@ -303,13 +308,12 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(host_init);
   host_init.hooks.key_down = key_down;
   host_init.hooks.key_up = key_up;
-  host_init.render_scale = 4;
-  host_init.audio_frequency = audio_frequency;
-  host_init.audio_frames = audio_frames;
+  host_init.render_scale = RENDER_SCALE;
+  host_init.audio_frequency = AUDIO_FREQUENCY;
+  host_init.audio_frames = AUDIO_FRAMES;
   host_init.audio_volume = s_audio_volume;
-  // TODO: make these configurable?
-  host_init.frames_per_base_state = 45;
-  host_init.rewind_buffer_capacity = MEGABYTES(32);
+  host_init.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
+  host_init.rewind_buffer_capacity = REWIND_BUFFER_CAPACITY;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
@@ -323,7 +327,7 @@ int main(int argc, char** argv) {
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
   while (s_running && host_poll_events(host)) {
     if (s_rewinding) {
-      rewind_by(70224 * 3 / 2);
+      rewind_by(REWIND_CYCLES_PER_FRAME);
     } else if (!s_paused) {
       host_run_ms(host, refresh_ms);
       if (s_step_frame) {
