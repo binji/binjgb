@@ -19,17 +19,38 @@ typedef struct {
   u8 padding[3];
 } JoypadState;
 
-typedef struct JoypadBuffer {
+typedef struct JoypadChunk {
   JoypadState* data;
   size_t size;
   size_t capacity;
-  struct JoypadBuffer *next, *prev;
+  struct JoypadChunk *next, *prev;
+} JoypadChunk;
+
+typedef struct {
+  JoypadChunk* chunk;
+  JoypadState* state;
+} JoypadStateIter;
+
+typedef struct {
+  JoypadChunk sentinel;
+  JoypadButtons last_buttons;
 } JoypadBuffer;
 
 typedef struct {
-  JoypadBuffer* buffer;
-  JoypadState* state;
-} JoypadStateIter;
+  size_t used_bytes;
+  size_t capacity_bytes;
+} JoypadStats;
+
+JoypadBuffer* joypad_new(void);
+void joypad_delete(JoypadBuffer*);
+void joypad_append(JoypadBuffer*, JoypadButtons*, Cycles);
+void joypad_append_if_new(JoypadBuffer*, JoypadButtons*, Cycles);
+JoypadStateIter joypad_find_state(JoypadBuffer*, Cycles);
+void joypad_truncate_to(JoypadBuffer*, JoypadStateIter);
+JoypadStateIter joypad_get_next_state(JoypadStateIter);
+u8 joypad_pack_buttons(JoypadButtons*);
+JoypadButtons joypad_unpack_buttons(u8);
+JoypadStats joypad_get_stats(JoypadBuffer*);
 
 #ifdef __cplusplus
 }

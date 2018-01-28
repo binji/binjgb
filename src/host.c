@@ -29,7 +29,6 @@
   while (0)
 
 #define GET_CYCLES(x) ((x).cycles)
-#define CMP_LT(x, y) ((x) < (y))
 #define CMP_GT(x, y) ((x) > (y))
 
 #define CHECK_WRITE(count, dst, dst_max_end) \
@@ -109,7 +108,6 @@ typedef f32 HostAudioSample;
 #define AUDIO_CONVERT_SAMPLE_FROM_U8(X, fvol) ((fvol) * (X) * (1 / 256.0f))
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
-#define JOYPAD_BUFFER_DEFAULT_CAPACITY 4096
 
 #define INVALID_CYCLES (~0ULL)
 
@@ -138,10 +136,9 @@ typedef struct Host {
   u64 performance_frequency;
   struct HostUI* ui;
   HostTexture* fb_texture;
-  JoypadBuffer joypad_buffer_sentinel;
+  JoypadBuffer* joypad_buffer;
   RewindBuffer rewind_buffer;
   RewindState rewind_state;
-  JoypadButtons last_joypad_buttons;
   Cycles last_cycles;
 } Host;
 
@@ -293,66 +290,6 @@ void host_render_audio(Host* host) {
   }
 }
 
-static JoypadBuffer* alloc_joypad_buffer(size_t capacity) {
-  JoypadBuffer* buffer = malloc(sizeof(JoypadBuffer));
-  ZERO_MEMORY(*buffer);
-  buffer->data = malloc(capacity * sizeof(JoypadState));
-  buffer->capacity = capacity;
-  return buffer;
-}
-
-static JoypadState* host_alloc_joypad_state(Host* host) {
-  JoypadBuffer* tail = host->joypad_buffer_sentinel.prev;
-  if (tail->size >= tail->capacity) {
-    JoypadBuffer* new_buffer =
-        alloc_joypad_buffer(JOYPAD_BUFFER_DEFAULT_CAPACITY);
-    new_buffer->next = &host->joypad_buffer_sentinel;
-    new_buffer->prev = tail;
-    host->joypad_buffer_sentinel.prev = tail->next = new_buffer;
-    tail = new_buffer;
-  }
-  return  &tail->data[tail->size++];
-}
-
-static u8 pack_buttons(JoypadButtons* buttons) {
-  return (buttons->down << 7) | (buttons->up << 6) | (buttons->left << 5) |
-         (buttons->right << 4) | (buttons->start << 3) |
-         (buttons->select << 2) | (buttons->B << 1) | (buttons->A << 0);
-}
-
-static JoypadButtons unpack_buttons(u8 packed) {
-  JoypadButtons buttons;
-  buttons.A = packed & 1;
-  buttons.B = (packed >> 1) & 1;
-  buttons.select = (packed >> 2) & 1;
-  buttons.start = (packed >> 3) & 1;
-  buttons.right = (packed >> 4) & 1;
-  buttons.left = (packed >> 5) & 1;
-  buttons.up = (packed >> 6) & 1;
-  buttons.down = (packed >> 7) & 1;
-  return buttons;
-}
-
-static Bool joypad_buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
-  return lhs->down == rhs->down && lhs->up == rhs->up &&
-         lhs->left == rhs->left && lhs->right == rhs->right &&
-         lhs->start == rhs->start && lhs->select == rhs->select &&
-         lhs->B == rhs->B && lhs->A == rhs->A;
-}
-
-static void host_store_joypad(Host* host, JoypadButtons* buttons) {
-  JoypadState* state = host_alloc_joypad_state(host);
-  state->cycles = emulator_get_cycles(host_get_emulator(host));
-  state->buttons = pack_buttons(buttons);
-  host->last_joypad_buttons = *buttons;
-}
-
-static void host_store_joypad_if_new(Host* host, JoypadButtons* buttons) {
-  if (!joypad_buttons_are_equal(buttons, &host->last_joypad_buttons)) {
-    host_store_joypad(host, buttons);
-  }
-}
-
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* host = user_data;
   const u8* state = SDL_GetKeyboardState(NULL);
@@ -365,86 +302,13 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->start = state[SDL_SCANCODE_RETURN];
   joyp->select = state[SDL_SCANCODE_BACKSPACE];
 
-  host_store_joypad_if_new(host, joyp);
-}
-
-static JoypadStateIter host_find_joypad(Host* host, Cycles cycles) {
-  /* TODO(binji): Use a skip list if this is too slow? */
-  JoypadStateIter result;
-  JoypadBuffer* first_buffer = host->joypad_buffer_sentinel.next;
-  JoypadBuffer* last_buffer = host->joypad_buffer_sentinel.prev;
-  assert(first_buffer->size != 0 && last_buffer->size != 0);
-  Cycles first_cycles = first_buffer->data[0].cycles;
-  Cycles last_cycles = last_buffer->data[last_buffer->size - 1].cycles;
-  if (cycles <= first_cycles) {
-    /* At or past the beginning. */
-    result.buffer = first_buffer;
-    result.state = &first_buffer->data[0];
-    return result;
-  } else if (cycles >= last_cycles) {
-    /* At or past the end. */
-    result.buffer = last_buffer;
-    result.state = &last_buffer->data[last_buffer->size - 1];
-    return result;
-  } else if (cycles - first_cycles < last_cycles - cycles) {
-    /* Closer to the beginning. */
-    JoypadBuffer* buffer = first_buffer;
-    while (cycles >= buffer->data[buffer->size - 1].cycles) {
-      buffer = buffer->next;
-    }
-    result.buffer = buffer;
-  } else {
-    /* Closer to the end. */
-    JoypadBuffer* buffer = last_buffer;
-    while (cycles < buffer->data[0].cycles) {
-      buffer = buffer->prev;
-    }
-    result.buffer = buffer;
-  }
-
-  JoypadState* begin = result.buffer->data;
-  JoypadState* end = begin + result.buffer->size;
-  LOWER_BOUND(JoypadState, lower_bound, begin, end, cycles, GET_CYCLES, CMP_LT);
-  assert(lower_bound != NULL); /* The buffer should not be empty. */
-
-  result.state = lower_bound;
-  assert(result.state->cycles <= cycles);
-  return result;
-}
-
-static JoypadStateIter host_get_next_joypad_state(JoypadStateIter iter) {
-  size_t index = iter.state - iter.buffer->data;
-  if (index < iter.buffer->size) {
-    ++iter.state;
-    return iter;
-  }
-
-  iter.buffer = iter.buffer->next;
-  iter.state = iter.buffer ? iter.buffer->data : NULL;
-  return iter;
-}
-
-static void host_delete_after_joypad_state(Host* host, JoypadStateIter iter) {
-  size_t index = iter.state - iter.buffer->data;
-  iter.buffer->size = index + 1;
-  JoypadBuffer* buffer = iter.buffer->next;
-  JoypadBuffer* sentinel = &host->joypad_buffer_sentinel;
-  while (buffer != sentinel) {
-    JoypadBuffer* temp = buffer->next;
-    free(buffer->data);
-    free(buffer);
-    buffer = temp;
-  }
-  iter.buffer->next = sentinel;
-  sentinel->prev = iter.buffer;
+  Cycles cycles = emulator_get_cycles(host_get_emulator(host));
+  joypad_append_if_new(host->joypad_buffer, joyp, cycles);
 }
 
 static void host_init_joypad(Host* host, struct Emulator* e) {
   emulator_set_joypad_callback(e, joypad_callback, host);
-  host->joypad_buffer_sentinel.next = host->joypad_buffer_sentinel.prev =
-      &host->joypad_buffer_sentinel;
-  ZERO_MEMORY(host->last_joypad_buttons);
-  host_store_joypad(host, &host->last_joypad_buttons);
+  host->joypad_buffer = joypad_new();
 }
 
 static u8* write_varint(u32 value, u8* dst_begin, u8* dst_max_end) {
@@ -672,18 +536,7 @@ Cycles host_get_rewind_newest_cycles(struct Host* host) {
 
 HostRewindStats host_get_rewind_stats(struct Host* host) {
   HostRewindStats stats;
-  stats.joypad_used_bytes = 0;
-  stats.joypad_capacity_bytes = 0;
-  JoypadBuffer* sentinel = &host->joypad_buffer_sentinel;
-  JoypadBuffer* cur = sentinel->next;
-  while (cur != sentinel) {
-    size_t overhead = sizeof(*cur);
-    stats.joypad_used_bytes += cur->size * sizeof(JoypadState) + overhead;
-    stats.joypad_capacity_bytes +=
-        cur->capacity * sizeof(JoypadState) + overhead;
-    cur = cur->next;
-  }
-
+  stats.joypad_stats = joypad_get_stats(host->joypad_buffer);
   stats.base_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Base];
   stats.diff_bytes = host->rewind_buffer.total_kind_bytes[RewindInfoKind_Diff];
   stats.uncompressed_bytes = host->rewind_buffer.total_uncompressed_bytes;
@@ -756,10 +609,10 @@ static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
   Cycles cycles = emulator_get_cycles(info->e);
   while (info->next.state && info->next.state->cycles <= cycles) {
     info->current = info->next;
-    info->next = host_get_next_joypad_state(info->next);
+    info->next = joypad_get_next_state(info->next);
   }
 
-  *joyp = unpack_buttons(info->current.state->buttons);
+  *joyp = joypad_unpack_buttons(info->current.state->buttons);
 }
 
 void host_begin_rewind(Host* host) {
@@ -841,13 +694,14 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
   CHECK(SUCCESS(emulator_read_state(e, file_data)));
   assert(emulator_get_cycles(e) == found->cycles);
 
-  JoypadStateIter iter = host_find_joypad(host, emulator_get_cycles(e));
+  JoypadStateIter iter =
+      joypad_find_state(host->joypad_buffer, emulator_get_cycles(e));
 
   if (emulator_get_cycles(e) < cycles) {
     HostRewindJoypadCallbackInfo hsjci;
     hsjci.e = e;
     hsjci.current = iter;
-    hsjci.next = host_get_next_joypad_state(iter);
+    hsjci.next = joypad_get_next_state(iter);
 
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
@@ -883,7 +737,7 @@ void host_end_rewind(Host* host) {
       data_range[0].end = data_range[0].begin;
     }
 
-    host_delete_after_joypad_state(host, host->rewind_state.joypad_iter);
+    joypad_truncate_to(host->joypad_buffer, host->rewind_state.joypad_iter);
     host->last_cycles = emulator_get_cycles(host_get_emulator(host));
   }
 
@@ -937,23 +791,13 @@ error:
   return NULL;
 }
 
-static void host_destroy_joypad(Host* host) {
-  JoypadBuffer* current = host->joypad_buffer_sentinel.next;
-  while (current != &host->joypad_buffer_sentinel) {
-    JoypadBuffer* next = current->next;
-    free(current->data);
-    free(current);
-    current = next;
-  }
-}
-
 void host_delete(Host* host) {
   if (host) {
     host_destroy_texture(host, host->fb_texture);
     SDL_GL_DeleteContext(host->gl_context);
     SDL_DestroyWindow(host->window);
     SDL_Quit();
-    host_destroy_joypad(host);
+    joypad_delete(host->joypad_buffer);
     free(host->rewind_buffer.data_range[0].begin);
     free(host->audio.buffer);
     free(host);
@@ -1079,7 +923,8 @@ void host_render_screen_overlay(struct Host* host,
 }
 
 Cycles host_oldest_cycles(Host* host) {
-  return host->joypad_buffer_sentinel.next->data[0].cycles;
+  /* TODO(binji): This should always be 0, I think. */
+  return host->joypad_buffer->sentinel.next->data[0].cycles;
 }
 
 Cycles host_newest_cycles(Host* host) {

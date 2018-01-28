@@ -40,11 +40,6 @@ enum {
   APU_CHANNEL_COUNT,
 };
 
-typedef struct JoypadButtons {
-  Bool down, up, left, right;
-  Bool start, select, B, A;
-} JoypadButtons;
-
 typedef void (*JoypadCallback)(struct JoypadButtons* joyp, void* user_data);
 
 typedef struct JoypadCallbackInfo {

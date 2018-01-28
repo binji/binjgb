@@ -88,6 +88,11 @@ typedef struct FileData {
   size_t size;
 } FileData;
 
+typedef struct JoypadButtons {
+  Bool down, up, left, right;
+  Bool start, select, B, A;
+} JoypadButtons;
+
 const char* replace_extension(const char* filename, const char* extension);
 Result file_read(const char* filename, FileData* out);
 Result file_write(const char* filename, const FileData*);

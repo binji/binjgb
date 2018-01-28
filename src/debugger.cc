@@ -1226,8 +1226,8 @@ void Debugger::RewindWindow() {
     f64 sec = (f64)total_cycles / CPU_CYCLES_PER_SECOND;
 
     ImGui::Text("joypad used/capacity: %s/%s",
-                PrettySize(stats.joypad_used_bytes).c_str(),
-                PrettySize(stats.joypad_capacity_bytes).c_str());
+                PrettySize(stats.joypad_stats.used_bytes).c_str(),
+                PrettySize(stats.joypad_stats.capacity_bytes).c_str());
 
     ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
                 PrettySize(base).c_str(), PrettySize(diff).c_str(),

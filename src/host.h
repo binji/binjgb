@@ -8,6 +8,7 @@
 #define BINJGB_HOST_H_
 
 #include "common.h"
+#include "joypad.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -143,8 +144,7 @@ typedef struct HostTexture {
 } HostTexture;
 
 typedef struct HostRewindStats {
-  size_t joypad_used_bytes;
-  size_t joypad_capacity_bytes;
+  JoypadStats joypad_stats;
   size_t base_bytes;
   size_t diff_bytes;
   size_t uncompressed_bytes;
