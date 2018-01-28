@@ -32,25 +32,6 @@
 #define CMP_LT(x, y) ((x) < (y))
 #define CMP_GT(x, y) ((x) > (y))
 
-#define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET, CMP) \
-  Type* var = NULL;                                                     \
-  if (init_end - init_begin != 0) {                                     \
-    Type* begin_ = init_begin; /* Inclusive. */                         \
-    Type* end_ = init_end;     /* Exclusive. */                         \
-    while (end_ - begin_ > 1) {                                         \
-      Type* mid_ = begin_ + ((end_ - begin_) / 2);                      \
-      if (to_find == GET(*mid_)) {                                      \
-        begin_ = mid_;                                                  \
-        break;                                                          \
-      } else if (CMP(to_find, GET(*mid_))) {                            \
-        end_ = mid_;                                                    \
-      } else {                                                          \
-        begin_ = mid_;                                                  \
-      }                                                                 \
-    }                                                                   \
-    var = begin_;                                                       \
-  }
-
 #define CHECK_WRITE(count, dst, dst_max_end) \
   do {                                       \
     if ((dst) + (count) > (dst_max_end)) {   \

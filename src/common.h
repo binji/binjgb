@@ -49,6 +49,25 @@ extern "C" {
   (((u32)(u8)(a) << 24) | ((u32)(u8)(b) << 16) | ((u32)(u8)(g) << 8) | \
    ((u32)(u8)(r)))
 
+#define LOWER_BOUND(Type, var, init_begin, init_end, to_find, GET, CMP) \
+  Type* var = NULL;                                                     \
+  if (init_end - init_begin != 0) {                                     \
+    Type* begin_ = init_begin; /* Inclusive. */                         \
+    Type* end_ = init_end;     /* Exclusive. */                         \
+    while (end_ - begin_ > 1) {                                         \
+      Type* mid_ = begin_ + ((end_ - begin_) / 2);                      \
+      if (to_find == GET(*mid_)) {                                      \
+        begin_ = mid_;                                                  \
+        break;                                                          \
+      } else if (CMP(to_find, GET(*mid_))) {                            \
+        end_ = mid_;                                                    \
+      } else {                                                          \
+        begin_ = mid_;                                                  \
+      }                                                                 \
+    }                                                                   \
+    var = begin_;                                                       \
+  }
+
 typedef int8_t s8;
 typedef int32_t s32;
 typedef uint8_t u8;
