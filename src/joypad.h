@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 typedef struct {
-  Cycles cycles;
+  Ticks ticks;
   u8 buttons;
   u8 padding[3];
 } JoypadState;
@@ -43,9 +43,9 @@ typedef struct {
 
 JoypadBuffer* joypad_new(void);
 void joypad_delete(JoypadBuffer*);
-void joypad_append(JoypadBuffer*, JoypadButtons*, Cycles);
-void joypad_append_if_new(JoypadBuffer*, JoypadButtons*, Cycles);
-JoypadStateIter joypad_find_state(JoypadBuffer*, Cycles);
+void joypad_append(JoypadBuffer*, JoypadButtons*, Ticks);
+void joypad_append_if_new(JoypadBuffer*, JoypadButtons*, Ticks);
+JoypadStateIter joypad_find_state(JoypadBuffer*, Ticks);
 void joypad_truncate_to(JoypadBuffer*, JoypadStateIter);
 JoypadStateIter joypad_get_next_state(JoypadStateIter);
 u8 joypad_pack_buttons(JoypadButtons*);

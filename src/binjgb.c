@@ -59,7 +59,7 @@ static Bool s_step_frame;
 static Bool s_paused;
 static f32 s_audio_volume = 0.5f;
 static Bool s_rewinding;
-static Cycles s_rewind_start;
+static Ticks s_rewind_start;
 
 static Overlay s_overlay;
 static StatusText s_status_text;
@@ -214,21 +214,21 @@ static void begin_rewind(void) {
   if (!s_rewinding) {
     host_begin_rewind(host);
     s_rewinding = TRUE;
-    s_rewind_start = emulator_get_cycles(e);
+    s_rewind_start = emulator_get_ticks(e);
   }
 }
 
-static void rewind_by(Cycles delta) {
-  Cycles now = emulator_get_cycles(e);
-  Cycles then = now;
+static void rewind_by(Ticks delta) {
+  Ticks now = emulator_get_ticks(e);
+  Ticks then = now;
   if (now >= delta) {
     then = now - delta;
-    host_rewind_to_cycles(host, then);
+    host_rewind_to_ticks(host, then);
   }
 
-  Cycles oldest = host_get_rewind_oldest_cycles(host);
-  Cycles total = s_rewind_start - oldest;
-  Cycles then_diff = then - oldest;
+  Ticks oldest = host_get_rewind_oldest_ticks(host);
+  Ticks total = s_rewind_start - oldest;
+  Ticks then_diff = then - oldest;
   int num_ticks = then_diff * (GLYPHS_PER_LINE - 2) / total;
 
   char buffer[GLYPHS_PER_LINE + 1];
@@ -241,7 +241,7 @@ static void rewind_by(Cycles delta) {
   buffer[GLYPHS_PER_LINE] = 0;
 
   u32 hr, min, sec, ms;
-  emulator_cycles_to_time(then, &hr, &min, &sec, &ms);
+  emulator_ticks_to_time(then, &hr, &min, &sec, &ms);
   char time[64];
   snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", hr, min, sec, ms / 10);
   size_t len = strlen(time);

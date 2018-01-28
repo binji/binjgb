@@ -19,13 +19,13 @@ void Debugger::DisassemblyWindow::Tick() {
   const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
 
   if (ImGui::BeginDock("Disassembly", &is_open)) {
-    Cycles now = emulator_get_cycles(d->e);
+    Ticks now = emulator_get_ticks(d->e);
     u32 hr, min, sec, ms;
-    emulator_cycles_to_time(now, &hr, &min, &sec, &ms);
+    emulator_ticks_to_time(now, &hr, &min, &sec, &ms);
 
     Registers regs = emulator_get_registers(d->e);
-    ImGui::Text("Cycles: %" PRIu64 " Time: %u:%02u:%02u.%02u", now, hr, min,
-                sec, ms / 10);
+    ImGui::Text("Ticks: %" PRIu64 " Time: %u:%02u:%02u.%02u", now, hr, min, sec,
+                ms / 10);
     ImGui::Separator();
 
     auto&& text_reg8 = [&](const char* name, u8 value) {
@@ -244,6 +244,6 @@ void Debugger::StepInstruction() {
   if (run_state == Running || run_state == Paused) {
     run_state = SteppingInstruction;
   } else if (run_state == Rewinding) {
-    RewindTo(emulator_get_cycles(e) + 1);
+    RewindTo(emulator_get_ticks(e) + 1);
   }
 }

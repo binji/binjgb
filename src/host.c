@@ -72,7 +72,7 @@ typedef struct Host {
   JoypadBuffer* joypad_buffer;
   RewindBuffer* rewind_buffer;
   RewindState rewind_state;
-  Cycles last_cycles;
+  Ticks last_ticks;
 } Host;
 
 static struct Emulator* host_get_emulator(Host* host) {
@@ -235,8 +235,8 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->start = state[SDL_SCANCODE_RETURN];
   joyp->select = state[SDL_SCANCODE_BACKSPACE];
 
-  Cycles cycles = emulator_get_cycles(host_get_emulator(host));
-  joypad_append_if_new(host->joypad_buffer, joyp, cycles);
+  Ticks ticks = emulator_get_ticks(host_get_emulator(host));
+  joypad_append_if_new(host->joypad_buffer, joyp, ticks);
 }
 
 static void host_init_joypad(Host* host, struct Emulator* e) {
@@ -252,12 +252,12 @@ static void append_rewind_state(Host* host) {
   rewind_append(host->rewind_buffer, host_get_emulator(host));
 }
 
-Cycles host_get_rewind_oldest_cycles(struct Host* host) {
-  return rewind_get_oldest_cycles(host->rewind_buffer);
+Ticks host_get_rewind_oldest_ticks(struct Host* host) {
+  return rewind_get_oldest_ticks(host->rewind_buffer);
 }
 
-Cycles host_get_rewind_newest_cycles(struct Host* host) {
-  return rewind_get_newest_cycles(host->rewind_buffer);
+Ticks host_get_rewind_newest_ticks(struct Host* host) {
+  return rewind_get_newest_ticks(host->rewind_buffer);
 }
 
 JoypadStats host_get_joypad_stats(struct Host* host) {
@@ -282,13 +282,13 @@ static void host_handle_event(Host* host, EmulatorEvent event) {
   }
 }
 
-static void host_run_until_cycles(struct Host* host, Cycles cycles) {
+static void host_run_until_ticks(struct Host* host, Ticks ticks) {
   struct Emulator* e = host_get_emulator(host);
-  assert(emulator_get_cycles(e) <= cycles);
+  assert(emulator_get_ticks(e) <= ticks);
   while (1) {
-    EmulatorEvent event = emulator_run_until(e, cycles);
+    EmulatorEvent event = emulator_run_until(e, ticks);
     host_handle_event(host, event);
-    if (event & EMULATOR_EVENT_UNTIL_CYCLES) {
+    if (event & EMULATOR_EVENT_UNTIL_TICKS) {
       break;
     }
   }
@@ -298,8 +298,8 @@ static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
                                         void* user_data) {
   Host* host = user_data;
   RewindState* state = &host->rewind_state;
-  Cycles cycles = emulator_get_cycles(host_get_emulator(host));
-  while (state->next.state && state->next.state->cycles <= cycles) {
+  Ticks ticks = emulator_get_ticks(host_get_emulator(host));
+  while (state->next.state && state->next.state->ticks <= ticks) {
     state->current = state->next;
     state->next = joypad_get_next_state(state->next);
   }
@@ -312,25 +312,25 @@ void host_begin_rewind(Host* host) {
   host->rewind_state.rewinding = TRUE;
 }
 
-Result host_rewind_to_cycles(Host* host, Cycles cycles) {
+Result host_rewind_to_ticks(Host* host, Ticks ticks) {
   assert(host->rewind_state.rewinding);
 
   RewindResult* result = &host->rewind_state.rewind_result;
-  CHECK(SUCCESS(rewind_to_cycles(host->rewind_buffer, cycles, result)));
+  CHECK(SUCCESS(rewind_to_ticks(host->rewind_buffer, ticks, result)));
 
   struct Emulator* e = host_get_emulator(host);
   CHECK(SUCCESS(emulator_read_state(e, &result->file_data)));
-  assert(emulator_get_cycles(e) == result->info->cycles);
+  assert(emulator_get_ticks(e) == result->info->ticks);
 
   host->rewind_state.current =
-      joypad_find_state(host->joypad_buffer, emulator_get_cycles(e));
+      joypad_find_state(host->joypad_buffer, emulator_get_ticks(e));
   host->rewind_state.next = joypad_get_next_state(host->rewind_state.current);
 
-  if (emulator_get_cycles(e) < cycles) {
+  if (emulator_get_ticks(e) < ticks) {
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
     emulator_set_joypad_callback(e, host_rewind_joypad_callback, host);
-    host_run_until_cycles(host, cycles);
+    host_run_until_ticks(host, ticks);
     /* Restore old joypad callback. */
     emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
   }
@@ -347,7 +347,7 @@ void host_end_rewind(Host* host) {
     rewind_truncate_to(host->rewind_buffer, e,
                        &host->rewind_state.rewind_result);
     joypad_truncate_to(host->joypad_buffer, host->rewind_state.current);
-    host->last_cycles = emulator_get_cycles(e);
+    host->last_ticks = emulator_get_ticks(e);
   }
 
   memset(&host->rewind_state, 0, sizeof(host->rewind_state));
@@ -365,7 +365,7 @@ Result host_init(Host* host, struct Emulator* e) {
   CHECK(SUCCESS(host_init_audio(host)));
   host_init_joypad(host, e);
   host->rewind_buffer = rewind_new(&host->init.rewind, e);
-  host->last_cycles = emulator_get_cycles(e);
+  host->last_ticks = emulator_get_ticks(e);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -373,10 +373,10 @@ Result host_init(Host* host, struct Emulator* e) {
 void host_run_ms(struct Host* host, f64 delta_ms) {
   assert(!host->rewind_state.rewinding);
   struct Emulator* e = host_get_emulator(host);
-  Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
-  Cycles until_cycles = emulator_get_cycles(e) + delta_cycles;
-  host_run_until_cycles(host, until_cycles);
-  host->last_cycles = emulator_get_cycles(e);
+  Ticks delta_ticks = (Ticks)(delta_ms * CPU_TICKS_PER_SECOND / 1000);
+  Ticks until_ticks = emulator_get_ticks(e) + delta_ticks;
+  host_run_until_ticks(host, until_ticks);
+  host->last_ticks = emulator_get_ticks(e);
 }
 
 void host_step(Host* host) {
@@ -384,7 +384,7 @@ void host_step(Host* host) {
   struct Emulator* e = host_get_emulator(host);
   EmulatorEvent event = emulator_step(e);
   host_handle_event(host, event);
-  host->last_cycles = emulator_get_cycles(e);
+  host->last_ticks = emulator_get_ticks(e);
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {
@@ -531,10 +531,10 @@ void host_render_screen_overlay(struct Host* host,
   host_ui_render_screen_overlay(host->ui, texture);
 }
 
-Cycles host_oldest_cycles(Host* host) {
+Ticks host_oldest_ticks(Host* host) {
   return 0;
 }
 
-Cycles host_newest_cycles(Host* host) {
-  return host->last_cycles;
+Ticks host_newest_ticks(Host* host) {
+  return host->last_ticks;
 }

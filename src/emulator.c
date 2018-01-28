@@ -399,8 +399,8 @@ typedef struct {
 typedef struct {
   Bool ime;      /* Interrupt Master Enable */
   u8 ie;         /* Interrupt Enable */
-  u8 if_;        /* Interrupt Request, delayed by 1 M-cycle for some IRQs. */
-  u8 new_if;     /* The new value of IF, updated in 1 M-cycle. */
+  u8 if_;        /* Interrupt Request, delayed by 1 tick for some IRQs. */
+  u8 new_if;     /* The new value of IF, updated in 1 tick. */
   Bool enable;   /* Set after EI instruction. This delays updating IME. */
   Bool halt;     /* Halted, waiting for an interrupt. */
   Bool halt_di;  /* Halted w/ disabled interrupts. */
@@ -422,7 +422,7 @@ typedef struct {
   SerialClock clock;
   u8 sb; /* Serial transfer data. */
   u8 transferred_bits;
-  Cycles cycles;
+  Ticks ticks;
 } Serial;
 
 typedef struct {
@@ -455,8 +455,8 @@ typedef struct {
   WaveDuty duty;
   u8 sample;   /* Last sample generated, 0..1 */
   u32 period;  /* Calculated from the frequency. */
-  u8 position; /* Position in the duty cycle, 0..7 */
-  u32 cycles;  /* 0..period */
+  u8 position; /* Position in the duty tick, 0..7 */
+  u32 ticks;   /* 0..period */
 } SquareWave;
 
 /* Channel 3 */
@@ -464,13 +464,13 @@ typedef struct {
   WaveVolume volume;
   u8 volume_shift;
   u8 ram[WAVE_RAM_SIZE];
-  Cycles sample_time; /* Time (in cycles) the sample was read. */
-  u8 sample_data;     /* Last sample generated, 0..1 */
-  u32 period;         /* Calculated from the frequency. */
-  u8 position;        /* 0..31 */
-  u32 cycles;         /* 0..period */
-  Bool playing;       /* TRUE if the channel has been triggered but the DAC not
-                              disabled. */
+  Ticks sample_time; /* Time (in ticks) the sample was read. */
+  u8 sample_data;    /* Last sample generated, 0..1 */
+  u32 period;        /* Calculated from the frequency. */
+  u8 position;       /* 0..31 */
+  u32 ticks;         /* 0..period */
+  Bool playing;      /* TRUE if the channel has been triggered but the DAC not
+                             disabled. */
 } Wave;
 
 /* Channel 4 */
@@ -481,7 +481,7 @@ typedef struct {
   u8 sample;  /* Last sample generated, 0..1 */
   u16 lfsr;   /* Linear feedback shift register, 15- or 7-bit. */
   u32 period; /* Calculated from the clock_shift and divisor. */
-  u32 cycles; /* 0..period */
+  u32 ticks;  /* 0..period */
 } Noise;
 
 typedef struct {
@@ -503,8 +503,8 @@ typedef struct {
   Wave wave;
   Noise noise;
   Channel channel[APU_CHANNEL_COUNT];
-  u8 frame;      /* 0..FRAME_SEQUENCER_COUNT */
-  Cycles cycles; /* Raw cycle counter */
+  u8 frame;    /* 0..FRAME_SEQUENCER_COUNT */
+  Ticks ticks; /* Raw tick counter */
   Bool initialized;
 } Apu;
 
@@ -529,11 +529,11 @@ typedef struct {
   StatInterrupt mode2;
   StatInterrupt vblank;
   StatInterrupt hblank;
-  Bool ly_eq_lyc;       /* TRUE if ly=lyc, delayed by 1 M-cycle. */
+  Bool ly_eq_lyc;       /* TRUE if ly=lyc, delayed by 1 tick. */
   PPUMode mode;         /* The current PPU mode. */
   Bool if_;             /* Internal interrupt flag for STAT interrupts. */
   PPUMode trigger_mode; /* This mode is used for checking STAT IRQ triggers. */
-  Bool new_ly_eq_lyc;   /* The new value for ly_eq_lyc, updated in 1 M-cycle. */
+  Bool new_ly_eq_lyc;   /* The new value for ly_eq_lyc, updated in 1 tick. */
 } Stat;
 
 typedef struct {
@@ -561,12 +561,12 @@ typedef struct {
   ColorPalettes bgcp;             /* BG Color Palettes */
   ColorPalettes obcp;             /* OBJ Color Palettes */
   PPUState state;
-  u32 state_cycles;
-  u32 line_cycles;                /* Counts cycles until line_y changes. */
-  u32 frame;                      /* The currently rendering frame. */
-  u8 last_ly;                     /* LY from the previous M-cycle. */
-  u8 render_x;                    /* Currently rendering X coordinate. */
-  u8 line_y;   /* The currently rendering line. Can be different than LY. */
+  u32 state_ticks;
+  u32 line_ticks; /* Counts ticks until line_y changes. */
+  u32 frame;      /* The currently rendering frame. */
+  u8 last_ly;     /* LY from the previous tick. */
+  u8 render_x;    /* Currently rendering X coordinate. */
+  u8 line_y;      /* The currently rendering line. Can be different than LY. */
   u8 win_y;    /* The window Y is only incremented when rendered. */
   u8 frame_wy; /* wy is cached per frame. */
   Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
@@ -580,7 +580,7 @@ typedef struct {
 typedef struct {
   DmaState state;
   MemoryTypeAddressPair source;
-  Cycles cycles;
+  Ticks ticks;
 } Dma;
 
 typedef struct {
@@ -629,7 +629,7 @@ typedef struct {
   Hdma hdma;
   CpuSpeed cpu_speed;
   u8 hram[HIGH_RAM_SIZE];
-  Cycles cycles;
+  Ticks ticks;
   Bool is_cgb;
   EmulatorEvent last_event;
 } EmulatorState;
@@ -658,7 +658,7 @@ typedef struct Emulator {
 #define CHANNEL4 CHANNEL(4)
 #define CHANNEL(i) (APU.channel[APU_CHANNEL##i])
 #define CPU_SPEED (e->state.cpu_speed)
-#define CYCLES (e->state.cycles)
+#define TICKS (e->state.ticks)
 #define DMA (e->state.dma)
 #define EXT_RAM (e->state.ext_ram)
 #define HRAM (e->state.hram)
@@ -757,15 +757,15 @@ typedef struct Emulator {
 #define ROM_BANK_SHIFT 14
 #define EXT_RAM_BANK_SHIFT 13
 
-/* Cycle counts */
-#define CPU_MCYCLE 4
-#define APU_CYCLES 2
+/* Tick counts */
+#define CPU_TICK 4
+#define APU_TICKS 2
 #define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
-#define PPU_MODE2_CYCLES 80
-#define PPU_MODE3_MIN_CYCLES 172
-#define DMA_CYCLES 648
-#define DMA_DELAY_CYCLES 8
-#define SERIAL_CYCLES (CPU_CYCLES_PER_SECOND / 8192)
+#define PPU_MODE2_TICKS 80
+#define PPU_MODE3_MIN_TICKS 172
+#define DMA_TICKS 648
+#define DMA_DELAY_TICKS 8
+#define SERIAL_TICKS (CPU_TICKS_PER_SECOND / 8192)
 
 /* Video */
 #define TILE_WIDTH 8
@@ -790,15 +790,15 @@ typedef struct Emulator {
 
 /* Additional samples so the AudioBuffer doesn't overflow. This could happen
  * because the audio buffer is updated at the granularity of an instruction, so
- * the most extra frames that could be added is equal to the Apu cycle count
+ * the most extra frames that could be added is equal to the Apu tick count
  * of the slowest instruction. */
 #define AUDIO_BUFFER_EXTRA_FRAMES 256
 
-#define WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES APU_CYCLES
-#define WAVE_TRIGGER_DELAY_CYCLES (3 * APU_CYCLES)
+#define WAVE_TRIGGER_CORRUPTION_OFFSET_TICKS APU_TICKS
+#define WAVE_TRIGGER_DELAY_TICKS (3 * APU_TICKS)
 
 #define FRAME_SEQUENCER_COUNT 8
-#define FRAME_SEQUENCER_CYCLES 8192 /* 512Hz */
+#define FRAME_SEQUENCER_TICKS 8192 /* 512Hz */
 #define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
 #define INVALID_READ_BYTE 0xff
@@ -1390,7 +1390,7 @@ static Result init_memory_map(Emulator* e) {
 }
 
 static Bool is_almost_mode3(Emulator* e) {
-  return PPU.state_cycles == 4 && STAT.mode == PPU_MODE_MODE2;
+  return PPU.state_ticks == CPU_TICK && STAT.mode == PPU_MODE_MODE2;
 }
 
 static Bool is_using_vram(Emulator* e, Bool write) {
@@ -1658,7 +1658,7 @@ static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
      * position. On DMG, this is only allowed if the read occurs exactly when
      * it is being accessed by the Wave channel. */
     u8 result;
-    if (IS_CGB || CYCLES == WAVE.sample_time) {
+    if (IS_CGB || TICKS == WAVE.sample_time) {
       result = WAVE.ram[WAVE.position >> 1];
       HOOK(read_wave_ram_while_playing_ab, addr, result);
     } else {
@@ -1772,7 +1772,7 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
 
 static void increment_tima(Emulator* e) {
   if (++TIMER.tima == 0) {
-    HOOK(trigger_timer_i, CYCLES + CPU_MCYCLE);
+    HOOK(trigger_timer_i, TICKS + CPU_TICK);
     TIMER.tima_state = TIMA_STATE_OVERFLOW;
     INTR.new_if |= IF_TIMER;
   }
@@ -1788,7 +1788,7 @@ static void write_div_counter(Emulator* e, u16 div_counter) {
   TIMER.div_counter = div_counter;
 }
 
-/* Trigger is only TRUE on the cycle where it transitioned to the new state;
+/* Trigger is only TRUE on the tick where it transitioned to the new state;
  * "check" is TRUE as long as at continues to be in that state. This is
  * necessary because the internal STAT IF flag is set when "triggered", and
  * cleared only when the "check" returns FALSE for all STAT IF bits. HBLANK and
@@ -1806,7 +1806,7 @@ static void write_div_counter(Emulator* e, u16 div_counter) {
 
 static void check_stat(Emulator* e) {
   if (!STAT.if_ && SHOULD_TRIGGER_STAT) {
-    HOOK(trigger_stat_ii, PPU.ly, CYCLES + CPU_MCYCLE);
+    HOOK(trigger_stat_ii, PPU.ly, TICKS + CPU_TICK);
     INTR.new_if |= IF_STAT;
     if (!(TRIGGER_VBLANK || TRIGGER_Y_COMPARE)) {
       INTR.if_ |= IF_STAT;
@@ -1822,7 +1822,7 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
   if (PPU.ly == PPU.lyc ||
       (write && PPU.last_ly == SCREEN_HEIGHT_WITH_VBLANK - 1 &&
        PPU.last_ly == PPU.lyc)) {
-    HOOK(trigger_y_compare_ii, PPU.ly, CYCLES + CPU_MCYCLE);
+    HOOK(trigger_y_compare_ii, PPU.ly, TICKS + CPU_TICK);
     STAT.y_compare.trigger = TRUE;
     STAT.new_ly_eq_lyc = TRUE;
   } else {
@@ -1864,7 +1864,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       SERIAL.transferring = UNPACK(value, SC_TRANSFER_START);
       SERIAL.clock = UNPACK(value, SC_SHIFT_CLOCK);
       if (SERIAL.transferring) {
-        SERIAL.cycles = 0;
+        SERIAL.ticks = 0;
         SERIAL.transferred_bits = 0;
       }
       break;
@@ -1874,12 +1874,12 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_TIMA_ADDR:
       if (TIMER.on) {
         if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
-          /* Cancel the overflow and interrupt if written on the same cycle. */
+          /* Cancel the overflow and interrupt if written on the same tick. */
           TIMER.tima_state = TIMA_STATE_NORMAL;
           INTR.new_if &= ~IF_TIMER;
           TIMER.tima = value;
         } else if (TIMER.tima_state != TIMA_STATE_RESET) {
-          /* Only update tima if it wasn't reset this cycle. */
+          /* Only update tima if it wasn't reset this tick. */
           TIMER.tima = value;
         }
       } else {
@@ -1935,8 +1935,8 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         if (LCDC.display) {
           HOOK0(enable_display_v);
           PPU.state = PPU_STATE_LCD_ON_MODE2;
-          PPU.state_cycles = PPU_MODE2_CYCLES;
-          PPU.line_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
+          PPU.state_ticks = PPU_MODE2_TICKS;
+          PPU.line_ticks = PPU_LINE_TICKS - CPU_TICK;
           PPU.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           STAT.trigger_mode = PPU_MODE_MODE2;
         } else {
@@ -1959,7 +1959,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         if (!STAT.if_ && (hblank || vblank || y_compare)) {
           HOOK(trigger_stat_from_write_cccii, y_compare ? 'Y' : '.',
                vblank ? 'V' : '.', hblank ? 'H' : '.', PPU.ly,
-               CYCLES + CPU_MCYCLE);
+               TICKS + CPU_TICK);
           INTR.new_if |= IF_STAT;
           INTR.if_ |= IF_STAT;
           STAT.if_ = TRUE;
@@ -1990,7 +1990,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       /* DMA can be restarted. */
       DMA.state = (DMA.state != DMA_INACTIVE ? DMA.state : DMA_TRIGGERED);
       DMA.source = map_address(value << 8);
-      DMA.cycles = 0;
+      DMA.ticks = 0;
       break;
     case IO_BGP_ADDR:
       PPU.bgp.color[3] = UNPACK(value, PALETTE_COLOR3);
@@ -2228,14 +2228,13 @@ static void trigger_nr14_reg(Emulator* e, Channel* channel) {
 
 static void write_wave_period(Emulator* e, Channel* channel) {
   WAVE.period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 2;
-  HOOK(write_wave_period_info_iii, channel->frequency, WAVE.cycles,
-       WAVE.period);
+  HOOK(write_wave_period_info_iii, channel->frequency, WAVE.ticks, WAVE.period);
 }
 
 static void write_square_wave_period(Emulator* e, Channel* channel,
                                      SquareWave* square) {
   square->period = ((SOUND_MAX_FREQUENCY + 1) - channel->frequency) * 4;
-  HOOK(write_square_wave_period_info_iii, channel->frequency, square->cycles,
+  HOOK(write_square_wave_period_info_iii, channel->frequency, square->ticks,
        square->period);
 }
 
@@ -2296,7 +2295,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       if (trigger) {
         trigger_nrx4_envelope(e, &CHANNEL1.envelope, addr);
         trigger_nr14_reg(e, &CHANNEL1);
-        CHANNEL1.square_wave.cycles = CHANNEL1.square_wave.period;
+        CHANNEL1.square_wave.ticks = CHANNEL1.square_wave.period;
       }
       break;
     }
@@ -2315,7 +2314,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
       write_square_wave_period(e, &CHANNEL2, &CHANNEL2.square_wave);
       if (trigger) {
         trigger_nrx4_envelope(e, &CHANNEL2.envelope, addr);
-        CHANNEL2.square_wave.cycles = CHANNEL2.square_wave.period;
+        CHANNEL2.square_wave.ticks = CHANNEL2.square_wave.period;
       }
       break;
     }
@@ -2345,7 +2344,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
         if (!IS_CGB && WAVE.playing) {
           /* Triggering the wave channel while it is already playing will
            * corrupt the wave RAM on DMG. */
-          if (WAVE.cycles == WAVE_TRIGGER_CORRUPTION_OFFSET_CYCLES) {
+          if (WAVE.ticks == WAVE_TRIGGER_CORRUPTION_OFFSET_TICKS) {
             assert(WAVE.position < 32);
             u8 position = (WAVE.position + 1) & 31;
             u8 byte = WAVE.ram[position >> 1];
@@ -2364,7 +2363,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
         }
 
         WAVE.position = 0;
-        WAVE.cycles = WAVE.period + WAVE_TRIGGER_DELAY_CYCLES;
+        WAVE.ticks = WAVE.period + WAVE_TRIGGER_DELAY_TICKS;
         WAVE.playing = TRUE;
       }
       break;
@@ -2389,7 +2388,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
         trigger_nrx4_envelope(e, &CHANNEL4.envelope, addr);
         NOISE.lfsr = 0x7fff;
         NOISE.sample = 1;
-        NOISE.cycles = NOISE.period;
+        NOISE.ticks = NOISE.period;
       }
       break;
     }
@@ -2436,7 +2435,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    if (IS_CGB || CYCLES == WAVE.sample_time) {
+    if (IS_CGB || TICKS == WAVE.sample_time) {
       WAVE.ram[WAVE.position >> 1] = value;
       HOOK(write_wave_ram_while_playing_ab, addr, value);
     }
@@ -2499,13 +2498,13 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
   write_u8_pair(e, pair, value);
 }
 
-static void ppu_mode2_mcycle(Emulator* e) {
+static void ppu_mode2_tick(Emulator* e) {
   if (!LCDC.obj_display || e->config.disable_obj ||
       PPU.line_obj_count >= OBJ_PER_LINE_COUNT) {
     return;
   }
 
-  /* 80 cycles / 40 sprites == 2 cycles/sprite == 2 sprites per M-cycle. */
+  /* 80 ticks / 40 sprites == 2 ticks/sprite == 2 sprites per tick. */
   int i;
   u8 obj_height = s_obj_size_to_height[LCDC.obj_size];
   u8 y = PPU.line_y;
@@ -2527,11 +2526,11 @@ static void ppu_mode2_mcycle(Emulator* e) {
   }
 }
 
-static u32 mode3_cycle_count(Emulator* e) {
+static u32 mode3_tick_count(Emulator* e) {
   s32 buckets[SCREEN_WIDTH / 8 + 2];
   ZERO_MEMORY(buckets);
   u8 scx_fine = PPU.scx & 7;
-  u32 cycles = PPU_MODE3_MIN_CYCLES + scx_fine;
+  u32 ticks = PPU_MODE3_MIN_TICKS + scx_fine;
   Bool has_zero = FALSE;
   int i;
   for (i = 0; i < PPU.line_obj_count; ++i) {
@@ -2542,17 +2541,17 @@ static u32 mode3_cycle_count(Emulator* e) {
     }
     if (!has_zero && x == 0) {
       has_zero = TRUE;
-      cycles += scx_fine;
+      ticks += scx_fine;
     }
     x += scx_fine;
     int bucket = x >> 3;
     buckets[bucket] = MAX(buckets[bucket], 5 - (x & 7));
-    cycles += 6;
+    ticks += 6;
   }
   for (i = 0; i < (int)ARRAY_SIZE(buckets); ++i) {
-    cycles += buckets[i];
+    ticks += buckets[i];
   }
-  return cycles;
+  return ticks;
 }
 
 static u8 reverse_bits_u8(u8 x) {
@@ -2561,14 +2560,14 @@ static u8 reverse_bits_u8(u8 x) {
          ((x << 5) & 0x40) | ((x << 7) & 0x80);
 }
 
-static void ppu_mode3_mcycle(Emulator* e) {
+static void ppu_mode3_tick(Emulator* e) {
   int i;
   u8 x = PPU.render_x;
   u8 y = PPU.line_y;
   if (x + 4 > SCREEN_WIDTH) {
     return;
   }
-  /* Each M-cycle writes 4 pixels. */
+  /* Each tick writes 4 pixels. */
   RGBA pixels[4];
   ZERO_MEMORY(pixels);
   Bool bg_is_zero[4];
@@ -2703,7 +2702,7 @@ static void ppu_mode3_mcycle(Emulator* e) {
   PPU.render_x += 4;
 }
 
-static void ppu_mcycle(Emulator* e) {
+static void ppu_tick(Emulator* e) {
   if (!LCDC.display) {
     return;
   }
@@ -2714,22 +2713,22 @@ static void ppu_mcycle(Emulator* e) {
   PPU.last_ly = PPU.ly;
 
   switch (STAT.mode) {
-    case PPU_MODE_MODE2: ppu_mode2_mcycle(e); break;
-    case PPU_MODE_MODE3: ppu_mode3_mcycle(e); break;
+    case PPU_MODE_MODE2: ppu_mode2_tick(e); break;
+    case PPU_MODE_MODE3: ppu_mode3_tick(e); break;
     default: break;
   }
 
-  PPU.state_cycles -= CPU_MCYCLE;
-  PPU.line_cycles -= CPU_MCYCLE;
-  if (PPU.state_cycles == 0) {
+  PPU.state_ticks -= CPU_TICK;
+  PPU.line_ticks -= CPU_TICK;
+  if (PPU.state_ticks == 0) {
     switch (PPU.state) {
       case PPU_STATE_HBLANK:
       case PPU_STATE_VBLANK_PLUS_4:
         PPU.line_y++;
         PPU.ly++;
-        PPU.line_cycles = PPU_LINE_CYCLES;
+        PPU.line_ticks = PPU_LINE_TICKS;
         check_ly_eq_lyc(e, FALSE);
-        PPU.state_cycles = CPU_MCYCLE;
+        PPU.state_ticks = CPU_TICK;
 
         if (PPU.state == PPU_STATE_HBLANK) {
           STAT.mode2.trigger = TRUE;
@@ -2759,7 +2758,7 @@ static void ppu_mcycle(Emulator* e) {
           if (PPU.ly == SCREEN_HEIGHT_WITH_VBLANK - 1) {
             PPU.state = PPU_STATE_VBLANK_LY_0;
           } else {
-            PPU.state_cycles = PPU_LINE_CYCLES;
+            PPU.state_ticks = PPU_LINE_TICKS;
           }
         }
         check_stat(e);
@@ -2767,7 +2766,7 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_HBLANK_PLUS_4:
         PPU.state = PPU_STATE_MODE2;
-        PPU.state_cycles = PPU_MODE2_CYCLES;
+        PPU.state_ticks = PPU_MODE2_TICKS;
         STAT.mode = PPU_MODE_MODE2;
         PPU.oam_index = 0;
         PPU.line_obj_count = 0;
@@ -2775,28 +2774,28 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_VBLANK:
         PPU.state = PPU_STATE_VBLANK_PLUS_4;
-        PPU.state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE;
+        PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK;
         STAT.mode = PPU_MODE_VBLANK;
         check_stat(e);
         break;
 
       case PPU_STATE_VBLANK_LY_0:
         PPU.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
-        PPU.state_cycles = CPU_MCYCLE;
+        PPU.state_ticks = CPU_TICK;
         PPU.ly = 0;
         break;
 
       case PPU_STATE_VBLANK_LY_0_PLUS_4:
         PPU.state = PPU_STATE_VBLANK_LINE_Y_0;
-        PPU.state_cycles = PPU_LINE_CYCLES - CPU_MCYCLE - CPU_MCYCLE;
+        PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK - CPU_TICK;
         check_ly_eq_lyc(e, FALSE);
         check_stat(e);
         break;
 
       case PPU_STATE_VBLANK_LINE_Y_0:
         PPU.state = PPU_STATE_HBLANK_PLUS_4;
-        PPU.state_cycles = CPU_MCYCLE;
-        PPU.line_cycles = PPU_LINE_CYCLES;
+        PPU.state_ticks = CPU_TICK;
+        PPU.line_ticks = PPU_LINE_TICKS;
         PPU.line_y = 0;
         PPU.frame_wy = PPU.wy;
         PPU.win_y = 0;
@@ -2808,15 +2807,14 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_LCD_ON_MODE2:
       case PPU_STATE_MODE2:
-        PPU.state_cycles = mode3_cycle_count(e);
-        if (PPU.state == PPU_STATE_LCD_ON_MODE2 ||
-            (PPU.state_cycles & 3) != 0) {
+        PPU.state_ticks = mode3_tick_count(e);
+        if (PPU.state == PPU_STATE_LCD_ON_MODE2 || (PPU.state_ticks & 3) != 0) {
           PPU.state = PPU_STATE_MODE3;
         } else {
           PPU.state = PPU_STATE_MODE3_EARLY_TRIGGER;
-          PPU.state_cycles--;
+          PPU.state_ticks--;
         }
-        PPU.state_cycles &= ~3;
+        PPU.state_ticks &= ~3;
         STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
         PPU.render_x = 0;
         PPU.rendering_window = FALSE;
@@ -2825,7 +2823,7 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_MODE3_EARLY_TRIGGER:
         PPU.state = PPU_STATE_MODE3_COMMON;
-        PPU.state_cycles = CPU_MCYCLE;
+        PPU.state_ticks = CPU_TICK;
         STAT.trigger_mode = PPU_MODE_HBLANK;
         check_stat(e);
         break;
@@ -2836,7 +2834,7 @@ static void ppu_mcycle(Emulator* e) {
 
       case PPU_STATE_MODE3_COMMON:
         PPU.state = PPU_STATE_HBLANK;
-        PPU.state_cycles = PPU.line_cycles;
+        PPU.state_ticks = PPU.line_ticks;
         STAT.mode = PPU_MODE_HBLANK;
         check_stat(e);
         break;
@@ -2926,15 +2924,15 @@ static void update_square_wave(Channel* channel, u32 total_frames) {
   SquareWave* square = &channel->square_wave;
   if (channel->status) {
     while (total_frames) {
-      u32 frames = square->cycles / APU_CYCLES;
+      u32 frames = square->ticks / APU_TICKS;
       u8 sample = CHANNELX_SAMPLE(channel, square->sample);
       if (frames <= total_frames) {
-        square->cycles = square->period;
+        square->ticks = square->period;
         square->position = (square->position + 1) % DUTY_CYCLE_COUNT;
         square->sample = duty[square->duty][square->position];
       } else {
         frames = total_frames;
-        square->cycles -= frames * APU_CYCLES;
+        square->ticks -= frames * APU_TICKS;
       }
       channel->accumulator += sample * frames;
       total_frames -= frames;
@@ -2942,29 +2940,29 @@ static void update_square_wave(Channel* channel, u32 total_frames) {
   }
 }
 
-static void update_wave(Emulator* e, u32 apu_cycles, u32 total_frames) {
+static void update_wave(Emulator* e, u32 apu_ticks, u32 total_frames) {
   if (CHANNEL3.status) {
     while (total_frames) {
-      u32 frames = WAVE.cycles / APU_CYCLES;
+      u32 frames = WAVE.ticks / APU_TICKS;
       /* Modulate 4-bit sample by wave volume. */
       u8 sample = WAVE.sample_data >> WAVE.volume_shift;
       if (frames <= total_frames) {
         WAVE.position = (WAVE.position + 1) % WAVE_SAMPLE_COUNT;
-        WAVE.sample_time = apu_cycles + WAVE.cycles;
+        WAVE.sample_time = apu_ticks + WAVE.ticks;
         u8 byte = WAVE.ram[WAVE.position >> 1];
         if ((WAVE.position & 1) == 0) {
           WAVE.sample_data = byte >> 4; /* High nybble. */
         } else {
           WAVE.sample_data = byte & 0x0f; /* Low nybble. */
         }
-        WAVE.cycles = WAVE.period;
+        WAVE.ticks = WAVE.period;
         HOOK(wave_update_position_iii, WAVE.position, WAVE.sample_data,
              WAVE.sample_time);
       } else {
         frames = total_frames;
-        WAVE.cycles -= frames * APU_CYCLES;
+        WAVE.ticks -= frames * APU_TICKS;
       }
-      apu_cycles += frames * APU_CYCLES;
+      apu_ticks += frames * APU_TICKS;
       CHANNEL3.accumulator += sample * frames;
       total_frames -= frames;
     }
@@ -2974,7 +2972,7 @@ static void update_wave(Emulator* e, u32 apu_cycles, u32 total_frames) {
 static void update_noise(Emulator* e, u32 total_frames) {
   if (CHANNEL4.status) {
     while (total_frames) {
-      u32 frames = NOISE.cycles / APU_CYCLES;
+      u32 frames = NOISE.ticks / APU_TICKS;
       u8 sample = CHANNELX_SAMPLE(&CHANNEL4, NOISE.sample);
       if (NOISE.clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
         if (frames <= total_frames) {
@@ -2985,10 +2983,10 @@ static void update_noise(Emulator* e, u32 total_frames) {
             NOISE.lfsr = ((NOISE.lfsr >> 1) & ~0x4000) | (bit << 14);
           }
           NOISE.sample = ~NOISE.lfsr & 1;
-          NOISE.cycles = NOISE.period;
+          NOISE.ticks = NOISE.period;
         } else {
           frames = total_frames;
-          NOISE.cycles -= frames * APU_CYCLES;
+          NOISE.ticks -= frames * APU_TICKS;
         }
       } else {
         frames = total_frames;
@@ -3002,7 +3000,7 @@ static void update_noise(Emulator* e, u32 total_frames) {
 static u32 get_gb_frames_until_next_resampled_frame(Emulator* e) {
   u32 result = 0;
   u32 counter = e->audio_buffer.freq_counter;
-  while (!VALUE_WRAPPED(counter, APU_CYCLES_PER_SECOND)) {
+  while (!VALUE_WRAPPED(counter, APU_TICKS_PER_SECOND)) {
     counter += e->audio_buffer.frequency;
     result++;
   }
@@ -3014,7 +3012,7 @@ static void write_audio_frame(Emulator* e, u32 gb_frames) {
   AudioBuffer* buffer = &e->audio_buffer;
   buffer->divisor += gb_frames;
   buffer->freq_counter += buffer->frequency * gb_frames;
-  if (VALUE_WRAPPED(buffer->freq_counter, APU_CYCLES_PER_SECOND)) {
+  if (VALUE_WRAPPED(buffer->freq_counter, APU_TICKS_PER_SECOND)) {
     for (i = 0; i < SOUND_OUTPUT_COUNT; ++i) {
       u32 accumulator = 0;
       for (j = 0; j < APU_CHANNEL_COUNT; ++j) {
@@ -3040,18 +3038,18 @@ static void apu_update_channels(Emulator* e, u32 total_frames) {
     frames = MIN(frames, total_frames);
     update_square_wave(&CHANNEL1, frames);
     update_square_wave(&CHANNEL2, frames);
-    update_wave(e, APU.cycles, frames);
+    update_wave(e, APU.ticks, frames);
     update_noise(e, frames);
     write_audio_frame(e, frames);
-    APU.cycles += frames * APU_CYCLES;
+    APU.ticks += frames * APU_TICKS;
     total_frames -= frames;
   }
 }
 
-static void apu_update(Emulator* e, u32 total_cycles) {
-  while (total_cycles) {
-    Cycles next_seq_cycles = NEXT_MODULO(APU.cycles, FRAME_SEQUENCER_CYCLES);
-    if (next_seq_cycles == FRAME_SEQUENCER_CYCLES) {
+static void apu_update(Emulator* e, u32 total_ticks) {
+  while (total_ticks) {
+    Ticks next_seq_ticks = NEXT_MODULO(APU.ticks, FRAME_SEQUENCER_TICKS);
+    if (next_seq_ticks == FRAME_SEQUENCER_TICKS) {
       APU.frame = (APU.frame + 1) % FRAME_SEQUENCER_COUNT;
       switch (APU.frame) {
         case 2: case 6: update_sweep(e); /* Fallthrough. */
@@ -3059,48 +3057,48 @@ static void apu_update(Emulator* e, u32 total_cycles) {
         case 7: update_envelopes(e); break;
       }
     }
-    Cycles cycles = MIN(next_seq_cycles, total_cycles);
-    apu_update_channels(e, cycles / APU_CYCLES);
-    total_cycles -= cycles;
+    Ticks ticks = MIN(next_seq_ticks, total_ticks);
+    apu_update_channels(e, ticks / APU_TICKS);
+    total_ticks -= ticks;
   }
 }
 
 static void apu_synchronize(Emulator* e) {
-  if (APU.cycles != CYCLES) {
-    u32 cycles = CYCLES - APU.cycles;
+  if (APU.ticks != TICKS) {
+    u32 ticks = TICKS - APU.ticks;
     if (APU.enabled) {
-      apu_update(e, cycles);
-      assert(APU.cycles == CYCLES);
+      apu_update(e, ticks);
+      assert(APU.ticks == TICKS);
     } else {
-      for (; cycles; cycles -= APU_CYCLES) {
+      for (; ticks; ticks -= APU_TICKS) {
         write_audio_frame(e, 1);
       }
-      APU.cycles = CYCLES;
+      APU.ticks = TICKS;
     }
   }
 }
 
-static void dma_mcycle(Emulator* e) {
+static void dma_tick(Emulator* e) {
   if (DMA.state == DMA_INACTIVE) {
     return;
   }
-  if (DMA.cycles < DMA_DELAY_CYCLES) {
-    DMA.cycles += CPU_MCYCLE;
-    if (DMA.cycles >= DMA_DELAY_CYCLES) {
-      DMA.cycles = DMA_DELAY_CYCLES;
+  if (DMA.ticks < DMA_DELAY_TICKS) {
+    DMA.ticks += CPU_TICK;
+    if (DMA.ticks >= DMA_DELAY_TICKS) {
+      DMA.ticks = DMA_DELAY_TICKS;
       DMA.state = DMA_ACTIVE;
     }
     return;
   }
 
-  u8 addr_offset = (DMA.cycles - DMA_DELAY_CYCLES) >> 2;
+  u8 addr_offset = (DMA.ticks - DMA_DELAY_TICKS) >> 2;
   assert(addr_offset < OAM_TRANSFER_SIZE);
   MemoryTypeAddressPair pair = DMA.source;
   pair.addr += addr_offset;
   u8 value = read_u8_pair(e, pair, FALSE);
   write_oam_no_mode_check(e, addr_offset, value);
-  DMA.cycles += CPU_MCYCLE;
-  if (VALUE_WRAPPED(DMA.cycles, DMA_CYCLES)) {
+  DMA.ticks += CPU_TICK;
+  if (VALUE_WRAPPED(DMA.ticks, DMA_TICKS)) {
     DMA.state = DMA_INACTIVE;
   }
 }
@@ -3113,7 +3111,7 @@ static void hdma_copy_byte(Emulator* e) {
      * then 0xff for the rest. */
     value = INVALID_READ_BYTE;
   } else {
-    value = read_u8_pair(e, source_pair);
+    value = read_u8_pair(e, source_pair, FALSE);
   }
   MemoryTypeAddressPair dest_pair = {MEMORY_MAP_VRAM,
                                      HDMA.dest++ & ADDR_MASK_8K};
@@ -3131,14 +3129,14 @@ static void hdma_copy_byte(Emulator* e) {
   }
 }
 
-static void hdma_mcycle(Emulator* e) {
+static void hdma_tick(Emulator* e) {
   if (HDMA.state == DMA_ACTIVE) {
     hdma_copy_byte(e);
     hdma_copy_byte(e);
   }
 }
 
-static void timer_mcycle(Emulator* e) {
+static void timer_tick(Emulator* e) {
   if (TIMER.on) {
     if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
       TIMER.tima_state = TIMA_STATE_RESET;
@@ -3147,16 +3145,16 @@ static void timer_mcycle(Emulator* e) {
       TIMER.tima_state = TIMA_STATE_NORMAL;
     }
   }
-  write_div_counter(e, TIMER.div_counter + CPU_MCYCLE);
+  write_div_counter(e, TIMER.div_counter + CPU_TICK);
 }
 
-static void serial_mcycle(Emulator* e) {
+static void serial_tick(Emulator* e) {
   if (!SERIAL.transferring) {
     return;
   }
   if (SERIAL.clock == SERIAL_CLOCK_INTERNAL) {
-    SERIAL.cycles += CPU_MCYCLE;
-    if (VALUE_WRAPPED(SERIAL.cycles, SERIAL_CYCLES)) {
+    SERIAL.ticks += CPU_TICK;
+    if (VALUE_WRAPPED(SERIAL.ticks, SERIAL_TICKS)) {
       /* Since we're never connected to another device, always shift in 0xff. */
       SERIAL.sb = (SERIAL.sb << 1) | 1;
       SERIAL.transferred_bits++;
@@ -3168,35 +3166,35 @@ static void serial_mcycle(Emulator* e) {
   }
 }
 
-static void mcycle(Emulator* e) {
+static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
-  dma_mcycle(e);
-  hdma_mcycle(e);
-  ppu_mcycle(e);
-  timer_mcycle(e);
-  serial_mcycle(e);
-  CYCLES += CPU_MCYCLE;
+  dma_tick(e);
+  hdma_tick(e);
+  ppu_tick(e);
+  timer_tick(e);
+  serial_tick(e);
+  TICKS += CPU_TICK;
 }
 
-static u8 read_u8_cy(Emulator* e, Address addr) {
-  mcycle(e);
+static u8 read_u8_tick(Emulator* e, Address addr) {
+  tick(e);
   return read_u8(e, addr);
 }
 
-static u16 read_u16_cy(Emulator* e, Address addr) {
-  u8 lo = read_u8_cy(e, addr);
-  u8 hi = read_u8_cy(e, addr + 1);
+static u16 read_u16_tick(Emulator* e, Address addr) {
+  u8 lo = read_u8_tick(e, addr);
+  u8 hi = read_u8_tick(e, addr + 1);
   return (hi << 8) | lo;
 }
 
-static void write_u8_cy(Emulator* e, Address addr, u8 value) {
-  mcycle(e);
+static void write_u8_tick(Emulator* e, Address addr, u8 value) {
+  tick(e);
   write_u8(e, addr, value);
 }
 
-static void write_u16_cy(Emulator* e, Address addr, u16 value) {
-  write_u8_cy(e, addr + 1, value >> 8);
-  write_u8_cy(e, addr, (u8)value);
+static void write_u16_tick(Emulator* e, Address addr, u16 value) {
+  write_u8_tick(e, addr + 1, value >> 8);
+  write_u8_tick(e, addr, (u8)value);
 }
 
 static u16 get_af_reg(Emulator* e) {
@@ -3232,7 +3230,7 @@ static u8 s_opcode_bytes[] = {
     /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
 };
 
-#define CY mcycle(e)
+#define TICK tick(e)
 #define RA REG.A
 #define RSP REG.SP
 #define FZ REG.F.Z
@@ -3243,10 +3241,10 @@ static u8 s_opcode_bytes[] = {
 #define SHIFT_FLAGS FZ_EQ0(u); FN = FH = 0
 #define MASK8(X) ((X) & 0xf)
 #define MASK16(X) ((X) & 0xfff)
-#define READ8(X) read_u8_cy(e, X)
-#define READ16(X) read_u16_cy(e, X)
-#define WRITE8(X, V) write_u8_cy(e, X, V)
-#define WRITE16(X, V) write_u16_cy(e, X, V)
+#define READ8(X) read_u8_tick(e, X)
+#define READ16(X) read_u16_tick(e, X)
+#define WRITE8(X, V) write_u8_tick(e, X, V)
+#define WRITE16(X, V) write_u16_tick(e, X, V)
 #define READ_N READ8(REG.PC + 1)
 #define READ_NN READ16(REG.PC + 1)
 #define READMR(MR) READ8(REG.MR)
@@ -3265,8 +3263,8 @@ static u8 s_opcode_bytes[] = {
 #define ADD_R(R) ADD_FLAGS(RA, REG.R); RA += REG.R
 #define ADD_MR(MR) u = READMR(MR); ADD_FLAGS(RA, u); RA += u
 #define ADD_N u = READ_N; ADD_FLAGS(RA, u); RA += u
-#define ADD_HL_RR(RR) CY; ADD_FLAGS16(REG.HL, REG.RR); REG.HL += REG.RR
-#define ADD_SP_N s = (s8)READ_N; ADD_SP_FLAGS(s); RSP += s; CY; CY
+#define ADD_HL_RR(RR) TICK; ADD_FLAGS16(REG.HL, REG.RR); REG.HL += REG.RR
+#define ADD_SP_N s = (s8)READ_N; ADD_SP_FLAGS(s); RSP += s; TICK; TICK
 #define FC_ADC(X, Y, C) FC = ((X) + (Y) + (C) > 0xff)
 #define FH_ADC(X, Y, C) FH = (MASK8(X) + MASK8(Y) + C > 0xf)
 #define FCH_ADC(X, Y, C) FC_ADC(X, Y, C); FH_ADC(X, Y, C)
@@ -3281,7 +3279,7 @@ static u8 s_opcode_bytes[] = {
 #define BIT_FLAGS(BIT, X) FZ_EQ0((X) & (1 << (BIT))); FN = 0; FH = 1
 #define BIT_R(BIT, R) u = REG.R; BIT_FLAGS(BIT, u)
 #define BIT_MR(BIT, MR) u = READMR(MR); BIT_FLAGS(BIT, u)
-#define CALL(X) CY; RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
+#define CALL(X) TICK; RSP -= 2; WRITE16(RSP, new_pc); new_pc = X
 #define CALL_NN u16 = READ_NN; CALL(u16)
 #define CALL_F_NN(COND) u16 = READ_NN; if (COND) { CALL(u16); }
 #define CCF FC ^= 1; FN = FH = 0
@@ -3307,7 +3305,7 @@ static u8 s_opcode_bytes[] = {
 #define DEC u--
 #define DEC_FLAGS FZ_EQ0(u); FN = 1; FH = MASK8(u) == 0xf
 #define DEC_R(R) BASIC_OP_R(R, DEC); DEC_FLAGS
-#define DEC_RR(RR) REG.RR--; CY
+#define DEC_RR(RR) REG.RR--; TICK
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
 #define DI INTR.ime = INTR.enable = FALSE;
 #define EI INTR.enable = TRUE;
@@ -3323,17 +3321,17 @@ static u8 s_opcode_bytes[] = {
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
 #define INC_R(R) BASIC_OP_R(R, INC); INC_FLAGS
-#define INC_RR(RR) REG.RR++; CY
+#define INC_RR(RR) REG.RR++; TICK
 #define INC_MR(MR) BASIC_OP_MR(MR, INC); INC_FLAGS
-#define JP_F_NN(COND) u16 = READ_NN; if (COND) { new_pc = u16; CY; }
+#define JP_F_NN(COND) u16 = READ_NN; if (COND) { new_pc = u16; TICK; }
 #define JP_RR(RR) new_pc = REG.RR
-#define JP_NN new_pc = READ_NN; CY
-#define JR new_pc += s; CY
+#define JP_NN new_pc = READ_NN; TICK
+#define JR new_pc += s; TICK
 #define JR_F_N(COND) s = READ_N; if (COND) { JR; }
 #define JR_N s = READ_N; JR
 #define LD_R_R(RD, RS) REG.RD = REG.RS
 #define LD_R_N(R) REG.R = READ_N
-#define LD_RR_RR(RRD, RRS) REG.RRD = REG.RRS; CY
+#define LD_RR_RR(RRD, RRS) REG.RRD = REG.RRS; TICK
 #define LD_RR_NN(RR) REG.RR = READ_NN
 #define LD_R_MR(R, MR) REG.R = READMR(MR)
 #define LD_R_MN(R) REG.R = READ8(READ_NN)
@@ -3345,20 +3343,20 @@ static u8 s_opcode_bytes[] = {
 #define LD_R_MFF00_N(R) REG.R = READ8(0xFF00 + READ_N)
 #define LD_R_MFF00_R(R1, R2) REG.R1 = READ8(0xFF00 + REG.R2)
 #define LD_MNN_SP u16 = READ_NN; WRITE16(u16, RSP)
-#define LD_HL_SP_N s = (s8)READ_N; ADD_SP_FLAGS(s); REG.HL = RSP + s; CY
+#define LD_HL_SP_N s = (s8)READ_N; ADD_SP_FLAGS(s); REG.HL = RSP + s; TICK
 #define OR_FLAGS FZ_EQ0(RA); FN = FH = FC = 0
 #define OR_R(R) RA |= REG.R; OR_FLAGS
 #define OR_MR(MR) RA |= READMR(MR); OR_FLAGS
 #define OR_N RA |= READ_N; OR_FLAGS
 #define POP_RR(RR) REG.RR = READ16(RSP); RSP += 2
 #define POP_AF set_af_reg(e, READ16(RSP)); RSP += 2
-#define PUSH_RR(RR) CY; RSP -= 2; WRITE16(RSP, REG.RR)
-#define PUSH_AF CY; RSP -= 2; WRITE16(RSP, get_af_reg(e))
+#define PUSH_RR(RR) TICK; RSP -= 2; WRITE16(RSP, REG.RR)
+#define PUSH_AF TICK; RSP -= 2; WRITE16(RSP, get_af_reg(e))
 #define RES(BIT) u &= ~(1 << (BIT))
 #define RES_R(BIT, R) BASIC_OP_R(R, RES(BIT))
 #define RES_MR(BIT, MR) BASIC_OP_MR(MR, RES(BIT))
-#define RET new_pc = READ16(RSP); RSP += 2; CY
-#define RET_F(COND) CY; if (COND) { RET; }
+#define RET new_pc = READ16(RSP); RSP += 2; TICK
+#define RET_F(COND) TICK; if (COND) { RET; }
 #define RETI INTR.enable = FALSE; INTR.ime = TRUE; RET
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
 #define RLA BASIC_OP_R(A, RL); FZ = FN = FH = 0
@@ -3467,10 +3465,10 @@ static void dispatch_interrupt(Emulator* e) {
   REG.PC = vector;
 
   if (delay) {
-    mcycle(e);
+    tick(e);
   }
-  mcycle(e);
-  mcycle(e);
+  tick(e);
+  tick(e);
 }
 
 static void execute_instruction(Emulator* e) {
@@ -3505,7 +3503,7 @@ static void execute_instruction(Emulator* e) {
     REG.PC--;
     INTR.halt_bug = FALSE;
   } else {
-    opcode = read_u8_cy(e, REG.PC);
+    opcode = read_u8_tick(e, REG.PC);
   }
 
   if (should_dispatch) {
@@ -3644,7 +3642,7 @@ static void execute_instruction(Emulator* e) {
     case 0xc9: RET; break;
     case 0xca: JP_F_NN(FZ); break;
     case 0xcb:
-      switch (read_u8_cy(e, REG.PC + 1)) {
+      switch (read_u8_tick(e, REG.PC + 1)) {
         REG_OPS(0x00, RLC)
         REG_OPS(0x08, RRC)
         REG_OPS(0x10, RL)
@@ -3730,11 +3728,11 @@ static void emulator_step_internal(Emulator* e) {
   if (HDMA.state == DMA_INACTIVE) {
     execute_instruction(e);
   } else {
-    mcycle(e);
+    tick(e);
   }
 }
 
-EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
+EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
   AudioBuffer* ab = &e->audio_buffer;
   if (e->state.last_event & EMULATOR_EVENT_NEW_FRAME) {
     PPU.new_frame_edge = FALSE;
@@ -3745,20 +3743,20 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
   check_joyp_intr(e);
 
   u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
-  Cycles max_audio_cycles =
-      APU.cycles +
-      (u32)DIV_CEIL(frames_left * CPU_CYCLES_PER_SECOND, ab->frequency);
+  Ticks max_audio_ticks =
+      APU.ticks +
+      (u32)DIV_CEIL(frames_left * CPU_TICKS_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
   while (event == 0) {
     emulator_step_internal(e);
     if (PPU.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    if (CYCLES >= max_audio_cycles) {
+    if (TICKS >= max_audio_ticks ) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
-    if (CYCLES >= until_cycles) {
-      event |= EMULATOR_EVENT_UNTIL_CYCLES;
+    if (TICKS >= until_ticks) {
+      event |= EMULATOR_EVENT_UNTIL_TICKS;
     }
   }
   apu_synchronize(e);
@@ -3766,7 +3764,7 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
 }
 
 EmulatorEvent emulator_step(Emulator* e) {
-  return emulator_run_until(e, CYCLES + 1);
+  return emulator_run_until(e, TICKS + 1);
 }
 
 static Result validate_header_checksum(CartInfo* cart_info) {
@@ -3857,7 +3855,7 @@ Result init_emulator(Emulator* e) {
   write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
 
-  APU.cycles = CYCLES = 0;
+  APU.ticks = TICKS = 0;
   return OK;
   ON_ERROR_RETURN;
 }
@@ -3892,8 +3890,8 @@ AudioBuffer* emulator_get_audio_buffer(struct Emulator* e) {
   return &e->audio_buffer;
 }
 
-Cycles emulator_get_cycles(struct Emulator* e) {
-  return CYCLES;
+Ticks emulator_get_ticks(struct Emulator* e) {
+  return TICKS;
 }
 
 u32 emulator_get_ppu_frame(struct Emulator* e) {
@@ -4038,10 +4036,9 @@ void emulator_delete(Emulator* e) {
   }
 }
 
-void emulator_cycles_to_time(Cycles cycles, u32* hr, u32* min, u32* sec,
-                             u32* ms) {
-  *hr = cycles / (60 * 60 * (Cycles)CPU_CYCLES_PER_SECOND);
-  *min = (cycles / (60 * (Cycles)CPU_CYCLES_PER_SECOND)) % 60;
-  *sec = (cycles / (Cycles)CPU_CYCLES_PER_SECOND) % 60;
-  *ms = (cycles / ((Cycles)CPU_CYCLES_PER_SECOND / 1000)) % 1000;
+void emulator_ticks_to_time(Ticks ticks, u32* hr, u32* min, u32* sec, u32* ms) {
+  *hr = ticks / (60 * 60 * (Ticks)CPU_TICKS_PER_SECOND);
+  *min = (ticks / (60 * (Ticks)CPU_TICKS_PER_SECOND)) % 60;
+  *sec = (ticks / (Ticks)CPU_TICKS_PER_SECOND) % 60;
+  *ms = (ticks / ((Ticks)CPU_TICKS_PER_SECOND / 1000)) % 1000;
 }

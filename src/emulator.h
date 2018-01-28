@@ -17,11 +17,11 @@ extern "C" {
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
 
-#define CPU_CYCLES_PER_SECOND 4194304
-#define APU_CYCLES_PER_SECOND 2097152
-#define PPU_LINE_CYCLES 456
-#define PPU_VBLANK_CYCLES (PPU_LINE_CYCLES * 10)
-#define PPU_FRAME_CYCLES (PPU_LINE_CYCLES * SCREEN_HEIGHT_WITH_VBLANK)
+#define CPU_TICKS_PER_SECOND 4194304
+#define APU_TICKS_PER_SECOND 2097152
+#define PPU_LINE_TICKS 456
+#define PPU_VBLANK_TICKS (PPU_LINE_TICKS * 10)
+#define PPU_FRAME_TICKS (PPU_LINE_TICKS * SCREEN_HEIGHT_WITH_VBLANK)
 
 #define SOUND_OUTPUT_COUNT 2
 #define PALETTE_COLOR_COUNT 4
@@ -110,7 +110,7 @@ typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
 typedef struct AudioBuffer {
   u32 frequency;    /* Sample frequency, as N samples per second */
-  u32 freq_counter; /* Used for resampling; [0..APU_CYCLES_PER_SECOND). */
+  u32 freq_counter; /* Used for resampling; [0..APU_TICKS_PER_SECOND). */
   u32 divisor;
   u32 frames; /* Number of frames to generate per call to emulator_run. */
   u8* data;   /* Unsigned 8-bit 2-channel samples @ |frequency| */
@@ -136,7 +136,7 @@ typedef u32 EmulatorEvent;
 enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
-  EMULATOR_EVENT_UNTIL_CYCLES = 0x4,
+  EMULATOR_EVENT_UNTIL_TICKS = 0x4,
 };
 
 extern const size_t s_emulator_state_size;
@@ -152,11 +152,11 @@ void emulator_set_config(struct Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(struct Emulator*);
 FrameBuffer* emulator_get_frame_buffer(struct Emulator*);
 AudioBuffer* emulator_get_audio_buffer(struct Emulator*);
-Cycles emulator_get_cycles(struct Emulator*);
+Ticks emulator_get_ticks(struct Emulator*);
 u32 emulator_get_ppu_frame(struct Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
-void emulator_cycles_to_time(Cycles, u32* hr, u32* min, u32* sec, u32* ms);
+void emulator_ticks_to_time(Ticks, u32* hr, u32* min, u32* sec, u32* ms);
 
 void emulator_init_state_file_data(FileData*);
 Result emulator_read_state(struct Emulator*, const FileData*);
@@ -170,7 +170,7 @@ Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
 
 EmulatorEvent emulator_step(struct Emulator*);
-EmulatorEvent emulator_run_until(struct Emulator*, Cycles until_cycles);
+EmulatorEvent emulator_run_until(struct Emulator*, Ticks until_ticks);
 
 #ifdef __cplusplus
 }

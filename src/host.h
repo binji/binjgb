@@ -163,16 +163,16 @@ void host_render_screen_overlay(struct Host*, struct HostTexture*);
 
 /* Rewind support. */
 
-Cycles host_oldest_cycles(struct Host*);
-Cycles host_newest_cycles(struct Host*);
+Ticks host_oldest_ticks(struct Host*);
+Ticks host_newest_ticks(struct Host*);
 
-Cycles host_get_rewind_oldest_cycles(struct Host*);
-Cycles host_get_rewind_newest_cycles(struct Host*);
+Ticks host_get_rewind_oldest_ticks(struct Host*);
+Ticks host_get_rewind_newest_ticks(struct Host*);
 JoypadStats host_get_joypad_stats(struct Host*);
 RewindStats host_get_rewind_stats(struct Host*);
 
 void host_begin_rewind(struct Host*);
-Result host_rewind_to_cycles(struct Host*, Cycles cycles);
+Result host_rewind_to_ticks(struct Host*, Ticks ticks);
 void host_end_rewind(struct Host*);
 Bool host_is_rewinding(struct Host*);
 

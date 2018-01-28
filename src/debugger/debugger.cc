@@ -324,7 +324,7 @@ void Debugger::StepFrame() {
   if (run_state == Running || run_state == Paused) {
     run_state = SteppingFrame;
   } else if (run_state == Rewinding) {
-    RewindTo(emulator_get_cycles(e) + PPU_FRAME_CYCLES);
+    RewindTo(emulator_get_ticks(e) + PPU_FRAME_TICKS);
   }
 }
 
@@ -440,13 +440,13 @@ void Debugger::EndAutoRewind() {
 
 void Debugger::AutoRewind(f64 delta_ms) {
   assert(run_state == AutoRewinding);
-  Cycles delta_cycles = (Cycles)(delta_ms * CPU_CYCLES_PER_SECOND / 1000);
-  Cycles now = emulator_get_cycles(e);
-  Cycles then = now >= delta_cycles ? now - delta_cycles : 0;
+  Ticks delta_ticks = (Ticks)(delta_ms * CPU_TICKS_PER_SECOND / 1000);
+  Ticks now = emulator_get_ticks(e);
+  Ticks then = now >= delta_ticks ? now - delta_ticks : 0;
   RewindTo(then);
 }
 
-void Debugger::RewindTo(Cycles cycles) {
-  host_rewind_to_cycles(host, cycles);
+void Debugger::RewindTo(Ticks ticks) {
+  host_rewind_to_ticks(host, ticks);
   host_reset_audio(host);
 }

@@ -11,7 +11,7 @@
 
 #define JOYPAD_CHUNK_DEFAULT_CAPACITY 4096
 
-#define GET_CYCLES(x) ((x).cycles)
+#define GET_TICKS(x) ((x).ticks)
 #define CMP_LT(x, y) ((x) < (y))
 
 JoypadBuffer* joypad_new(void) {
@@ -52,10 +52,9 @@ static JoypadState* alloc_joypad_state(JoypadBuffer* buffer) {
   return &tail->data[tail->size++];
 }
 
-void joypad_append(JoypadBuffer* buffer, JoypadButtons* buttons,
-                   Cycles cycles) {
+void joypad_append(JoypadBuffer* buffer, JoypadButtons* buttons, Ticks ticks) {
   JoypadState* state = alloc_joypad_state(buffer);
-  state->cycles = cycles;
+  state->ticks = ticks;
   state->buttons = joypad_pack_buttons(buttons);
   buffer->last_buttons = *buttons;
 }
@@ -68,41 +67,41 @@ static Bool buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
 }
 
 void joypad_append_if_new(JoypadBuffer* buffer, JoypadButtons* buttons,
-                          Cycles cycles) {
+                          Ticks ticks) {
   if (!buttons_are_equal(buttons, &buffer->last_buttons)) {
-    joypad_append(buffer, buttons, cycles);
+    joypad_append(buffer, buttons, ticks);
   }
 }
 
-JoypadStateIter joypad_find_state(JoypadBuffer* buffer, Cycles cycles) {
+JoypadStateIter joypad_find_state(JoypadBuffer* buffer, Ticks ticks) {
   /* TODO(binji): Use a skip list if this is too slow? */
   JoypadStateIter result;
   JoypadChunk* first_chunk = buffer->sentinel.next;
   JoypadChunk* last_chunk = buffer->sentinel.prev;
   assert(first_chunk->size != 0 && last_chunk->size != 0);
-  Cycles first_cycles = first_chunk->data[0].cycles;
-  Cycles last_cycles = last_chunk->data[last_chunk->size - 1].cycles;
-  if (cycles <= first_cycles) {
+  Ticks first_ticks = first_chunk->data[0].ticks;
+  Ticks last_ticks = last_chunk->data[last_chunk->size - 1].ticks;
+  if (ticks <= first_ticks) {
     /* At or past the beginning. */
     result.chunk = first_chunk;
     result.state = &first_chunk->data[0];
     return result;
-  } else if (cycles >= last_cycles) {
+  } else if (ticks >= last_ticks) {
     /* At or past the end. */
     result.chunk = last_chunk;
     result.state = &last_chunk->data[last_chunk->size - 1];
     return result;
-  } else if (cycles - first_cycles < last_cycles - cycles) {
+  } else if (ticks - first_ticks < last_ticks - ticks) {
     /* Closer to the beginning. */
     JoypadChunk* chunk = first_chunk;
-    while (cycles >= chunk->data[chunk->size - 1].cycles) {
+    while (ticks >= chunk->data[chunk->size - 1].ticks) {
       chunk = chunk->next;
     }
     result.chunk = chunk;
   } else {
     /* Closer to the end. */
     JoypadChunk* chunk = last_chunk;
-    while (cycles < chunk->data[0].cycles) {
+    while (ticks < chunk->data[0].ticks) {
       chunk = chunk->prev;
     }
     result.chunk = chunk;
@@ -110,11 +109,11 @@ JoypadStateIter joypad_find_state(JoypadBuffer* buffer, Cycles cycles) {
 
   JoypadState* begin = result.chunk->data;
   JoypadState* end = begin + result.chunk->size;
-  LOWER_BOUND(JoypadState, lower_bound, begin, end, cycles, GET_CYCLES, CMP_LT);
+  LOWER_BOUND(JoypadState, lower_bound, begin, end, ticks, GET_TICKS, CMP_LT);
   assert(lower_bound != NULL); /* The chunk should not be empty. */
 
   result.state = lower_bound;
-  assert(result.state->cycles <= cycles);
+  assert(result.state->ticks <= ticks);
   return result;
 }
 

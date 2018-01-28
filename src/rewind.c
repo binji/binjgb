@@ -13,9 +13,9 @@
 
 #define SANITY_CHECK 0
 
-#define INVALID_CYCLES (~0ULL)
+#define INVALID_TICKS (~0ULL)
 
-#define GET_CYCLES(x) ((x).cycles)
+#define GET_TICKS(x) ((x).ticks)
 #define CMP_GT(x, y) ((x) > (y))
 
 #define CHECK_WRITE(count, dst, dst_max_end) \
@@ -99,7 +99,7 @@ RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
   emulator_init_state_file_data(&buffer->last_state);
   emulator_init_state_file_data(&buffer->last_base_state);
   emulator_init_state_file_data(&buffer->rewind_diff_state);
-  buffer->last_base_state_cycles = INVALID_CYCLES;
+  buffer->last_base_state_ticks = INVALID_TICKS;
   buffer->data_range[0].begin = buffer->data_range[0].end = data;
   buffer->data_range[1] = buffer->data_range[0];
   RewindInfo* info = (RewindInfo*)(data + capacity);
@@ -198,14 +198,14 @@ static RewindInfo* find_first_base_in_range(RewindInfoRange range) {
 }
 
 void rewind_append(RewindBuffer* buf, struct Emulator* e) {
-  Cycles cycles = emulator_get_cycles(e);
+  Ticks ticks = emulator_get_ticks(e);
   (void)emulator_write_state(e, &buf->last_state);
 
   /* The new state must be written in sorted order; if it is out of order (from
    * a rewind), then the subsequent saved states should have been cleared
    * first. */
-  assert(rewind_get_newest_cycles(buf) == INVALID_CYCLES ||
-         cycles > rewind_get_oldest_cycles(buf));
+  assert(rewind_get_newest_ticks(buf) == INVALID_TICKS ||
+         ticks > rewind_get_oldest_ticks(buf));
 
   RewindInfoKind kind;
   if (buf->frames_until_next_base-- == 0) {
@@ -236,7 +236,7 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
   u8* data_end;
   switch (kind) {
     case RewindInfoKind_Diff:
-      if (buf->last_base_state_cycles != INVALID_CYCLES) {
+      if (buf->last_base_state_ticks != INVALID_TICKS) {
         data_end = encode_diff(buf->last_state.data, buf->last_base_state.data,
                                buf->last_state.size, data_begin, data_end_max);
         break;
@@ -250,7 +250,7 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
                             data_begin, data_end_max);
       memcpy(buf->last_base_state.data, buf->last_state.data,
              buf->last_state.size);
-      buf->last_base_state_cycles = cycles;
+      buf->last_base_state_ticks = ticks;
       break;
   }
 
@@ -273,7 +273,7 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
   info_range[1].end = new_end;
   info_range[1].begin = MIN(info_range[1].begin, info_range[1].end);
 
-  new_info->cycles = cycles;
+  new_info->ticks = ticks;
   new_info->data = data_begin;
   new_info->size = data_end - data_begin;
   new_info->kind = kind;
@@ -293,14 +293,14 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
   rewind_sanity_check(buf, e);
 }
 
-Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
+Result rewind_to_ticks(RewindBuffer* buf, Ticks ticks,
                         RewindResult* out_result) {
   RewindInfoRange* info_range = buf->info_range;
 
   int info_range_index;
-  if (cycles >= info_range[0].end[-1].cycles) {
+  if (ticks >= info_range[0].end[-1].ticks) {
     info_range_index = 0;
-  } else if (cycles >= info_range[1].end[-1].cycles) {
+  } else if (ticks >= info_range[1].end[-1].ticks) {
     info_range_index = 1;
   } else {
     return ERROR;
@@ -308,12 +308,12 @@ Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
 
   RewindInfo* begin = info_range[info_range_index].begin;
   RewindInfo* end = info_range[info_range_index].end;
-  LOWER_BOUND(RewindInfo, found, begin, end, cycles, GET_CYCLES, CMP_GT);
+  LOWER_BOUND(RewindInfo, found, begin, end, ticks, GET_TICKS, CMP_GT);
   assert(found);
   assert(found >= begin && found < end);
 
   /* We actually want upper bound, so increment if it wasn't an exact match. */
-  if (found->cycles != cycles) {
+  if (found->ticks != ticks) {
     assert(found + 1 != end);
     ++found;
     // HACK: Rewind one more, if available -- this way we'll render frames when
@@ -323,14 +323,14 @@ Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
     }
   }
 
-  assert(found->cycles <= cycles);
+  assert(found->ticks <= ticks);
 
   FileData* file_data = NULL;
   if (found->kind == RewindInfoKind_Base) {
     file_data = &buf->last_base_state;
     decode_rle(found->data, found->size, file_data->data,
                file_data->data + file_data->size);
-    buf->last_base_state_cycles = found->cycles;
+    buf->last_base_state_ticks = found->ticks;
   } else {
     assert(found->kind == RewindInfoKind_Diff);
     /* Find the previous base state. */
@@ -352,7 +352,7 @@ Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
     FileData* base = &buf->last_base_state;
     decode_rle(base_info->data, base_info->size, base->data,
                base->data + base->size);
-    buf->last_base_state_cycles = base_info->cycles;
+    buf->last_base_state_ticks = base_info->ticks;
 
     file_data = &buf->rewind_diff_state;
     decode_diff(found->data, found->size, base->data, file_data->data,
@@ -386,7 +386,7 @@ static Bool is_rewind_range_empty(RewindInfoRange* r) {
   return r->end == r->begin;
 }
 
-Cycles rewind_get_oldest_cycles(RewindBuffer* buffer) {
+Ticks rewind_get_oldest_ticks(RewindBuffer* buffer) {
   RewindInfoRange* info_range = buffer->info_range;
   /* info_range[1] is always older than info_range[0], if it exists, so check
    * that first. */
@@ -394,24 +394,24 @@ Cycles rewind_get_oldest_cycles(RewindBuffer* buffer) {
   for (i = 1; i >= 0; --i) {
     if (!is_rewind_range_empty(&info_range[i])) {
       /* end is exclusive. */
-      return info_range[i].end[-1].cycles;
+      return info_range[i].end[-1].ticks;
     }
   }
 
-  return INVALID_CYCLES;
+  return INVALID_TICKS;
 }
 
-Cycles rewind_get_newest_cycles(RewindBuffer* buffer) {
+Ticks rewind_get_newest_ticks(RewindBuffer* buffer) {
   RewindInfoRange* info_range = buffer->info_range;
 
   int i;
   for (i = 0; i < 2; ++i) {
     if (!is_rewind_range_empty(&info_range[i])) {
-      return info_range[i].begin[0].cycles;
+      return info_range[i].begin[0].ticks;
     }
   }
 
-  return INVALID_CYCLES;
+  return INVALID_TICKS;
 }
 
 RewindStats rewind_get_stats(RewindBuffer* buffer) {

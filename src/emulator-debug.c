@@ -25,7 +25,7 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
     if (s_log_level[LOG_SYSTEM_##system] >= LOG_LEVEL_##level) {            \
       va_list args;                                                         \
       va_start(args, func_name);                                            \
-      fprintf(stdout, "%10" PRIu64 ": %-30s:", e->state.cycles, func_name); \
+      fprintf(stdout, "%10" PRIu64 ": %-30s:", e->state.ticks, func_name); \
       vfprintf(stdout, format "\n", args);                                  \
       va_end(args);                                                         \
     }                                                                       \
@@ -64,8 +64,8 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(A, V, write_nrx4_info_abii, "(%#04x, %#02x) trigger=%u length_enabled=%u") \
   X(A, D, write_nrx4_trigger_new_length_abi,                                   \
     "(%#04x, %#02x) trigger, new length = %u")                                 \
-  X(A, D, write_square_wave_period_info_iii, "freq: %u cycle: %u period: %u")  \
-  X(A, D, write_wave_period_info_iii, "freq: %u cycle: %u period: %u")         \
+  X(A, D, write_square_wave_period_info_iii, "freq: %u tick: %u period: %u")  \
+  X(A, D, write_wave_period_info_iii, "freq: %u tick: %u period: %u")         \
   X(A, D, write_wave_ram_ab, "(%#02x, %#02x)")                                 \
   X(A, D, write_wave_ram_while_playing_ab, "(%#02x, %#02x) while playing")     \
   X(H, D, audio_add_buffer_fzz, "+++ %.1f: buf: %zu -> %zu")                   \
@@ -332,7 +332,7 @@ void HOOK_emulator_step(Emulator* e, const char* func_name) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
            REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
            REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);
-    printf(" (cy: %" PRIu64 ")", e->state.cycles);
+    printf(" (cy: %" PRIu64 ")", e->state.ticks);
     if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
       printf(" ppu:%c%u", PPU.lcdc.display ? '+' : '-', PPU.stat.mode);
     }

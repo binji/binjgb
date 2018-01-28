@@ -21,7 +21,7 @@ typedef enum {
 } RewindInfoKind;
 
 typedef struct {
-  Cycles cycles;
+  Ticks ticks;
   u8* data;
   size_t size;
   RewindInfoKind kind;
@@ -78,7 +78,7 @@ typedef struct RewindBuffer {
   RewindInfoRange info_range[2];
   FileData last_state;
   FileData last_base_state;
-  Cycles last_base_state_cycles;
+  Ticks last_base_state_ticks;
   int frames_until_next_base;
 
   /* Data is decompressed into these states when rewinding. */
@@ -103,10 +103,10 @@ typedef struct {
 RewindBuffer* rewind_new(const RewindInit*, struct Emulator*);
 void rewind_delete(RewindBuffer*);
 void rewind_append(RewindBuffer*, struct Emulator*);
-Result rewind_to_cycles(RewindBuffer*, Cycles, RewindResult*);
+Result rewind_to_ticks(RewindBuffer*, Ticks, RewindResult*);
 void rewind_truncate_to(RewindBuffer*, struct Emulator*, RewindResult*);
-Cycles rewind_get_oldest_cycles(RewindBuffer*);
-Cycles rewind_get_newest_cycles(RewindBuffer*);
+Ticks rewind_get_oldest_ticks(RewindBuffer*);
+Ticks rewind_get_newest_ticks(RewindBuffer*);
 RewindStats rewind_get_stats(RewindBuffer*);
 
 #ifdef __cplusplus

@@ -61,7 +61,7 @@ class Debugger {
   void BeginAutoRewind();
   void EndAutoRewind();
   void AutoRewind(f64 ms);
-  void RewindTo(Cycles cycles);
+  void RewindTo(Ticks ticks);
 
   // Return true if hovering on the tile.
   bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,

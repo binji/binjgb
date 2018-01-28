@@ -8,9 +8,9 @@
 
 #include <inttypes.h>
 
+#include "imgui-helpers.h"
 #include "imgui.h"
 #include "imgui_dock.h"
-#include "imgui-helpers.h"
 
 Debugger::RewindWindow::RewindWindow(Debugger* d) : Window(d) {
   emulator_init_state_file_data(&reverse_step_save_state);
@@ -32,52 +32,60 @@ void Debugger::RewindWindow::Tick() {
     }
 
     if (rewinding) {
-      Cycles cur_cy = emulator_get_cycles(d->e);
-      Cycles oldest_cy = host_get_rewind_oldest_cycles(d->host);
-      Cycles rel_cur_cy = cur_cy - oldest_cy;
-      u32 range_fr =
-          (host_newest_cycles(d->host) - oldest_cy) / PPU_FRAME_CYCLES;
+      Ticks cur_cy = emulator_get_ticks(d->e);
+      Ticks oldest_cy = host_get_rewind_oldest_ticks(d->host);
+      Ticks rel_cur_cy = cur_cy - oldest_cy;
+      u32 range_fr = (host_newest_ticks(d->host) - oldest_cy) / PPU_FRAME_TICKS;
 
       // Frames.
-      int frame = rel_cur_cy / PPU_FRAME_CYCLES;
+      int frame = rel_cur_cy / PPU_FRAME_TICKS;
 
       ImGui::PushButtonRepeat(true);
-      if (ImGui::Button("-1")) { --frame; }
+      if (ImGui::Button("-1")) {
+        --frame;
+      }
       ImGui::SameLine();
-      if (ImGui::Button("+1")) { ++frame; }
+      if (ImGui::Button("+1")) {
+        ++frame;
+      }
       ImGui::PopButtonRepeat();
       ImGui::SameLine();
       ImGui::SliderInt("Frames", &frame, 0, range_fr);
 
       frame = CLAMP(frame, 0, static_cast<int>(range_fr));
 
-      // Cycles.
-      int offset_cy = rel_cur_cy % PPU_FRAME_CYCLES;
+      // Ticks.
+      int offset_cy = rel_cur_cy % PPU_FRAME_TICKS;
       bool reverse_step = false;
 
       ImGui::PushButtonRepeat(true);
-      if (ImGui::Button("-I")) { offset_cy -= 28; reverse_step = true; }
+      if (ImGui::Button("-I")) {
+        offset_cy -= 28;
+        reverse_step = true;
+      }
       ImGui::SameLine();
-      if (ImGui::Button("+I")) { offset_cy += 1; }
+      if (ImGui::Button("+I")) {
+        offset_cy += 1;
+      }
       ImGui::PopButtonRepeat();
       ImGui::SameLine();
-      ImGui::SliderInt("Cycle Offset", &offset_cy, 0, PPU_FRAME_CYCLES - 1);
+      ImGui::SliderInt("Tick Offset", &offset_cy, 0, PPU_FRAME_TICKS - 1);
 
-      Cycles rel_seek_cy = (Cycles)frame * PPU_FRAME_CYCLES + offset_cy;
+      Ticks rel_seek_cy = (Ticks)frame * PPU_FRAME_TICKS + offset_cy;
 
       if (rel_cur_cy != rel_seek_cy) {
         d->RewindTo(oldest_cy + rel_seek_cy);
 
         // Reverse stepping is tricky because we don't know how long the
-        // previous instruction took. We can rewind by 28 cycles (longer than
+        // previous instruction took. We can rewind by 28 ticks (longer than
         // any instruction or interrupt dispatch) and step forward until just
-        // before the current cycle. But since we don't know how long a step
+        // before the current tick. But since we don't know how long a step
         // will take, it's easier to just save state, step forward one
         // instruction too far, then load state and step just before it.
         if (reverse_step) {
           emulator_write_state(d->e, &reverse_step_save_state);
           int count = 0;
-          for (; emulator_get_cycles(d->e) < cur_cy; ++count) {
+          for (; emulator_get_ticks(d->e) < cur_cy; ++count) {
             emulator_step(d->e);
           }
 
@@ -98,9 +106,8 @@ void Debugger::RewindWindow::Tick() {
     size_t uncompressed = rw_stats.uncompressed_bytes;
     size_t used = rw_stats.used_bytes;
     size_t capacity = rw_stats.capacity_bytes;
-    Cycles total_cycles =
-        host_newest_cycles(d->host) - host_oldest_cycles(d->host);
-    f64 sec = (f64)total_cycles / CPU_CYCLES_PER_SECOND;
+    Ticks total_ticks = host_newest_ticks(d->host) - host_oldest_ticks(d->host);
+    f64 sec = (f64)total_ticks / CPU_TICKS_PER_SECOND;
 
     ImGui::Text("joypad used/capacity: %s/%s",
                 d->PrettySize(joyp_stats.used_bytes).c_str(),
@@ -116,9 +123,9 @@ void Debugger::RewindWindow::Tick() {
                 d->PrettySize(total / sec * 60).c_str(),
                 d->PrettySize(total / sec * 60 * 60).c_str());
 
-    Cycles oldest = host_get_rewind_oldest_cycles(d->host);
-    Cycles newest = host_get_rewind_newest_cycles(d->host);
-    f64 range = (f64)(newest - oldest) / CPU_CYCLES_PER_SECOND;
+    Ticks oldest = host_get_rewind_oldest_ticks(d->host);
+    Ticks newest = host_get_rewind_newest_ticks(d->host);
+    f64 range = (f64)(newest - oldest) / CPU_TICKS_PER_SECOND;
     ImGui::Text("range: [%" PRIu64 "..%" PRIu64 "] (%.0f sec)", oldest, newest,
                 range);
 
