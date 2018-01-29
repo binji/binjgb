@@ -543,8 +543,7 @@ void host_render_screen_overlay(struct Host* host,
 }
 
 Cycles host_oldest_cycles(Host* host) {
-  /* TODO(binji): This should always be 0, I think. */
-  return host->joypad_buffer->sentinel.next->data[0].cycles;
+  return 0;
 }
 
 Cycles host_newest_cycles(Host* host) {

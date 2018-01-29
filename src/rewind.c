@@ -86,16 +86,11 @@
   } while (0)
 
 RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
-  size_t capacity = init->buffer_capacity;
-  if (capacity == 0) {
-    /* TODO(binji): Probably shouldn't do this anymore. */
-    return NULL;
-  }
-
   RewindBuffer* buffer = malloc(sizeof(RewindBuffer));
   ZERO_MEMORY(*buffer);
   buffer->init = *init;
 
+  size_t capacity = init->buffer_capacity;
   u8* data = malloc(capacity);
   emulator_init_state_file_data(&buffer->last_state);
   emulator_init_state_file_data(&buffer->last_base_state);
