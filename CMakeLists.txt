@@ -44,6 +44,7 @@ if (NOT EMSCRIPTEN)
       src/host-gl.c
       src/host-ui-simple.c
       src/joypad.c
+      src/rewind.c
       src/binjgb.c
     )
     target_link_libraries(binjgb SDL2::SDL2 SDL2::SDL2main ${OPENGL_gl_LIBRARY})
@@ -65,6 +66,7 @@ if (NOT EMSCRIPTEN)
       src/host-gl.c
       src/host-ui-imgui.cc
       src/joypad.c
+      src/rewind.c
       src/debugger.cc
     )
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)

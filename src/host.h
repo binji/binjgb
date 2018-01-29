@@ -9,6 +9,7 @@
 
 #include "common.h"
 #include "joypad.h"
+#include "rewind.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -122,8 +123,7 @@ typedef struct HostInit {
   int audio_frequency;
   int audio_frames;
   f32 audio_volume;
-  size_t rewind_buffer_capacity;
-  int frames_per_base_state;
+  RewindInit rewind;
 } HostInit;
 
 typedef struct HostConfig {
@@ -142,18 +142,6 @@ typedef struct HostTexture {
   int height;
   intptr_t handle;
 } HostTexture;
-
-typedef struct HostRewindStats {
-  JoypadStats joypad_stats;
-  size_t base_bytes;
-  size_t diff_bytes;
-  size_t uncompressed_bytes;
-  size_t used_bytes;
-  size_t capacity_bytes;
-
-  size_t data_ranges[4];
-  size_t info_ranges[4];
-} HostRewindStats;
 
 struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
@@ -180,7 +168,8 @@ Cycles host_newest_cycles(struct Host*);
 
 Cycles host_get_rewind_oldest_cycles(struct Host*);
 Cycles host_get_rewind_newest_cycles(struct Host*);
-HostRewindStats host_get_rewind_stats(struct Host*);
+JoypadStats host_get_joypad_stats(struct Host*);
+RewindStats host_get_rewind_stats(struct Host*);
 
 void host_begin_rewind(struct Host*);
 Result host_rewind_to_cycles(struct Host*, Cycles cycles);

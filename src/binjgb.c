@@ -312,8 +312,8 @@ int main(int argc, char** argv) {
   host_init.audio_frequency = AUDIO_FREQUENCY;
   host_init.audio_frames = AUDIO_FRAMES;
   host_init.audio_volume = s_audio_volume;
-  host_init.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
-  host_init.rewind_buffer_capacity = REWIND_BUFFER_CAPACITY;
+  host_init.rewind.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
+  host_init.rewind.buffer_capacity = REWIND_BUFFER_CAPACITY;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 

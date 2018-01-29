@@ -434,8 +434,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
   };
   // TODO: make these configurable?
-  host_init.frames_per_base_state = 45;
-  host_init.rewind_buffer_capacity = MEGABYTES(32);
+  host_init.rewind.frames_per_base_state = 45;
+  host_init.rewind.buffer_capacity = MEGABYTES(32);
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -1215,19 +1215,20 @@ void Debugger::RewindWindow() {
     }
 
     ImGui::Separator();
-    HostRewindStats stats = host_get_rewind_stats(host);
-    size_t base = stats.base_bytes;
-    size_t diff = stats.diff_bytes;
+    JoypadStats joyp_stats = host_get_joypad_stats(host);
+    RewindStats rw_stats = host_get_rewind_stats(host);
+    size_t base = rw_stats.base_bytes;
+    size_t diff = rw_stats.diff_bytes;
     size_t total = base + diff;
-    size_t uncompressed = stats.uncompressed_bytes;
-    size_t used = stats.used_bytes;
-    size_t capacity = stats.capacity_bytes;
+    size_t uncompressed = rw_stats.uncompressed_bytes;
+    size_t used = rw_stats.used_bytes;
+    size_t capacity = rw_stats.capacity_bytes;
     Cycles total_cycles = host_newest_cycles(host) - host_oldest_cycles(host);
     f64 sec = (f64)total_cycles / CPU_CYCLES_PER_SECOND;
 
     ImGui::Text("joypad used/capacity: %s/%s",
-                PrettySize(stats.joypad_stats.used_bytes).c_str(),
-                PrettySize(stats.joypad_stats.capacity_bytes).c_str());
+                PrettySize(joyp_stats.used_bytes).c_str(),
+                PrettySize(joyp_stats.capacity_bytes).c_str());
 
     ImGui::Text("rewind base/diff/total: %s/%s/%s (%.0f%%)",
                 PrettySize(base).c_str(), PrettySize(diff).c_str(),
@@ -1266,10 +1267,10 @@ void Debugger::RewindWindow() {
       draw_list->AddRectFilled(ul, br, col);
     };
 
-    draw_bar(stats.data_ranges[0], stats.data_ranges[1], 0xfff38bff);
-    draw_bar(stats.data_ranges[2], stats.data_ranges[3], 0xffac5eb5);
-    draw_bar(stats.info_ranges[0], stats.info_ranges[1], 0xff64ea54);
-    draw_bar(stats.info_ranges[2], stats.info_ranges[3], 0xff3eab32);
+    draw_bar(rw_stats.data_ranges[0], rw_stats.data_ranges[1], 0xfff38bff);
+    draw_bar(rw_stats.data_ranges[2], rw_stats.data_ranges[3], 0xffac5eb5);
+    draw_bar(rw_stats.info_ranges[0], rw_stats.info_ranges[1], 0xff64ea54);
+    draw_bar(rw_stats.info_ranges[2], rw_stats.info_ranges[3], 0xff3eab32);
     ImGui::Dummy(ImVec2(w, h));
   }
   ImGui::EndDock();

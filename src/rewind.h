@@ -9,6 +9,8 @@
 
 #include "common.h"
 
+struct Emulator;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,6 +37,17 @@ typedef struct {
   u8* end;
 } RewindDataRange;
 
+typedef struct {
+  int info_range_index;
+  RewindInfo* info;
+  FileData file_data;
+} RewindResult;
+
+typedef struct {
+  size_t buffer_capacity;
+  int frames_per_base_state;
+} RewindInit;
+
 typedef struct RewindBuffer {
  /*
   * |                  rewind buffer                      |
@@ -60,6 +73,7 @@ typedef struct RewindBuffer {
   * information in the info ranges. Remove?
   *
   */
+  RewindInit init;
   RewindDataRange data_range[2];
   RewindInfoRange info_range[2];
   FileData last_state;
@@ -76,11 +90,24 @@ typedef struct RewindBuffer {
 } RewindBuffer;
 
 typedef struct {
-  size_t info_range_index;
-  RewindInfo* info;
-  JoypadStateIter joypad_iter;
-  Bool rewinding;
-} RewindState;
+  size_t base_bytes;
+  size_t diff_bytes;
+  size_t uncompressed_bytes;
+  size_t used_bytes;
+  size_t capacity_bytes;
+
+  size_t data_ranges[4];
+  size_t info_ranges[4];
+} RewindStats;
+
+RewindBuffer* rewind_new(const RewindInit*, struct Emulator*);
+void rewind_delete(RewindBuffer*);
+void rewind_append(RewindBuffer*, struct Emulator*);
+Result rewind_to_cycles(RewindBuffer*, Cycles, RewindResult*);
+void rewind_truncate_to(RewindBuffer*, RewindResult*);
+Cycles rewind_get_oldest_cycles(RewindBuffer*);
+Cycles rewind_get_newest_cycles(RewindBuffer*);
+RewindStats rewind_get_stats(RewindBuffer*);
 
 #ifdef __cplusplus
 }
