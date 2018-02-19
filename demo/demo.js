@@ -26,15 +26,15 @@ function setScale(scale) {
   canvasEl.style.height = canvasEl.height * scale + 'px';
 }
 
-$('#_1x').addEventListener('click', function(event) { setScale(1); });
-$('#_2x').addEventListener('click', function(event) { setScale(2); });
-$('#_3x').addEventListener('click', function(event) { setScale(3); });
-$('#_4x').addEventListener('click', function(event) { setScale(4); });
+$('#_1x').addEventListener('click', (event) => setScale(1));
+$('#_2x').addEventListener('click', (event) => setScale(2));
+$('#_3x').addEventListener('click', (event) => setScale(3));
+$('#_4x').addEventListener('click', (event) => setScale(4));
 
-$('#file').addEventListener('change', function(event) {
+$('#file').addEventListener('change', (event) => {
   var reader = new FileReader();
-  reader.onloadend = function() { startEmulator(reader.result); }
-  reader.readAsArrayBuffer(this.files[0]);
+  reader.onloadend = () => startEmulator(reader.result);
+  reader.readAsArrayBuffer(event.target.files[0]);
 });
 
 function startEmulator(romArrayBuffer) {
@@ -54,7 +54,7 @@ function Emulator(romArrayBuffer) {
   this.renderer = new WebGLRenderer(canvasEl);
   // this.renderer = new Canvas2DRenderer(canvasEl);
   this.audio = new AudioContext();
-  this.defer(function() { this.audio.close(); });
+  this.defer(() => this.audio.close());
 
   var romData = _malloc(romArrayBuffer.byteLength);
   HEAPU8.set(
@@ -64,7 +64,7 @@ function Emulator(romArrayBuffer) {
   if (this.e == 0) {
     throw Error('Invalid ROM.');
   }
-  this.defer(function() { _emulator_delete(this.e); });
+  this.defer(() => _emulator_delete(this.e));
 
   this.frameBuffer = new Uint8Array(
       Module.buffer, _get_frame_buffer_ptr(this.e),
@@ -89,6 +89,11 @@ Emulator.prototype.cleanup = function() {
   }
 };
 
+Emulator.prototype.addEventListener = function(el, name, func) {
+  el.addEventListener(name, func);
+  this.defer(() => el.removeEventListener(name, func));
+};
+
 Emulator.prototype.togglePause = function() {
   if (this.rafCancelToken === null) {
     pauseEl.textContent = "pause";
@@ -102,15 +107,13 @@ Emulator.prototype.togglePause = function() {
 };
 
 Emulator.prototype.bindPauseButton = function(el) {
-  var func = this.togglePause.bind(this);
-  el.addEventListener('click', func);
-  this.defer(function() { el.removeEventListener('click', func); });
+  this.addEventListener(el, 'click', this.togglePause.bind(this));
 };
 
 Emulator.prototype.bindFpsCounter = function(el, updateMs) {
-  var func = (function() { el.textContent = this.fps.toFixed(1); }).bind(this);
+  var func = () => el.textContent = this.fps.toFixed(1);
   var intervalId = setInterval(func, updateMs);
-  this.defer(function() { clearInterval(intervalId); });
+  this.defer(() => clearInterval(intervalId));
 };
 
 Emulator.prototype.bindKeyInput = function(el) {
@@ -125,23 +128,17 @@ Emulator.prototype.bindKeyInput = function(el) {
     90: _set_joyp_B,
   };
 
-  var nop = function() {};
-  var makeKeyFunc = function(isKeyDown) {
-    return (function(event) {
-      (keyFuncs[event.keyCode] || nop)(this.e, isKeyDown);
-      event.preventDefault();
-    });
+  var makeKeyFunc = (isKeyDown) => {
+    return (event) => {
+      if (event.keyCode in keyFuncs) {
+        keyFuncs[event.keyCode](this.e, isKeyDown);
+        event.preventDefault();
+      }
+    };
   };
 
-  var keyDown = makeKeyFunc(true).bind(this);
-  var keyUp = makeKeyFunc(false).bind(this);
-  el.addEventListener('keydown', keyDown);
-  el.addEventListener('keyup', keyUp);
-
-  this.defer(function() {
-    el.removeEventListener('keydown', keyDown);
-    el.removeEventListener('keyup', keyUp);
-  });
+  this.addEventListener(el, 'keydown', makeKeyFunc(true));
+  this.addEventListener(el, 'keyup', makeKeyFunc(false));
 };
 
 Emulator.prototype.requestAnimationFrame = function() {
@@ -155,7 +152,7 @@ Emulator.prototype.cancelAnimationFrame = function() {
 
 Emulator.prototype.run = function() {
   this.requestAnimationFrame();
-  this.defer(function() { this.cancelAnimationFrame(); });
+  this.defer(() => this.cancelAnimationFrame());
 };
 
 Emulator.prototype.getCycles = function() {
