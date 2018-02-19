@@ -18,6 +18,7 @@ else ()
   add_definitions(
     -Wall -Wextra -Wpointer-arith -Wno-unused-parameter -g
     -Wno-unused-function -Wno-unused-variable
+    -Wno-implicit-fallthrough
   )
   if (WERROR)
     add_definitions(-Werror)
