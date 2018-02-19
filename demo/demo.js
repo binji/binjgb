@@ -18,6 +18,7 @@ const EVENT_UNTIL_CYCLES = 4;
 
 var $ = document.querySelector.bind(document);
 var canvasEl = $('canvas');
+var pauseEl = $('#pause');
 var emulator = null;
 
 function setScale(scale) {
@@ -42,7 +43,7 @@ function startEmulator(romArrayBuffer) {
   }
 
   emulator = new Emulator(romArrayBuffer);
-  emulator.bindStopButton($('#stop'));
+  emulator.bindPauseButton(pauseEl);
   emulator.bindFpsCounter($('#fps'), 500);
   emulator.bindKeyInput(window);
   emulator.run();
@@ -88,13 +89,20 @@ Emulator.prototype.cleanup = function() {
   }
 };
 
-Emulator.prototype.stop = function() {
-  cancelAnimationFrame(this.rafCancelToken);
-  this.audio.suspend();
+Emulator.prototype.togglePause = function() {
+  if (this.rafCancelToken === null) {
+    pauseEl.textContent = "pause";
+    this.requestAnimationFrame();
+    this.audio.resume();
+  } else {
+    pauseEl.textContent = "resume";
+    this.cancelAnimationFrame();
+    this.audio.suspend();
+  }
 };
 
-Emulator.prototype.bindStopButton = function(el) {
-  var func = this.stop.bind(this);
+Emulator.prototype.bindPauseButton = function(el) {
+  var func = this.togglePause.bind(this);
   el.addEventListener('click', func);
   this.defer(function() { el.removeEventListener('click', func); });
 };
@@ -136,9 +144,18 @@ Emulator.prototype.bindKeyInput = function(el) {
   });
 };
 
-Emulator.prototype.run = function() {
+Emulator.prototype.requestAnimationFrame = function() {
   this.rafCancelToken = requestAnimationFrame(this.renderVideo.bind(this));
-  this.defer(function() { cancelAnimationFrame(this.rafCancelToken); });
+};
+
+Emulator.prototype.cancelAnimationFrame = function() {
+  cancelAnimationFrame(this.rafCancelToken);
+  this.rafCancelToken = null;
+};
+
+Emulator.prototype.run = function() {
+  this.requestAnimationFrame();
+  this.defer(function() { this.cancelAnimationFrame(); });
 };
 
 Emulator.prototype.getCycles = function() {
@@ -150,7 +167,7 @@ function lerp(from, to, alpha) {
 }
 
 Emulator.prototype.renderVideo = function(startMs) {
-  this.rafCancelToken = requestAnimationFrame(this.renderVideo.bind(this));
+  this.requestAnimationFrame();
 
   var startSec = startMs / 1000;
   var deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
