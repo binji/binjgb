@@ -2142,6 +2142,7 @@ static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
         write_noise_period(e);
         trigger_nrx4_envelope(e, &CHANNEL4.envelope, addr);
         NOISE.lfsr = 0x7fff;
+        NOISE.sample = 1;
         NOISE.cycles = NOISE.period;
       }
       break;
@@ -2691,22 +2692,26 @@ static void update_wave(Emulator* e, u32 apu_cycles, u32 total_frames) {
 }
 
 static void update_noise(Emulator* e, u32 total_frames) {
-  if (CHANNEL4.status && NOISE.clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
+  if (CHANNEL4.status) {
     while (total_frames) {
       u32 frames = NOISE.cycles / APU_CYCLES;
       u8 sample = CHANNELX_SAMPLE(&CHANNEL4, NOISE.sample);
-      if (frames <= total_frames) {
-        u16 bit = (NOISE.lfsr ^ (NOISE.lfsr >> 1)) & 1;
-        if (NOISE.lfsr_width == LFSR_WIDTH_7) {
-          NOISE.lfsr = ((NOISE.lfsr >> 1) & ~0x40) | (bit << 6);
+      if (NOISE.clock_shift <= NOISE_MAX_CLOCK_SHIFT) {
+        if (frames <= total_frames) {
+          u16 bit = (NOISE.lfsr ^ (NOISE.lfsr >> 1)) & 1;
+          if (NOISE.lfsr_width == LFSR_WIDTH_7) {
+            NOISE.lfsr = ((NOISE.lfsr >> 1) & ~0x40) | (bit << 6);
+          } else {
+            NOISE.lfsr = ((NOISE.lfsr >> 1) & ~0x4000) | (bit << 14);
+          }
+          NOISE.sample = ~NOISE.lfsr & 1;
+          NOISE.cycles = NOISE.period;
         } else {
-          NOISE.lfsr = ((NOISE.lfsr >> 1) & ~0x4000) | (bit << 14);
+          frames = total_frames;
+          NOISE.cycles -= frames * APU_CYCLES;
         }
-        NOISE.sample = ~NOISE.lfsr & 1;
-        NOISE.cycles = NOISE.period;
       } else {
         frames = total_frames;
-        NOISE.cycles -= frames * APU_CYCLES;
       }
       CHANNEL4.accumulator += sample * frames;
       total_frames -= frames;
