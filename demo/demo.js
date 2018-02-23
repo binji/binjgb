@@ -197,22 +197,22 @@ Emulator.prototype.keyRewind = function(e, isKeyDown) {
 
 Emulator.prototype.bindKeyInput = function(el) {
   var keyFuncs = {
-    8: _set_joyp_select,
-    13: _set_joyp_start,
-    37: _set_joyp_left,
-    38: _set_joyp_up,
-    39: _set_joyp_right,
-    40: _set_joyp_down,
-    88: _set_joyp_A,
-    90: _set_joyp_B,
-    32: this.keyTogglePaused.bind(this),
-    192: this.keyRewind.bind(this),
+    'ArrowDown': _set_joyp_down,
+    'ArrowLeft': _set_joyp_left,
+    'ArrowRight': _set_joyp_right,
+    'ArrowUp': _set_joyp_up,
+    'KeyX': _set_joyp_B,
+    'KeyZ': _set_joyp_A,
+    'Enter': _set_joyp_start,
+    'Tab': _set_joyp_select,
+    'Backspace': this.keyRewind.bind(this),
+    'Space': this.keyTogglePaused.bind(this),
   };
 
   var makeKeyFunc = (isKeyDown) => {
     return (event) => {
-      if (event.keyCode in keyFuncs) {
-        keyFuncs[event.keyCode](this.e, isKeyDown);
+      if (event.code in keyFuncs) {
+        keyFuncs[event.code](this.e, isKeyDown);
         event.preventDefault();
       }
     };
