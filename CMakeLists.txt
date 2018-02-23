@@ -101,7 +101,11 @@ if (NOT EMSCRIPTEN)
   install(TARGETS binjgb-tester DESTINATION bin)
   target_copy_to_bin(binjgb-tester)
 else (EMSCRIPTEN)
-  add_executable(binjgb src/emulator.c src/emscripten/wrapper.c)
+  add_executable(binjgb
+    src/emulator.c
+    src/joypad.c
+    src/rewind.c
+    src/emscripten/wrapper.c)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)
   target_include_directories(binjgb PUBLIC ${PROJECT_SOURCE_DIR}/src)
 

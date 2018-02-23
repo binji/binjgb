@@ -18,16 +18,23 @@
       border: 1px solid gray;
       margin: auto;
     }
-    #status-wrap {
-      width: 100%;
+    .top-line {
       border-top: 1px solid gray;
+    }
+    .bar-wrap {
+      width: 100%;
       padding: 8px 0;
     }
-    #status {
+    .bar {
       display: flex;
       width: 800px;
       margin: auto;
       flex-direction: row;
+    }
+    #rewind {
+      margin: auto;
+      width: 100%;
+      height: 1em;
     }
     .left {
       margin-right: auto;
@@ -36,8 +43,8 @@
 </head>
 <body>
   <canvas width="160" height="144"></canvas>
-  <div id="status-wrap">
-    <div id="status">
+  <div class="bar-wrap top-line">
+    <div class="bar">
       <div class="left">
         <button id="_1x">1x</button>
         <button id="_2x">2x</button>
@@ -49,6 +56,12 @@
       <div>
         <span id="fps">0</span> FPS
       </div>
+    </div>
+  </div>
+  <div id="rewindBar" class="bar-wrap" hidden>
+    <div class="bar">
+      <input id="rewind" type="range">
+      <span id="rewindTime"></span>
     </div>
   </div>
   <script src="binjgb.js"></script>
