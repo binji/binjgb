@@ -407,6 +407,7 @@ Cycles rewind_get_newest_cycles(RewindBuffer* buffer) {
 
 RewindStats rewind_get_stats(RewindBuffer* buffer) {
   RewindStats stats;
+  ZERO_MEMORY(stats);
   stats.base_bytes = buffer->total_kind_bytes[RewindInfoKind_Base];
   stats.diff_bytes = buffer->total_kind_bytes[RewindInfoKind_Diff];
   stats.uncompressed_bytes = buffer->total_uncompressed_bytes;

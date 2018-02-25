@@ -166,6 +166,7 @@ JoypadButtons joypad_unpack_buttons(u8 packed) {
 
 JoypadStats joypad_get_stats(JoypadBuffer* buffer) {
   JoypadStats stats;
+  ZERO_MEMORY(stats);
   JoypadChunk* sentinel = &buffer->sentinel;
   JoypadChunk* cur = sentinel->next;
   while (cur != sentinel) {
