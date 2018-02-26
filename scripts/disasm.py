@@ -7,6 +7,7 @@
 #
 from __future__ import print_function
 import argparse
+import json
 import os
 import struct
 import sys
@@ -135,6 +136,66 @@ for op in [0x18, 0x20, 0x28, 0x30, 0x38]: ADDR_OPCODES[op] = 'jr'
 for op in [0xc2, 0xc3, 0xca, 0xd2, 0xda]: ADDR_OPCODES[op] = 'jp'
 for op in [0xc4, 0xcc, 0xcd, 0xd4, 0xdc]: ADDR_OPCODES[op] = 'call'
 
+KNOWN_ADDRS = {
+  0xff00: 'JOYP',
+  0xff01: 'SB',
+  0xff02: 'SC',
+  0xff04: 'DIV',
+  0xff05: 'TIMA',
+  0xff06: 'TMA',
+  0xff07: 'TAC',
+  0xff0f: 'IF',
+  0xff10: 'NR10',
+  0xff11: 'NR11',
+  0xff12: 'NR12',
+  0xff13: 'NR13',
+  0xff14: 'NR14',
+  0xff16: 'NR21',
+  0xff17: 'NR22',
+  0xff18: 'NR23',
+  0xff19: 'NR24',
+  0xff1a: 'NR30',
+  0xff1b: 'NR31',
+  0xff1c: 'NR32',
+  0xff1d: 'NR33',
+  0xff1e: 'NR34',
+  0xff20: 'NR41',
+  0xff21: 'NR42',
+  0xff22: 'NR43',
+  0xff23: 'NR44',
+  0xff24: 'NR50',
+  0xff25: 'NR51',
+  0xff26: 'NR52',
+  0xff40: 'LCDC',
+  0xff41: 'STAT',
+  0xff42: 'SCY',
+  0xff43: 'SCX',
+  0xff44: 'LY',
+  0xff45: 'LYC',
+  0xff46: 'DMA',
+  0xff47: 'BGP',
+  0xff48: 'OBP0',
+  0xff49: 'OBP1',
+  0xff4a: 'WY',
+  0xff4b: 'WX',
+  0xffff: 'IE',
+}
+
+
+def AddrFromLoc( loc):
+  bank = loc >> 14
+  addr = (loc & 0x3fff) + (0 if bank == 0 else 0x4000)
+  return bank, addr
+
+
+def BankFromAddr(addr, src_bank):
+  if addr < 0x4000:
+    return 0
+  elif src_bank > 0 and 0x4000 <= addr < 0x8000:
+    return src_bank
+  else:
+    return -1
+
 
 class ROM(object):
   def __init__(self, data, usage):
@@ -142,62 +203,91 @@ class ROM(object):
     self.usage = usage
     assert len(usage) == len(data)
     self.targets = self.FindBranchTargets()
+    for addr, name in KNOWN_ADDRS.items():
+      self.targets[addr] = {-1: name}
 
-  def ReadU8(self, addr):
-    return self.data[addr]
+  def ReadU8(self, loc):
+    return self.data[loc]
 
-  def ReadS8(self, addr):
-    x = self.data[addr]
+  def ReadS8(self, loc):
+    x = self.data[loc]
     if x >= 128: x = x - 256
     return x
 
-  def ReadU16(self, addr):
-    return (self.data[addr+1] << 8) | self.data[addr]
+  def ReadU16(self, loc):
+    return (self.data[loc+1] << 8) | self.data[loc]
 
-  def ReadOpcode(self, addr):
-    opcode = self.ReadU8(addr)
+  def ReadOpcode(self, loc):
+    opcode = self.ReadU8(loc)
     oplen = OPCODE_BYTES[opcode]
     return opcode, oplen
 
-  def GetBranchTarget(self, addr):
-    opcode, oplen = self.ReadOpcode(addr)
+  def GetBranchTarget(self, loc):
+    bank, addr = AddrFromLoc(loc)
+    opcode, oplen = self.ReadOpcode(loc)
     kind = CONTROL_OPCODES.get(opcode)
     if not kind:
-      return None
+      return None, None
 
     if kind == 'jr':
-      return addr + oplen + self.ReadS8(addr + 1)
-    elif kind == 'jp':
-      return self.ReadU16(addr + 1)
-    elif kind == 'call':
-      return self.ReadU16(addr + 1)
-    elif kind == 'rst':
-      return opcode - 0xc7
+      target_addr = addr + oplen + self.ReadS8(loc + 1)
+    elif kind in ('jp', 'call'):
+      target_addr = self.ReadU16(loc + 1)
+    else:
+      assert kind == 'rst'
+      target_addr = opcode - 0xc7
+
+    return BankFromAddr(target_addr, bank), target_addr
+
 
   def FindBranchTargets(self):
-    addr = 0
+    loc = 0
     targets = {}
-    for i in range(1<<16):
-      if not (self.usage[addr] & 1):
-        addr += 1
+    while loc < len(self.data):
+      if not (self.usage[loc] & 1):
+        loc += 1
         continue
 
-      _, oplen = self.ReadOpcode(addr)
-      target_addr = self.GetBranchTarget(addr)
+      _, oplen = self.ReadOpcode(loc)
+      target_bank, target_addr = self.GetBranchTarget(loc)
       if target_addr:
-        targets[target_addr] = '_%04x' % target_addr
-      addr += oplen
+        if target_addr not in targets:
+          targets[target_addr] = {}
+
+        if target_bank != -1:
+          targets[target_addr][target_bank] = (
+              'B%02x_%04x' % (target_bank, target_addr))
+        else:
+          targets[target_addr][-1] = 'Bxx_%04x' % target_addr
+
+      loc += oplen
 
     return targets
 
-  def Disassemble(self, addr):
-    opcode, oplen = self.ReadOpcode(addr)
+  def GetAddrSymbol(self, bank, addr):
+    if bank is not None:
+      target = self.targets.get(addr)
+      if target:
+        if bank in target:
+          return target[bank]
+        elif -1 in target:
+          return target[-1]
+    return None
+
+  def GetAddrText(self, bank, addr):
+    symbol = self.GetAddrSymbol(bank, addr)
+    if symbol is not None:
+      return symbol
+    return '$%04x' % addr
+
+  def Disassemble(self, loc):
+    opcode, oplen = self.ReadOpcode(loc)
     if oplen == 0:
-      s = '.db %u' % opcode
+      s = '.db $%02x' % opcode
     elif oplen == 1:
       s = OPCODE_MNEMONIC[opcode]
     elif oplen == 2:
-      byte = self.ReadU8(addr + 1)
+      byte = self.ReadU8(loc + 1)
       if opcode == 0xcb:
         s = CB_OPCODE_MNEMONIC[byte]
       else:
@@ -205,20 +295,22 @@ class ROM(object):
         kind = ADDR_OPCODES.get(opcode)
         if kind:
           if kind in 'jr':
-            target_addr = self.GetBranchTarget(addr)
+            target_bank, target_addr = self.GetBranchTarget(loc)
           else:
             assert(kind == 'ff')
             target_addr = 0xff00 + byte
-          name = self.targets.get(target_addr, '$%04x' % target_addr)
+            target_bank = -1
+          name = self.GetAddrText(target_bank, target_addr)
           s = fmt % name
         else:
           s = fmt % byte
     elif oplen == 3:
       fmt = OPCODE_MNEMONIC[opcode]
-      word = self.ReadU16(addr + 1)
+      word = self.ReadU16(loc + 1)
       kind = ADDR_OPCODES.get(opcode)
       if kind:
-        name = self.targets.get(word, '$%04x' % word)
+        bank, _ = AddrFromLoc(loc)
+        name = self.GetAddrText(BankFromAddr(word, bank), word)
         s = fmt % name
       else:
         s = fmt % word
@@ -226,18 +318,21 @@ class ROM(object):
     return s, oplen
 
   def DisassembleBank(self, bank):
-    addr = bank << 14
-    for i in range(1<<16):
-      if addr in self.targets:
-        print('_%04x:' % addr)
+    loc = bank << 14
+    next_bank_loc = (bank + 1) << 14
+    while loc < next_bank_loc:
+      _, addr = AddrFromLoc(loc)
+      symbol = self.GetAddrSymbol(bank, addr)
+      if symbol:
+        print('%s:' % symbol)
 
-      if self.usage[addr] & 1:
-        s, oplen = self.Disassemble(addr)
-        addr += oplen
+      if self.usage[loc] & 1:
+        s, oplen = self.Disassemble(loc)
+        loc += oplen
         print('  %s' % s)
       else:
-        print('  .db $%02x' % self.ReadU8(addr))
-        addr += 1
+        print('  .db $%02x' % self.ReadU8(loc))
+        loc += 1
 
 
 def main(args):
@@ -256,7 +351,7 @@ def main(args):
     rom_usage = '\x00' * len(rom_data)
 
   rom = ROM(rom_data, rom_usage)
-  rom.DisassembleBank(0)
+  rom.DisassembleBank(12)
 
 
 if __name__ == '__main__':
