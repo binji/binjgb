@@ -1526,7 +1526,7 @@ static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
   return DMA.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
 }
 
-static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair) {
+static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair, Bool raw) {
   switch (pair.type) {
     /* Take advantage of the fact that MEMORY_MAP_ROM9 is 0, and ROM1 is 1 when
      * indexing into rom_base. */
@@ -1535,7 +1535,9 @@ static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair) {
       u32 rom_addr = MMAP_STATE.rom_base[pair.type] | pair.addr;
       assert(rom_addr < e->cart_info->size);
       u8 value = e->cart_info->data[rom_addr];
-      HOOK(read_rom_ib, rom_addr, value);
+      if (!raw) {
+        HOOK(read_rom_ib, rom_addr, value);
+      }
       return value;
     }
     case MEMORY_MAP_VRAM:
@@ -1568,7 +1570,7 @@ static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair) {
 
 static u8 read_u8_raw(Emulator* e, Address addr) {
   MemoryTypeAddressPair pair = map_address(addr);
-  return read_u8_pair(e, pair);
+  return read_u8_pair(e, pair, TRUE);
 }
 
 static u8 read_u8(Emulator* e, Address addr) {
@@ -1578,7 +1580,7 @@ static u8 read_u8(Emulator* e, Address addr) {
     return INVALID_READ_BYTE;
   }
 
-  return read_u8_pair(e, pair);
+  return read_u8_pair(e, pair, FALSE);
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
@@ -2819,7 +2821,7 @@ static void dma_mcycle(Emulator* e) {
   assert(addr_offset < OAM_TRANSFER_SIZE);
   MemoryTypeAddressPair pair = DMA.source;
   pair.addr += addr_offset;
-  u8 value = read_u8_pair(e, pair);
+  u8 value = read_u8_pair(e, pair, FALSE);
   write_oam_no_mode_check(e, addr_offset, value);
   DMA.cycles += CPU_MCYCLE;
   if (VALUE_WRAPPED(DMA.cycles, DMA_CYCLES)) {
