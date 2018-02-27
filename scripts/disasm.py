@@ -280,7 +280,8 @@ class ROM(object):
     usage = self.usage[loc:loc + oplen]
     return (oplen == 0 or
             usage[0] == 2 or
-            (usage[0] == 0 and any(u != 0 for u in usage[1:])))
+            (usage[0] == 0 and any(u != 0 for u in usage[1:])) or
+            0x104 <= loc < 0x150)
 
   def FindBranchTargets(self):
     loc = 0
