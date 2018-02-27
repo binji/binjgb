@@ -7,8 +7,8 @@
 #
 from __future__ import print_function
 import argparse
-import json
 import os
+import re
 import struct
 import sys
 
@@ -35,9 +35,9 @@ OPCODE_BYTES = [
 ]
 
 OPCODE_MNEMONIC = [
-    "nop", "ld bc,%u", "ld (bc),a", "inc bc", "inc b", "dec b", "ld b,%u",
+    "nop", "ld bc,%s", "ld (bc),a", "inc bc", "inc b", "dec b", "ld b,%u",
     "rlca", "ld (%s),sp", "add hl,bc", "ld a,(bc)", "dec bc", "inc c",
-    "dec c", "ld c,%u", "rrca", "stop", "ld de,%u", "ld (de),a", "inc de",
+    "dec c", "ld c,%u", "rrca", "stop", "ld de,%s", "ld (de),a", "inc de",
     "inc d", "dec d", "ld d,%u", "rla", "jr %s", "add hl,de", "ld a,(de)",
     "dec de", "inc e", "dec e", "ld e,%u", "rra", "jr nz,%s", "ld hl,%s",
     "ldi (hl),a", "inc hl", "inc h", "dec h", "ld h,%u", "daa", "jr z,%s",
@@ -130,13 +130,18 @@ for op in [0xc7, 0xcf, 0xd7, 0xdf, 0xe7, 0xef, 0xf7, 0xff]:
 
 
 ADDR_OPCODES = {}
-for op in [0x08, 0x21, 0x31, 0xea, 0xfa]: ADDR_OPCODES[op] = '4'
+for op in [0x01, 0x08, 0x11, 0x21, 0x31, 0xea, 0xfa]: ADDR_OPCODES[op] = '4'
 for op in [0xe0, 0xf0]: ADDR_OPCODES[op] = 'ff'
 for op in [0x18, 0x20, 0x28, 0x30, 0x38]: ADDR_OPCODES[op] = 'jr'
 for op in [0xc2, 0xc3, 0xca, 0xd2, 0xda]: ADDR_OPCODES[op] = 'jp'
 for op in [0xc4, 0xcc, 0xcd, 0xd4, 0xdc]: ADDR_OPCODES[op] = 'call'
 
 KNOWN_ADDRS = {
+  0x8000: 'VRAM',
+  0x9800: 'TILEMAP0',
+  0x9c00: 'TILEMAP1',
+  0xc000: 'WRAM',
+  0xfe00: 'OAM',
   0xff00: 'JOYP',
   0xff01: 'SB',
   0xff02: 'SC',
@@ -166,6 +171,7 @@ KNOWN_ADDRS = {
   0xff24: 'NR50',
   0xff25: 'NR51',
   0xff26: 'NR52',
+  0xff30: 'WAVERAM',
   0xff40: 'LCDC',
   0xff41: 'STAT',
   0xff42: 'SCY',
@@ -178,8 +184,23 @@ KNOWN_ADDRS = {
   0xff49: 'OBP1',
   0xff4a: 'WY',
   0xff4b: 'WX',
+  0xff80: 'HRAM',
   0xffff: 'IE',
 }
+
+
+def ReadSymbols(file):
+  symbols = {}
+  for line in file.readlines():
+    m = re.match(r'^([\da-fA-F]{2}):([\da-fA-F]{4})\s+(.*)$', line)
+    if m:
+      bank, addr, name = m.groups()
+      bank = int(bank, 16)
+      addr = int(addr, 16)
+      if addr not in symbols:
+        symbols[addr] = {}
+      symbols[addr][bank] = name
+  return symbols
 
 
 def AddrFromLoc( loc):
@@ -198,13 +219,19 @@ def BankFromAddr(addr, src_bank):
 
 
 class ROM(object):
-  def __init__(self, data, usage):
+  def __init__(self, data, usage, symbols):
     self.data = data
     self.usage = usage
     assert len(usage) == len(data)
     self.targets = self.FindBranchTargets()
     for addr, name in KNOWN_ADDRS.items():
       self.targets[addr] = {-1: name}
+
+    if symbols:
+      for addr in symbols.keys():
+        if addr not in self.targets:
+          self.targets[addr] = {}
+        self.targets[addr].update(symbols[addr])
 
   def ReadU8(self, loc):
     return self.data[loc]
@@ -256,7 +283,7 @@ class ROM(object):
 
         if target_bank != -1:
           targets[target_addr][target_bank] = (
-              'B%02x_%04x' % (target_bank, target_addr))
+              'B%02u_%04x' % (target_bank, target_addr))
         else:
           targets[target_addr][-1] = 'Bxx_%04x' % target_addr
 
@@ -338,6 +365,7 @@ class ROM(object):
 def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('-u', '--usage', metavar='FILE', help='usage file')
+  parser.add_argument('-s', '--sym', metavar='FILE', help='sym file')
   parser.add_argument('rom', help='rom file')
   options = parser.parse_args(args)
 
@@ -350,8 +378,17 @@ def main(args):
   else:
     rom_usage = '\x00' * len(rom_data)
 
-  rom = ROM(rom_data, rom_usage)
-  rom.DisassembleBank(12)
+  if options.sym:
+    with open(options.sym, 'r') as file:
+      symbols = ReadSymbols(file)
+  else:
+    symbols = None
+
+  rom = ROM(rom_data, rom_usage, symbols)
+  banks = len(rom_data) >> 14
+  for bank in range(banks):
+    print('; Bank %d' % bank)
+    rom.DisassembleBank(bank)
 
 
 if __name__ == '__main__':
