@@ -12,7 +12,7 @@ import re
 import struct
 import sys
 
-import common
+from common import Error
 
 
 OPCODE_BYTES = [
@@ -137,6 +137,8 @@ for op in [0x18, 0x20, 0x28, 0x30, 0x38]: ADDR_OPCODES[op] = 'jr'
 for op in [0xc2, 0xc3, 0xca, 0xd2, 0xda]: ADDR_OPCODES[op] = 'jp'
 for op in [0xc4, 0xcc, 0xcd, 0xd4, 0xdc]: ADDR_OPCODES[op] = 'call'
 
+TERMINATOR_OPCODES = set([0x18, 0xc3, 0xc9, 0xd9, 0xe9])
+
 KNOWN_ADDRS = {
   0x8000: 'VRAM',
   0x9800: 'TILEMAP0',
@@ -190,6 +192,30 @@ KNOWN_ADDRS = {
 }
 
 
+def ReadUsage(file, length):
+  HEX = r'[\da-fA-F]'
+  LOC = r'(%s{2}):(%s{4})' % (HEX, HEX)
+  RE = r'^%s\.\.%s:\s+(.*)$' % (LOC, LOC)
+  KINDS = {'Unknown': 0, 'Data': 2, 'Code': 3, 'Addr': 4}
+  usage = bytearray(length)
+  for i, line in enumerate(file.readlines()):
+    m = re.match(RE, line)
+    if m:
+      bank0, addr0, bank1, addr1, kind = m.groups()
+      loc0 = LocFromBankAddr(int(bank0, 16), int(addr0, 16))
+      loc1 = LocFromBankAddr(int(bank1, 16), int(addr1, 16))
+      if loc0 > loc1:
+        raise Error('Invalid range %s:%s..%s:%s' % (bank0, addr0, bank1, addr1))
+      if kind not in KINDS:
+        raise Error('Invalid kind: %s' % kind)
+      kind = KINDS[kind]
+      for l in range(loc0, loc1 + 1):
+        usage[l] = kind
+    else:
+      raise Error('Invalid line: %s' % line)
+  return usage
+
+
 def ReadSymbols(file):
   symbols = {}
   for line in file.readlines():
@@ -208,7 +234,14 @@ def ReadSymbols(file):
   return symbols
 
 
-def AddrFromLoc( loc):
+def LocFromBankAddr(bank, addr):
+  if bank == 0:
+    return addr
+  else:
+    return (bank << 14) + (addr - 0x4000)
+
+
+def AddrFromLoc(loc):
   bank = loc >> 14
   addr = (loc & 0x3fff) + (0 if bank == 0 else 0x4000)
   return bank, addr
@@ -271,9 +304,13 @@ class ROM(object):
 
     return BankFromAddr(target_addr, bank), target_addr
 
+  def GetPointerTarget(self, loc):
+    bank, _ = AddrFromLoc(loc)
+    target_addr = self.ReadU16(loc)
+    return BankFromAddr(target_addr, bank), target_addr
 
   def IsCode(self, loc):
-    return not self.IsData(loc)
+    return not (self.IsData(loc) or self.IsAddr(loc))
 
   def IsData(self, loc):
     _, oplen = self.ReadOpcode(loc)
@@ -283,16 +320,24 @@ class ROM(object):
             (usage[0] == 0 and any(u != 0 for u in usage[1:])) or
             0x104 <= loc < 0x150)
 
+  def IsAddr(self, loc):
+    return self.usage[loc] == 4 and self.usage[loc+1] == 4
+
   def FindBranchTargets(self):
     loc = 0
     targets = {}
     while loc < len(self.data):
-      if not self.IsCode(loc):
+      if self.IsCode(loc):
+        _, oplen = self.ReadOpcode(loc)
+        target_bank, target_addr = self.GetBranchTarget(loc)
+        loc += oplen
+      elif self.IsAddr(loc):
+        target_bank, target_addr = self.GetPointerTarget(loc)
+        loc += 2
+      else:
         loc += 1
         continue
 
-      _, oplen = self.ReadOpcode(loc)
-      target_bank, target_addr = self.GetBranchTarget(loc)
       if target_addr:
         if target_addr not in targets:
           targets[target_addr] = {}
@@ -302,8 +347,6 @@ class ROM(object):
               'B%02u_%04x' % (target_bank, target_addr))
         else:
           targets[target_addr][-1] = 'Bxx_%04x' % target_addr
-
-      loc += oplen
 
     return targets
 
@@ -358,9 +401,9 @@ class ROM(object):
       else:
         s = fmt % word
 
-    return s, oplen
+    return s, opcode, oplen
 
-  def DisassembleBank(self, bank):
+  def DisassembleBank(self, file, bank):
     loc = bank << 14
     next_bank_loc = (bank + 1) << 14
 
@@ -368,32 +411,50 @@ class ROM(object):
     def FlushPendingData():
       nonlocal pending_data
       while pending_data:
-        row = pending_data[:8]
-        pending_data = pending_data[8:]
-        print('  db %s' % ', '.join('$%02x' % x for x in row))
+        row = pending_data[:16]
+        pending_data = pending_data[16:]
+        file.write('  db %s\n' % ', '.join('$%02x' % x for x in row))
+
+    was_terminator = False
 
     while loc < next_bank_loc:
       _, addr = AddrFromLoc(loc)
       symbol = self.GetAddrSymbol(bank, addr)
       if symbol:
         FlushPendingData()
-        print('%s:' % symbol)
+        file.write('%s:\n' % symbol)
+      elif was_terminator:
+        FlushPendingData()
+        file.write('; ?? %02x:%04x:\n' % (bank, addr))
 
-      if self.IsData(loc):
+      was_terminator = False
+
+      if self.IsAddr(loc):
+        FlushPendingData()
+        file.write('  dw %s\n' % self.GetAddrText(*self.GetPointerTarget(loc)))
+        loc += 2
+      elif self.IsData(loc):
         pending_data.append(self.ReadU8(loc))
         loc += 1
       else:
         FlushPendingData()
         maybe_code = self.usage[loc] != 3
-        s, oplen = self.Disassemble(loc)
+        s, opcode, oplen = self.Disassemble(loc)
         if oplen == 0: oplen += 1
         op_bytes = self.data[loc:loc+oplen]
 
         if maybe_code:
-          print('  %s%s; db %s' % (
-            s, ' ' * (36 - len(s)), ', '.join('$%02x' % x for x in op_bytes)))
+          file.write('  %s%s; %02x:%04x: db %s\n' % (
+            s, ' ' * (36 - len(s)),
+            bank, addr,
+            ', '.join('$%02x' % x for x in op_bytes)))
         else:
-          print('  %s' % s)
+          file.write('  %s\n' % s)
+
+        if opcode in TERMINATOR_OPCODES:
+          was_terminator = True
+          file.write('\n')
+
         loc += oplen
 
     FlushPendingData()
@@ -403,6 +464,7 @@ def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('-u', '--usage', metavar='FILE', help='usage file')
   parser.add_argument('-s', '--sym', metavar='FILE', help='sym file')
+  parser.add_argument('-o', '--output', metavar='FILE', help='output file')
   parser.add_argument('rom', help='rom file')
   options = parser.parse_args(args)
 
@@ -410,8 +472,8 @@ def main(args):
     rom_data = bytearray(file.read())
 
   if options.usage:
-    with open(options.usage, 'rb') as file:
-      rom_usage = bytearray(file.read())
+    with open(options.usage, 'r') as file:
+      rom_usage = ReadUsage(file, len(rom_data))
   else:
     rom_usage = '\x00' * len(rom_data)
 
@@ -421,11 +483,20 @@ def main(args):
   else:
     symbols = None
 
+  if options.output:
+    outfile = open(options.output, 'w')
+  else:
+    outfile = sys.stdout
+
   rom = ROM(rom_data, rom_usage, symbols)
   banks = len(rom_data) >> 14
-  for bank in range(banks):
-    print('; Bank %d' % bank)
-    rom.DisassembleBank(bank)
+  for i, bank in enumerate(range(banks)):
+    if i != 0:
+      outfile.write('\n')
+    outfile.write(';;; BANK %d ;;;\n' % bank)
+    rom.DisassembleBank(outfile, bank)
+
+  outfile.close()
 
 
 if __name__ == '__main__':
