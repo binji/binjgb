@@ -157,19 +157,19 @@ UNCOMMON_OPCODES = set([
 ])
 
 KNOWN_ADDRS = {
-  0x8000: 'VRAM',
-  0x9800: 'TILEMAP0',
-  0x9c00: 'TILEMAP1',
-  0xc000: 'WRAM',
-  0xfe00: 'OAM',
-  0xff00: 'JOYP',
-  0xff01: 'SB',
-  0xff02: 'SC',
-  0xff04: 'DIV',
-  0xff05: 'TIMA',
-  0xff06: 'TMA',
-  0xff07: 'TAC',
-  0xff0f: 'IF',
+  0x8000: '_VRAM',
+  0x9800: '_SCRN0',
+  0x9c00: '_SCRN1',
+  0xc000: '_RAM',
+  0xfe00: '_OAMRAM',
+  0xff00: 'rP1',
+  0xff01: 'rSB',
+  0xff02: 'rSC',
+  0xff04: 'rDIV',
+  0xff05: 'rTIMA',
+  0xff06: 'rTMA',
+  0xff07: 'rTAC',
+  0xff0f: 'rIF',
   0xff10: 'NR10',
   0xff11: 'NR11',
   0xff12: 'NR12',
@@ -191,21 +191,21 @@ KNOWN_ADDRS = {
   0xff24: 'NR50',
   0xff25: 'NR51',
   0xff26: 'NR52',
-  0xff30: 'WAVERAM',
-  0xff40: 'LCDC',
-  0xff41: 'STAT',
-  0xff42: 'SCY',
-  0xff43: 'SCX',
-  0xff44: 'LY',
-  0xff45: 'LYC',
-  0xff46: 'DMA',
-  0xff47: 'BGP',
-  0xff48: 'OBP0',
-  0xff49: 'OBP1',
-  0xff4a: 'WY',
-  0xff4b: 'WX',
-  0xff80: 'HRAM',
-  0xffff: 'IE',
+  0xff30: '_AUD3WAVERAM',
+  0xff40: 'rLCDC',
+  0xff41: 'rSTAT',
+  0xff42: 'rSCY',
+  0xff43: 'rSCX',
+  0xff44: 'rLY',
+  0xff45: 'rLYC',
+  0xff46: 'rDMA',
+  0xff47: 'rBGP',
+  0xff48: 'rOBP0',
+  0xff49: 'rOBP1',
+  0xff4a: 'rWY',
+  0xff4b: 'rWX',
+  0xff80: '_HRAM',
+  0xffff: 'rIE',
 }
 
 
@@ -511,10 +511,16 @@ def main(args):
 
   rom = ROM(rom_data, rom_usage, symbols)
   banks = len(rom_data) >> 14
-  for i, bank in enumerate(range(banks)):
-    if i != 0:
+  for bank in range(banks):
+    if bank != 0:
       outfile.write('\n')
-    outfile.write(';;; BANK %d ;;;\n' % bank)
+    outfile.write('SECTION "Bank%d", ' % bank)
+    if bank == 0:
+      outfile.write('ROM0[$0000]')
+    else:
+      outfile.write('ROMX[$4000], BANK[%d]' % bank)
+    outfile.write('\n\n')
+
     rom.DisassembleBank(outfile, bank)
 
   outfile.close()
