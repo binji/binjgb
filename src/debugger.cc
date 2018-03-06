@@ -1308,12 +1308,10 @@ void Debugger::RewindWindow() {
 void Debugger::ROMWindow() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("ROM", &rom_window_open)) {
-    static int scale = 3;
-    const ImVec2 texture_size(rom_texture_width, rom_texture_height);
-    const ImVec2 scaled_texture_size = texture_size * scale;
+    static int scale = 1;
 
     PaletteRGBA palette = {
-        {0xff000000u, 0xff00ff00u, 0xffff0000u, 0xffff00ffu}};
+        {0xff202020u, 0xff00ff00u, 0xffff0000u, 0xffff00ffu}};
 
     size_t rom_size = emulator_get_rom_size(e);
     u8* rom_usage = emulator_get_rom_usage(e);
@@ -1347,26 +1345,76 @@ void Debugger::ROMWindow() {
                 (f64)usage_bytes[3] * 100 / rom_size);
 
     ImGui::Separator();
-    ImGui::BeginChild("Data", ImVec2(0, 0), false,
-                      ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImVec2 avail_size = ImGui::GetContentRegionAvail();
+    s32 avail_x = (s32)(avail_size.x - ImGui::GetStyle().ScrollbarSize);
+    avail_x -= avail_x % scale;
+    ImVec2 child_size(avail_x, rom_texture_width * scale * rom_texture_height *
+                                       scale / avail_x +
+                                   scale);
+
+    ImGui::BeginChild("Data");
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 cursor = ImGui::GetCursorScreenPos();
 
-    ImVec2 ul_pos = cursor;
-    ImVec2 br_pos = ul_pos + scaled_texture_size;
-    ImVec2 ul_uv(0, 0);
-    ImVec2 br_uv((f32)rom_texture_width / rom_texture->width,
-                 (f32)rom_texture_height / rom_texture->height);
-
-    draw_list->PushClipRect(ul_pos, br_pos, true);
-
     SetPaletteAndEnable(host, draw_list, palette);
-    draw_list->AddImage((ImTextureID)rom_texture->handle, ul_pos, br_pos, ul_uv,
-                        br_uv);
+    ImTextureID texture_id = (ImTextureID)rom_texture->handle;
+    draw_list->PushTextureID(texture_id);
+    draw_list->PushClipRect(cursor, cursor + child_size, true);
+
+    f32 scroll_y = ImGui::GetScrollY();
+    f32 inv_scale = 1.f / scale;
+    s32 min_y = (s32)(scroll_y * inv_scale);
+    s32 max_y = (s32)(
+        std::min((scroll_y + avail_size.y + scale), child_size.y) * inv_scale);
+    s32 unscaled_w = avail_x / scale;
+
+    s32 x = 0;
+    s32 y = min_y;
+    s32 tx = (y * unscaled_w + x) % rom_texture_width;
+    s32 ty = (y * unscaled_w + x) / rom_texture_width;
+
+    ImVec2 inv_tex_size(1.f / rom_texture_width, 1.f / rom_texture_height);
+
+    while (y < max_y && ty < rom_texture_height) {
+      ImVec2 ul_pos = cursor + ImVec2(x, y) * scale;
+      ImVec2 ul_uv = ImVec2(tx, ty) * inv_tex_size;
+
+      s32 strip_w = std::min(unscaled_w - x, rom_texture_width - tx);
+
+      ImVec2 br_pos = cursor + ImVec2(x + strip_w, y + 1) * scale;
+      ImVec2 br_uv = ImVec2(tx + strip_w, ty + 1) * inv_tex_size;
+
+      x += strip_w;
+      if (x >= unscaled_w) {
+        x -= unscaled_w;
+        y += 1;
+      }
+
+      tx += strip_w;
+      if (tx >= rom_texture_width) {
+        tx -= rom_texture_width;
+        ty += 1;
+      }
+
+      draw_list->AddImage(texture_id, ul_pos, br_pos, ul_uv, br_uv);
+    }
+
+    draw_list->PopTextureID();
     DisablePalette(host, draw_list);
 
     ImGui::PopClipRect();
-    ImGui::Dummy(scaled_texture_size);
+    ImGui::Dummy(child_size);
+    if (ImGui::IsItemHovered()) {
+      ImVec2 mouse_pos = (ImGui::GetMousePos() - cursor) * inv_scale;
+      s32 rom_loc = (s32)mouse_pos.y * unscaled_w + (s32)mouse_pos.x;
+
+      if (rom_loc < rom_texture_width * rom_texture_height) {
+        u32 bank = rom_loc >> 14;
+        u32 addr = (rom_loc & 0x3fff) + (bank == 0 ? 0 : 0x4000);
+        ImGui::SetTooltip("%02x:%04x", bank, addr);
+      }
+    }
     ImGui::EndChild();
   }
   ImGui::EndDock();
