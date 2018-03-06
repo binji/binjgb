@@ -53,7 +53,8 @@ typedef struct {
 
 typedef struct {
   RewindResult rewind_result;
-  JoypadStateIter joypad_iter;
+  JoypadStateIter current;
+  JoypadStateIter next;
   Bool rewinding;
 } RewindState;
 
@@ -293,22 +294,17 @@ static void host_run_until_cycles(struct Host* host, Cycles cycles) {
   }
 }
 
-typedef struct {
-  struct Emulator* e;
-  JoypadStateIter current;
-  JoypadStateIter next;
-} HostRewindJoypadCallbackInfo;
-
 static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
                                         void* user_data) {
-  HostRewindJoypadCallbackInfo* info = user_data;
-  Cycles cycles = emulator_get_cycles(info->e);
-  while (info->next.state && info->next.state->cycles <= cycles) {
-    info->current = info->next;
-    info->next = joypad_get_next_state(info->next);
+  Host* host = user_data;
+  RewindState* state = &host->rewind_state;
+  Cycles cycles = emulator_get_cycles(host_get_emulator(host));
+  while (state->next.state && state->next.state->cycles <= cycles) {
+    state->current = state->next;
+    state->next = joypad_get_next_state(state->next);
   }
 
-  *joyp = joypad_unpack_buttons(info->current.state->buttons);
+  *joyp = joypad_unpack_buttons(state->current.state->buttons);
 }
 
 void host_begin_rewind(Host* host) {
@@ -326,27 +322,18 @@ Result host_rewind_to_cycles(Host* host, Cycles cycles) {
   CHECK(SUCCESS(emulator_read_state(e, &result.file_data)));
   assert(emulator_get_cycles(e) == result.info->cycles);
 
-  JoypadStateIter iter =
+  host->rewind_state.current =
       joypad_find_state(host->joypad_buffer, emulator_get_cycles(e));
+  host->rewind_state.next = joypad_get_next_state(host->rewind_state.current);
 
   if (emulator_get_cycles(e) < cycles) {
-    HostRewindJoypadCallbackInfo hsjci;
-    hsjci.e = e;
-    hsjci.current = iter;
-    hsjci.next = joypad_get_next_state(iter);
-
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
-    emulator_set_joypad_callback(e, host_rewind_joypad_callback, &hsjci);
+    emulator_set_joypad_callback(e, host_rewind_joypad_callback, host);
     host_run_until_cycles(host, cycles);
     /* Restore old joypad callback. */
     emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
-    iter = hsjci.current;
   }
-
-  /* Save state for host_end_rewind. */
-  host->rewind_state.rewind_result = result;
-  host->rewind_state.joypad_iter = iter;
 
   return OK;
   ON_ERROR_RETURN;
@@ -357,7 +344,7 @@ void host_end_rewind(Host* host) {
 
   if (host->rewind_state.rewind_result.info) {
     rewind_truncate_to(host->rewind_buffer, &host->rewind_state.rewind_result);
-    joypad_truncate_to(host->joypad_buffer, host->rewind_state.joypad_iter);
+    joypad_truncate_to(host->joypad_buffer, host->rewind_state.current);
     host->last_cycles = emulator_get_cycles(host_get_emulator(host));
   }
 
