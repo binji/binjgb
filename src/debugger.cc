@@ -397,6 +397,8 @@ class Debugger {
   bool memory_window_open = true;
   bool rewind_window_open = true;
   bool rom_window_open = true;
+
+  FileData reverse_step_save_state;
 };
 
 Debugger::Debugger() {
@@ -405,6 +407,7 @@ Debugger::Debugger() {
 }
 
 Debugger::~Debugger() {
+  file_data_delete(&reverse_step_save_state);
   emulator_delete(e);
   host_delete(host);
 }
@@ -479,6 +482,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   memory_editor.WriteFn = [](u8*, size_t offset, u8 value, void* user_data) {
     static_cast<Debugger*>(user_data)->MemoryEditorWrite(offset, value);
   };
+
+  emulator_init_state_file_data(&reverse_step_save_state);
 
   return true;
 }
@@ -1208,8 +1213,9 @@ void Debugger::RewindWindow() {
     }
 
     if (rewinding) {
+      Cycles cur_cy = emulator_get_cycles(e);
       Cycles oldest_cy = host_get_rewind_oldest_cycles(host);
-      Cycles rel_cur_cy = emulator_get_cycles(e) - oldest_cy;
+      Cycles rel_cur_cy = cur_cy - oldest_cy;
       u32 range_fr = (host_newest_cycles(host) - oldest_cy) / PPU_FRAME_CYCLES;
 
       // Frames.
@@ -1227,11 +1233,12 @@ void Debugger::RewindWindow() {
 
       // Cycles.
       int offset_cy = rel_cur_cy % PPU_FRAME_CYCLES;
+      bool reverse_step = false;
 
       ImGui::PushButtonRepeat(true);
-      if (ImGui::Button("-10")) { offset_cy -= 10; }
+      if (ImGui::Button("-I")) { offset_cy -= 28; reverse_step = true; }
       ImGui::SameLine();
-      if (ImGui::Button("+10")) { offset_cy += 10; }
+      if (ImGui::Button("+I")) { offset_cy += 1; }
       ImGui::PopButtonRepeat();
       ImGui::SameLine();
       ImGui::SliderInt("Cycle Offset", &offset_cy, 0, PPU_FRAME_CYCLES - 1);
@@ -1240,6 +1247,25 @@ void Debugger::RewindWindow() {
 
       if (rel_cur_cy != rel_seek_cy) {
         RewindTo(oldest_cy + rel_seek_cy);
+
+        // Reverse stepping is tricky because we don't know how long the
+        // previous instruction took. We can rewind by 28 cycles (longer than
+        // any instruction or interrupt dispatch) and step forward until just
+        // before the current cycle. But since we don't know how long a step
+        // will take, it's easier to just save state, step forward one
+        // instruction too far, then load state and step just before it.
+        if (reverse_step) {
+          emulator_write_state(e, &reverse_step_save_state);
+          int count = 0;
+          for (; emulator_get_cycles(e) < cur_cy; ++count) {
+            emulator_step(e);
+          }
+
+          emulator_read_state(e, &reverse_step_save_state);
+          for (int i = 0; i < count - 1; ++i) {
+            emulator_step(e);
+          }
+        }
       }
     }
 
