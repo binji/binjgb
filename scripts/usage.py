@@ -12,25 +12,6 @@ import sys
 
 import common
 
-OPCODE_BYTES = [
-    1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
-    1, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 3, 3, 3, 1, 2, 1, 1, 1, 3, 2, 3, 3, 2, 1,
-    1, 1, 3, 0, 3, 1, 2, 1, 1, 1, 3, 0, 3, 0, 2, 1,
-    2, 1, 1, 0, 0, 1, 2, 1, 2, 1, 3, 0, 0, 0, 2, 1,
-    2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
-]
-
 USAGE_STRING = {0: 'Unknown', 2: 'Data', 3: 'Code'}
 
 
@@ -47,13 +28,9 @@ def LocString(loc):
 
 def main(args):
   parser = argparse.ArgumentParser()
-  parser.add_argument('rom', help='rom file')
   parser.add_argument('usage', help='usage file')
   parser.add_argument('-o', '--output', help='output file')
   options = parser.parse_args(args)
-
-  with open(options.rom, 'rb') as file:
-    rom_data = bytearray(file.read())
 
   with open(options.usage, 'rb') as file:
     rom_usage = bytearray(file.read())
@@ -77,29 +54,15 @@ def main(args):
     outfile.write('%s..%s: %s\n' % (
       LocString(start), LocString(loc - 1), USAGE_STRING[last_usage]))
 
-  while loc < len(rom_data):
+  while loc < len(rom_usage):
     usage = rom_usage[loc]
     if last_usage is not None and usage != last_usage:
       Print()
       start = loc
 
-    if usage == 3:
-      # Code.
-      data = rom_data[loc]
-      oplen = OPCODE_BYTES[data]
-      assert oplen > 0
-      loc += oplen
-      counts[usage] += oplen
-    elif usage == 2:
-      # Data.
-      loc += 1
-      counts[usage] += 1
-    else:
-      # Unknown.
-      loc += 1
-      counts[usage] += 1
-
+    counts[usage] += 1
     last_usage = usage
+    loc += 1
 
   Print()
 

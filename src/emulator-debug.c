@@ -314,7 +314,11 @@ static void mark_rom_usage_for_pc(struct Emulator* e) {
     default:
       return;
   }
-  mark_rom_usage(rom_addr, ROM_USAGE_CODE);
+  u8 opcode = e->cart_info->data[rom_addr];
+  u8 count = s_opcode_bytes[opcode];
+  while (count-- > 0) {
+    mark_rom_usage(rom_addr++, ROM_USAGE_CODE);
+  }
 }
 
 void HOOK_emulator_step(Emulator* e, const char* func_name) {

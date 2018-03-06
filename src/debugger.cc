@@ -1322,7 +1322,7 @@ void Debugger::ROMWindow() {
       file_data.size = rom_size;
       file_write(rom_usage_filename, &file_data);
     }
-    ImGui::SliderInt("Scale", &scale, 1, 10);
+    ImGui::SliderInt("Scale", &scale, 1, 16);
 
     static int counter = 60;
     static size_t usage_bytes[4];
@@ -1337,11 +1337,9 @@ void Debugger::ROMWindow() {
 
     ImGui::Text("Unknown: %s (%.0f%%)", PrettySize(usage_bytes[0]).c_str(),
                 (f64)usage_bytes[0] * 100 / rom_size);
-    ImGui::Text("Code: %s (%.0f%%)", PrettySize(usage_bytes[1]).c_str(),
-                (f64)usage_bytes[1] * 100 / rom_size);
     ImGui::Text("Data: %s (%.0f%%)", PrettySize(usage_bytes[2]).c_str(),
                 (f64)usage_bytes[2] * 100 / rom_size);
-    ImGui::Text("Code+Data: %s (%.0f%%)", PrettySize(usage_bytes[3]).c_str(),
+    ImGui::Text("Code: %s (%.0f%%)", PrettySize(usage_bytes[3]).c_str(),
                 (f64)usage_bytes[3] * 100 / rom_size);
 
     ImGui::Separator();
