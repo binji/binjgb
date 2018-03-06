@@ -3433,10 +3433,10 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Cycles until_cycles) {
     if (PPU.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }
-    if (max_audio_cycles < CYCLES) {
+    if (CYCLES >= max_audio_cycles) {
       event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
     }
-    if (until_cycles < CYCLES) {
+    if (CYCLES >= until_cycles) {
       event |= EMULATOR_EVENT_UNTIL_CYCLES;
     }
   }
