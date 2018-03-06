@@ -277,10 +277,11 @@ void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
   write_u8_raw(e, addr, value);
 }
 
-// Store as 1-1 mapping of bytes, low 2 bits used only.
+// Store as 1-1 mapping of bytes, low 3 bits used only.
 typedef enum {
   ROM_USAGE_CODE = 1,
   ROM_USAGE_DATA = 2,
+  ROM_USAGE_CODE_START = 4, /* Start of an opcode. */
 } RomUsage;
 static u8 s_rom_usage[MAXIMUM_ROM_SIZE];
 
@@ -316,8 +317,14 @@ static void mark_rom_usage_for_pc(struct Emulator* e) {
   }
   u8 opcode = e->cart_info->data[rom_addr];
   u8 count = s_opcode_bytes[opcode];
-  while (count-- > 0) {
-    mark_rom_usage(rom_addr++, ROM_USAGE_CODE);
+  mark_rom_usage(rom_addr, ROM_USAGE_CODE | ROM_USAGE_CODE_START);
+  switch (count) {
+    case 3:
+      mark_rom_usage(rom_addr + 2, ROM_USAGE_CODE);
+      /* fallthrough */
+    case 2:
+      mark_rom_usage(rom_addr + 1, ROM_USAGE_CODE);
+      /* fallthrough */
   }
 }
 

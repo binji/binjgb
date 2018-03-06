@@ -55,7 +55,7 @@ def main(args):
       LocString(start), LocString(loc - 1), USAGE_STRING[last_usage]))
 
   while loc < len(rom_usage):
-    usage = rom_usage[loc]
+    usage = rom_usage[loc] & 3
     if last_usage is not None and usage != last_usage:
       Print()
       start = loc
