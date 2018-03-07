@@ -68,7 +68,8 @@ if (NOT EMSCRIPTEN)
       src/host-ui-imgui.cc
       src/joypad.c
       src/rewind.c
-      src/debugger.cc
+      src/debugger/debugger.cc
+      src/debugger/main.cc
     )
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD_REQUIRED ON)
@@ -83,6 +84,7 @@ if (NOT EMSCRIPTEN)
     endif ()
 
     target_include_directories(binjgb-debugger PUBLIC
+        ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/third_party/imgui
         ${PROJECT_SOURCE_DIR}/third_party/imgui_dock
         ${PROJECT_SOURCE_DIR}/third_party/imgui_memory_editor)

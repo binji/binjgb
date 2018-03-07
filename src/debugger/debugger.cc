@@ -4,141 +4,20 @@
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
-#include <assert.h>
+#include "debugger.h"
+
 #include <inttypes.h>
-#include <stdarg.h>
-#include <stdio.h>
 
 #include <algorithm>
-#include <array>
 #include <string>
 #include <utility>
 
-#include "emulator-debug.h"
-#include "options.h"
-#include "host.h"
-
 #include "imgui.h"
 #include "imgui_dock.h"
-#include "imgui_memory_editor.h"
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
 #define ROM_USAGE_EXTENSION ".romusage"
-
-static const char* s_rom_filename;
-static f32 s_font_scale = 1.0f;
-static bool s_paused_at_start;
-
-static void usage(int argc, char** argv) {
-  PRINT_ERROR(
-      "usage: %s [options] <in.gb>\n"
-      "  -h,--help          help\n"
-      "  -t,--trace         trace each instruction\n"
-      "  -f,--font-scale=F  set the global font scale factor to F\n"
-      "  -l,--log S=N       set log level for system S to N\n\n"
-      "  -p,--pause         pause at start\n",
-      argv[0]);
-
-  emulator_print_log_systems();
-}
-
-void parse_arguments(int argc, char** argv) {
-  static const Option options[] = {
-    {'h', "help", 0},
-    {'t', "trace", 0},
-    {'f', "font-scale", 1},
-    {'l', "log", 1},
-    {'p', "pause", 0},
-  };
-
-  struct OptionParser* parser = option_parser_new(
-      options, sizeof(options) / sizeof(options[0]), argc, argv);
-
-  int errors = 0;
-  int done = 0;
-  while (!done) {
-    OptionResult result = option_parser_next(parser);
-    switch (result.kind) {
-      case OPTION_RESULT_KIND_UNKNOWN:
-        PRINT_ERROR("ERROR: Unknown option: %s.\n\n", result.arg);
-        goto error;
-
-      case OPTION_RESULT_KIND_EXPECTED_VALUE:
-        PRINT_ERROR("ERROR: Option --%s requires a value.\n\n",
-                    result.option->long_name);
-        goto error;
-
-      case OPTION_RESULT_KIND_BAD_SHORT_OPTION:
-        PRINT_ERROR("ERROR: Short option -%c is too long: %s.\n\n",
-                    result.option->short_name, result.arg);
-        goto error;
-
-      case OPTION_RESULT_KIND_OPTION:
-        switch (result.option->short_name) {
-          case 'h':
-            goto error;
-
-          case 't':
-            emulator_set_trace(TRUE);
-            break;
-
-          case 'f':
-            s_font_scale = atof(result.value);
-            break;
-
-          case 'l':
-            switch (emulator_set_log_level_from_string(result.value)) {
-              case SET_LOG_LEVEL_ERROR_NONE:
-                break;
-
-              case SET_LOG_LEVEL_ERROR_INVALID_FORMAT:
-                PRINT_ERROR("invalid log level format, should be S=N\n");
-                break;
-
-              case SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM: {
-                const char* equals = strchr(result.value, '=');
-                PRINT_ERROR("unknown log system: %.*s\n",
-                            (int)(equals - result.value), result.value);
-                emulator_print_log_systems();
-                break;
-              }
-            }
-            break;
-
-          case 'p':
-            s_paused_at_start = true;
-            break;
-
-          default:
-            assert(0);
-            break;
-        }
-        break;
-
-      case OPTION_RESULT_KIND_ARG:
-        s_rom_filename = result.value;
-        break;
-
-      case OPTION_RESULT_KIND_DONE:
-        done = 1;
-        break;
-    }
-  }
-
-  if (!s_rom_filename) {
-    PRINT_ERROR("ERROR: expected input .gb\n\n");
-    goto error;
-  }
-
-  option_parser_delete(parser);
-  return;
-
-error:
-  usage(argc, argv);
-  option_parser_delete(parser);
-  exit(1);
-}
 
 static const ImVec2 kTileSize(8, 8);
 static const ImVec2 k8x16OBJSize(8, 16);
@@ -218,27 +97,6 @@ void DisablePalette(Host* host, ImDrawList* draw_list) {
   draw_list->AddCallback(func, host);
 }
 
-class TileImage {
- public:
-  TileImage();
-
-  void Init(Host* host);
-  void Upload(Emulator*);
-  // Return true if hovering on the tile.
-  bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
-                f32 scale, PaletteRGBA palette, bool xflip = false,
-                bool yflip = false);
-  // Return -1 if not hovering, or tile index if hovering.
-  int DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int index,
-              const ImVec2& ul_pos, f32 scale, PaletteRGBA palette, bool xflip,
-              bool yflip);
-
- private:
-  Host* host;
-  TileData tile_data;
-  HostTexture* texture;
-};
-
 TileImage::TileImage() : host(nullptr), texture(nullptr) {}
 
 void TileImage::Init(Host* h) {
@@ -305,112 +163,7 @@ int TileImage::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
   return result;
 }
 
-class Debugger {
- public:
-  Debugger();
-  Debugger(const Debugger&) = delete;
-  Debugger& operator=(const Debugger&) = delete;
-
-  ~Debugger();
-
-  bool Init(const char* filename, int audio_frequency, int audio_frames,
-            int font_scale);
-  void Run();
-
- private:
-  void OnAudioBufferFull();
-  void OnKeyDown(HostKeycode);
-  void OnKeyUp(HostKeycode);
-
-  void StepInstruction();
-  void StepFrame();
-  void TogglePause();
-  void Pause();
-  void Exit();
-
-  void WriteStateToFile();
-  void ReadStateFromFile();
-
-  void SetAudioVolume(f32 volume);
-
-  void MainMenuBar();
-  void EmulatorWindow();
-  void AudioWindow();
-  void TiledataWindow();
-  void ObjWindow();
-  void MapWindow();
-  void DisassemblyWindow();
-  void MemoryWindow();
-  void RewindWindow();
-  void ROMWindow();
-
-  void BeginRewind();
-  void EndRewind();
-  void BeginAutoRewind();
-  void EndAutoRewind();
-  void AutoRewind(f64 ms);
-  void RewindTo(Cycles cycles);
-
-  u8 MemoryEditorRead(Address addr);
-  void MemoryEditorWrite(Address addr, u8 value);
-
-  EmulatorInit emulator_init;
-  HostInit host_init;
-  Emulator* e = nullptr;
-  Host* host = nullptr;
-  const char* save_filename = nullptr;
-  const char* save_state_filename = nullptr;
-  const char* rom_usage_filename = nullptr;
-
-  enum RunState {
-    Exiting,
-    Running,
-    Paused,
-    SteppingFrame,
-    SteppingInstruction,
-    Rewinding,
-    AutoRewinding,
-  };
-  RunState run_state;
-
-  TileImage tiledata_image;
-  HostTexture* rom_texture = nullptr;
-  int rom_texture_width = 0;
-  int rom_texture_height = 0;
-
-  static const int kAudioDataSamples = 1000;
-  f32 audio_data[2][kAudioDataSamples];
-  f32 audio_volume = 0.5f;
-
-  bool highlight_obj = false;
-  int highlight_obj_index = 0;
-  bool highlight_tile = false;
-  int highlight_tile_index = 0;
-
-  MemoryEditor memory_editor;
-  Address memory_editor_base = 0;
-
-  bool emulator_window_open = true;
-  bool audio_window_open = true;
-  bool tiledata_window_open = true;
-  bool obj_window_open = true;
-  bool map_window_open = true;
-  bool disassembly_window_open = true;
-  bool memory_window_open = true;
-  bool rewind_window_open = true;
-  bool rom_window_open = true;
-
-  FileData reverse_step_save_state;
-
-  // Used to collect disassembled instructions.
-  std::array<Address, 65536> instrs;
-  int instr_count = 0;
-};
-
-Debugger::Debugger() {
-  ZERO_MEMORY(audio_data);
-  run_state = s_paused_at_start ? Paused : Running;
-}
+Debugger::Debugger() {}
 
 Debugger::~Debugger() {
   file_data_delete(&reverse_step_save_state);
@@ -419,11 +172,13 @@ Debugger::~Debugger() {
 }
 
 bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
-                    int font_scale) {
+                    int font_scale, bool paused_at_start) {
   FileData rom;
   if (!SUCCESS(file_read(filename, &rom))) {
     return false;
   }
+
+  run_state = paused_at_start ? Paused : Running;
 
   ZERO_MEMORY(emulator_init);
   emulator_init.rom = rom;
@@ -479,7 +234,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
   rom_usage_filename = replace_extension(filename, ROM_USAGE_EXTENSION);
-  ImGui::GetIO().FontGlobalScale = s_font_scale;
+  ImGui::GetIO().FontGlobalScale = font_scale;
 
   memory_editor.UserData = this;
   memory_editor.ReadFn = [](u8*, size_t offset, void* user_data) {
@@ -1609,19 +1364,4 @@ u8 Debugger::MemoryEditorRead(Address addr) {
 
 void Debugger::MemoryEditorWrite(Address addr, u8 value) {
   return emulator_write_u8_raw(e, memory_editor_base + addr, value);
-}
-
-int main(int argc, char** argv) {
-  const int audio_frequency = 44100;
-  const int audio_frames = 2048;
-
-  parse_arguments(argc, argv);
-
-  Debugger debugger;
-  if (!debugger.Init(s_rom_filename, audio_frequency, audio_frames,
-                     s_font_scale)) {
-    return 1;
-  }
-  debugger.Run();
-  return 0;
 }
