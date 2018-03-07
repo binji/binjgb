@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <utility>
 
@@ -144,7 +145,8 @@ static const ImVec2 k8x16OBJSize(8, 16);
 static const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
 static const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
 static const ImU32 kHighlightColor(IM_COL32(0, 255, 0, 192));
-static const ImVec4 kPCColor(0, 255, 0, 192);
+static const ImVec4 kPCColor(0.2f, 1.f, 0.1f, 1.f);
+static const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
 
 ImVec2 operator +(const ImVec2& lhs, const ImVec2& rhs) {
   return ImVec2(lhs.x + rhs.x, lhs.y + rhs.y);
@@ -399,6 +401,10 @@ class Debugger {
   bool rom_window_open = true;
 
   FileData reverse_step_save_state;
+
+  // Used to collect disassembled instructions.
+  std::array<Address, 65536> instrs;
+  int instr_count = 0;
 };
 
 Debugger::Debugger() {
@@ -541,9 +547,9 @@ void Debugger::Run() {
       TiledataWindow();
       ObjWindow();
       MapWindow();
-      DisassemblyWindow();
-      MemoryWindow();
       ROMWindow();
+      MemoryWindow();
+      DisassemblyWindow();
       ImGui::EndWorkspace();
     }
 
@@ -1059,36 +1065,16 @@ void Debugger::MapWindow() {
   ImGui::EndDock();
 }
 
-static Address step_forward_by_instruction(Emulator* e, Address from_addr) {
-  return std::min(from_addr + emulator_opcode_bytes(e, from_addr), 0xffff);
-}
-
-static Address step_backward_by_instruction(Emulator* e, Address from_addr) {
-  // Iterate from |from_addr| - MAX to |from_addr| - 1, adding up the number of
-  // paths that lead to each instruction. Finally, choose the instruction whose
-  // next instruction is |from_addr| and has the most paths leading up to it.
-  // Since instructions are 1, 2, or 3 bytes, we only have to inspect counts
-  // 1..3.
-  const int MAX = 16;
-  int count[MAX];
-  ZERO_MEMORY(count);
-  for (int i = std::min<int>(from_addr, MAX) - 1; i > 0; --i) {
-    Address next = step_forward_by_instruction(e, from_addr - i);
-    if (next <= from_addr) {
-      // Give a "bonus" to instructions whose next is |from_addr|.
-      count[i] += (next == from_addr ? MAX : 1);
-      count[from_addr - next] += count[i];
-    }
-  }
-  int* best = std::max_element(count + 1, count + 4);
-  return std::max<int>(from_addr - (best - count), 0);
-}
-
 void Debugger::DisassemblyWindow() {
-  ImGui::SetNextDock(ImGuiDockSlot_Right);
+  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Disassembly", &disassembly_window_open)) {
     static bool track_pc = true;
-    static Address start_addr = 0;
+    static bool rom_only = true;
+    static f32 last_scroll_y = 0;
+    static Address scroll_addr = 0;
+    // Offset to add to prevent popping when dragging the scrollbar.
+    static f32 scroll_addr_offset = 0;
+
     Cycles now = emulator_get_cycles(e);
     u32 hr, min, sec, ms;
     emulator_cycles_to_time(now, &hr, &min, &sec, &ms);
@@ -1096,39 +1082,79 @@ void Debugger::DisassemblyWindow() {
     Registers regs = emulator_get_registers(e);
     ImGui::Text("Cycles: %" PRIu64 " Time: %u:%02u:%02u.%02u", now, hr, min,
                 sec, ms / 10);
-    ImGui::Text("A: %02X", regs.A);
-    ImGui::Text("B: %02X C: %02X BC: %04X", regs.B, regs.C, regs.BC);
-    ImGui::Text("D: %02X E: %02X DE: %04X", regs.D, regs.E, regs.DE);
-    ImGui::Text("H: %02X L: %02X HL: %04X", regs.H, regs.L, regs.HL);
-    ImGui::Text("SP: %04X", regs.SP);
-    ImGui::Text("PC: %04X", regs.PC);
-    ImGui::Text("F: %c%c%c%c", regs.F.Z ? 'Z' : '_', regs.F.N ? 'N' : '_',
-                regs.F.H ? 'H' : '_', regs.F.C ? 'C' : '_');
     ImGui::Separator();
 
-    ImGui::PushButtonRepeat(true);
-    if (ImGui::Button("-1")) {
-      start_addr = std::max(start_addr - 1, 0);
-      track_pc = false;
-    }
+    auto&& text_reg8 = [&](const char* name, u8 value) {
+      ImGui::Text("%s:", name);
+      ImGui::SameLine();
+      ImGui::TextColored(kRegColor, "%02x", value);
+      ImGui::SameLine(0, 20);
+    };
+
+    auto&& text_reg16 = [&](const char* name, u16 value) {
+      ImGui::Text("%s:", name);
+      ImGui::SameLine();
+      ImGui::TextColored(kRegColor, "%04x", value);
+      ImGui::SameLine(0, 20);
+    };
+
+    text_reg8("A", regs.A);
+    text_reg8("B", regs.B);
+    text_reg8("C", regs.C);
+    text_reg8("D", regs.D);
+    text_reg8("E", regs.E);
+    text_reg8("H", regs.H);
+    text_reg8("L", regs.L);
+    ImGui::NewLine();
+
+    text_reg16("BC", regs.BC);
+    text_reg16("DE", regs.DE);
+    text_reg16("HL", regs.HL);
+    text_reg16("SP", regs.SP);
+    ImGui::NewLine();
+
+    ImGui::Text("F:");
     ImGui::SameLine();
-    if (ImGui::Button("+1")) {
-      start_addr = std::min(start_addr + 1, 0xffff);
-      track_pc = false;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("-I")) {
-      start_addr = step_backward_by_instruction(e, start_addr);
-      track_pc = false;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("+I")) {
-      start_addr = step_forward_by_instruction(e, start_addr);
-      track_pc = false;
-    }
-    ImGui::PopButtonRepeat();
-    ImGui::SameLine();
+    ImGui::TextColored(kRegColor, "%c%c%c%c", regs.F.Z ? 'Z' : '_',
+                       regs.F.N ? 'N' : '_', regs.F.H ? 'H' : '_',
+                       regs.F.C ? 'C' : '_');
+
+    text_reg16("PC", regs.PC);
+    ImGui::NewLine();
+
+    ImGui::Separator();
+
+    int scroll_delta = 0;
+
     ImGui::Checkbox("Track PC", &track_pc);
+    ImGui::SameLine(0, 20);
+
+    ImGui::Checkbox("ROM only", &rom_only);
+    ImGui::SameLine(0, 20);
+
+    {
+      ImGui::PushItemWidth(ImGui::CalcTextSize("00000").x);
+      char addr_input_buf[5] = {};
+      if (ImGui::InputText("Goto", addr_input_buf, 5,
+                           ImGuiInputTextFlags_CharsHexadecimal |
+                               ImGuiInputTextFlags_EnterReturnsTrue)) {
+        u32 addr;
+        if (sscanf(addr_input_buf, "%x", &addr) == 1) {
+          scroll_addr = addr;
+          scroll_addr_offset = 0;
+          track_pc = false;
+        }
+      }
+      ImGui::PopItemWidth();
+      ImGui::SameLine(0, 20);
+    }
+
+    ImGui::PushButtonRepeat(true);
+    if (ImGui::Button("-I")) { scroll_delta = -1; track_pc = false; }
+    ImGui::SameLine();
+    if (ImGui::Button("+I")) { scroll_delta = 1; track_pc = false; }
+    ImGui::PopButtonRepeat();
+
     ImGui::Separator();
 
     ImGui::PushButtonRepeat(true);
@@ -1137,36 +1163,129 @@ void Debugger::DisassemblyWindow() {
     }
     ImGui::PopButtonRepeat();
 
-    f32 height = ImGui::GetTextLineHeightWithSpacing();
-    int lines = static_cast<int>(ImGui::GetContentRegionAvail().y / height);
+    instr_count = 0;
 
-    // When tracking the PC, determine whether PC is in currently visible
-    // range; if it's not, adjust the view so it is.
-    if (track_pc) {
-      Address addr = start_addr;
-      for (int i = 0; i < lines; ++i) {
-        addr += emulator_opcode_bytes(e, addr);
-      }
-      if (regs.PC < start_addr || regs.PC > addr) {
-        start_addr = regs.PC;
-        // Step backward by half the height to center the instruction at PC.
-        for (int j = 0; j < lines / 2 - 1; ++j) {
-          start_addr = step_backward_by_instruction(e, start_addr);
+    for (int rom_region = 0; rom_region < 2; ++rom_region) {
+      int bank = emulator_get_rom_bank(e, rom_region);
+      u8* rom_usage = emulator_get_rom_usage(e) + (bank << 14);
+
+      for (Address rel_addr = 0; rel_addr < 0x4000;) {
+        Address addr = rom_region * 0x4000 + rel_addr;
+        u8 usage = rom_usage[rel_addr];
+        bool is_data = usage == ROM_USAGE_DATA;
+        int len;
+        if (!is_data) {
+          // Code or unknown usage, disassemble either way.
+          u8 opcode = emulator_read_u8_raw(e, addr);
+          len = opcode_bytes(opcode);
+          assert(len <= 3);
+          if (len == 0) {
+            is_data = true;
+          } else if (!(usage & ROM_USAGE_CODE_START)) {
+            // Unknown, disassemble but be careful not to skip over a
+            // ROM_USAGE_CODE_START.
+            for (int i = 1; i < len; ++i) {
+              if (rom_usage[rel_addr + i] & ROM_USAGE_CODE_START) {
+                is_data = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (is_data) {
+          rel_addr++;
+        } else {
+          assert(instr_count < (int)instrs.size());
+          instrs[instr_count++] = addr;
+          rel_addr += len;
         }
       }
     }
 
-    Address addr = start_addr;
-    for (int i = 0; i < lines; ++i) {
-      char buffer[64];
-      bool is_pc = addr == regs.PC;
-      addr += emulator_disassemble(e, addr, buffer, sizeof(buffer));
-      if (is_pc) {
-        ImGui::TextColored(kPCColor, "%s", buffer);
-      } else {
-        ImGui::Text("%s", buffer);
+    if (!rom_only || regs.PC > 0x8000) {
+      for (int addr = 0x8000; addr < 0x10000;) {
+        u8 opcode = emulator_read_u8_raw(e, addr);
+        int len = opcode_bytes(opcode);
+        if (len != 0) {
+          assert(instr_count < (int)instrs.size());
+          instrs[instr_count++] = addr;
+          addr += len;
+        } else {
+          addr++;
+        }
       }
     }
+
+    ImGui::BeginChild("Disassembly");
+    // TODO(binji): Is there a better way to tell if the user scrolled?
+    f32 scroll_y = ImGui::GetScrollY();
+    bool did_mouse_scroll = scroll_y != last_scroll_y;
+    last_scroll_y = scroll_y;
+
+    f32 line_height = ImGui::GetTextLineHeightWithSpacing();
+    f32 avail_y = ImGui::GetContentRegionAvail().y;
+
+    if (!did_mouse_scroll) {
+      Address want_scroll_addr = track_pc ? regs.PC : scroll_addr;
+
+      Address* addr_end = instrs.begin() + instr_count;
+      Address* addr_ptr =
+          std::lower_bound(instrs.begin(), addr_end, want_scroll_addr);
+
+      if (addr_ptr != addr_end) {
+        int got_line = addr_ptr - instrs.begin();
+        f32 view_min_y = scroll_y;
+        f32 view_max_y = view_min_y + avail_y;
+        f32 item_y = got_line * line_height + scroll_addr_offset;
+
+        if (scroll_delta) {
+          item_y += scroll_delta * line_height;
+        }
+
+        bool is_in_view =
+            item_y >= view_min_y && item_y + line_height < view_max_y;
+        bool should_center = !(track_pc && is_in_view);
+
+        if (should_center) {
+          last_scroll_y = std::max(
+              std::min(item_y - avail_y * 0.5f, ImGui::GetScrollMaxY()), 0.f);
+          ImGui::SetScrollY(last_scroll_y);
+
+          if (track_pc) {
+            scroll_addr = want_scroll_addr;
+            scroll_addr_offset = 0;
+          }
+        }
+      }
+    }
+
+    if (!track_pc) {
+      f32 center = last_scroll_y + avail_y * 0.5f;
+      int center_index = (int)(center / line_height);
+      if (center_index < instr_count) {
+        scroll_addr = instrs[center_index];
+        scroll_addr_offset = center - center_index * line_height;
+        track_pc = false;
+      }
+    }
+
+    ImGuiListClipper clipper(instr_count, line_height);
+
+    while (clipper.Step()) {
+      for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+        Address addr = instrs[i];
+        char buffer[64];
+        emulator_disassemble(e, addr, buffer, sizeof(buffer));
+        if (addr == regs.PC) {
+          ImGui::TextColored(kPCColor, "%s", buffer);
+        } else {
+          ImGui::Text("%s", buffer);
+        }
+      }
+    }
+
+    ImGui::EndChild();
   }
   ImGui::EndDock();
 }
@@ -1332,7 +1451,7 @@ void Debugger::RewindWindow() {
 }
 
 void Debugger::ROMWindow() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
+  ImGui::SetNextDock(ImGuiDockSlot_Right);
   if (ImGui::BeginDock("ROM", &rom_window_open)) {
     static int scale = 1;
 

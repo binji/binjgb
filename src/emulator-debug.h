@@ -54,6 +54,12 @@ typedef enum LayerType {
   LAYER_TYPE_WINDOW,
 } LayerType;
 
+typedef enum {
+  ROM_USAGE_CODE = 1,
+  ROM_USAGE_DATA = 2,
+  ROM_USAGE_CODE_START = 4, /* Start of an opcode. */
+} RomUsage;
+
 struct Emulator;
 
 #define TILE_DATA_TEXTURE_WIDTH 128
@@ -92,9 +98,10 @@ int emulator_get_rom_size(struct Emulator*);
 u8* emulator_get_rom_usage(struct Emulator*);
 void emulator_clear_rom_usage(struct Emulator* e);
 
-int emulator_opcode_bytes(struct Emulator*, Address);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
 Registers emulator_get_registers(struct Emulator*);
+
+int emulator_get_rom_bank(struct Emulator*, int region);
 
 u8 emulator_read_u8_raw(struct Emulator*, Address);
 void emulator_write_u8_raw(struct Emulator*, Address, u8);
@@ -119,6 +126,8 @@ Bool obj_is_visible(const Obj* obj);
 
 RGBA color_to_rgba(Color color);
 PaletteRGBA palette_to_palette_rgba(Palette palette);
+
+int opcode_bytes(u8 opcode);
 
 #ifdef __cplusplus
 }
