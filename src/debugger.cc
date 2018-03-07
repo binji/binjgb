@@ -1229,12 +1229,11 @@ void Debugger::DisassemblyWindow() {
     if (!did_mouse_scroll) {
       Address want_scroll_addr = track_pc ? regs.PC : scroll_addr;
 
-      Address* addr_end = instrs.begin() + instr_count;
-      Address* addr_ptr =
-          std::lower_bound(instrs.begin(), addr_end, want_scroll_addr);
+      auto addr_end = instrs.begin() + instr_count;
+      auto iter = std::lower_bound(instrs.begin(), addr_end, want_scroll_addr);
 
-      if (addr_ptr != addr_end) {
-        int got_line = addr_ptr - instrs.begin();
+      if (iter != addr_end) {
+        int got_line = iter - instrs.begin();
         f32 view_min_y = scroll_y;
         f32 view_max_y = view_min_y + avail_y;
         f32 item_y = got_line * line_height + scroll_addr_offset;
