@@ -10,11 +10,23 @@
 
 #include <array>
 
+#include "imgui.h"
+#include "imgui_memory_editor.h"
+
 #include "emulator-debug.h"
 #include "host.h"
 
-#include "imgui.h"
-#include "imgui_memory_editor.h"
+const ImVec2 kTileSize(8, 8);
+const ImVec2 k8x16OBJSize(8, 16);
+const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
+const ImU32 kHighlightColor(IM_COL32(0, 255, 0, 192));
+const ImVec4 kPCColor(0.2f, 1.f, 0.1f, 1.f);
+const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+
+void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
+                         const PaletteRGBA& palette);
+void DisablePalette(Host* host, ImDrawList* draw_list);
 
 class TileImage {
  public:
@@ -50,6 +62,9 @@ class Debugger {
   void Run();
 
  private:
+  // static
+  std::string PrettySize(size_t size);
+
   void OnAudioBufferFull();
   void OnKeyDown(HostKeycode);
   void OnKeyUp(HostKeycode);
@@ -57,7 +72,6 @@ class Debugger {
   void StepInstruction();
   void StepFrame();
   void TogglePause();
-  void Pause();
   void Exit();
 
   void WriteStateToFile();
@@ -66,15 +80,6 @@ class Debugger {
   void SetAudioVolume(f32 volume);
 
   void MainMenuBar();
-  void EmulatorWindow();
-  void AudioWindow();
-  void TiledataWindow();
-  void ObjWindow();
-  void MapWindow();
-  void DisassemblyWindow();
-  void MemoryWindow();
-  void RewindWindow();
-  void ROMWindow();
 
   void BeginRewind();
   void EndRewind();
@@ -82,9 +87,6 @@ class Debugger {
   void EndAutoRewind();
   void AutoRewind(f64 ms);
   void RewindTo(Cycles cycles);
-
-  u8 MemoryEditorRead(Address addr);
-  void MemoryEditorWrite(Address addr, u8 value);
 
   EmulatorInit emulator_init;
   HostInit host_init;
@@ -106,12 +108,7 @@ class Debugger {
   RunState run_state = Running;
 
   TileImage tiledata_image;
-  HostTexture* rom_texture = nullptr;
-  int rom_texture_width = 0;
-  int rom_texture_height = 0;
 
-  static const int kAudioDataSamples = 1000;
-  f32 audio_data[2][kAudioDataSamples] = {};
   f32 audio_volume = 0.5f;
 
   bool highlight_obj = false;
@@ -119,24 +116,84 @@ class Debugger {
   bool highlight_tile = false;
   int highlight_tile_index = 0;
 
-  MemoryEditor memory_editor;
-  Address memory_editor_base = 0;
+  struct Window {
+    explicit Window(Debugger* d) : d(d) {}
+    Debugger* d;
+    bool is_open = true;
+  };
 
-  bool emulator_window_open = true;
-  bool audio_window_open = true;
-  bool tiledata_window_open = true;
-  bool obj_window_open = true;
-  bool map_window_open = true;
-  bool disassembly_window_open = true;
-  bool memory_window_open = true;
-  bool rewind_window_open = true;
-  bool rom_window_open = true;
+  struct AudioWindow : Window {
+    explicit AudioWindow(Debugger*);
+    void Tick();
 
-  FileData reverse_step_save_state;
+    static const int kAudioDataSamples = 1000;
+    f32 audio_data[2][kAudioDataSamples] = {};
+  };
 
-  // Used to collect disassembled instructions.
-  std::array<Address, 65536> instrs;
-  int instr_count = 0;
+  struct DisassemblyWindow : Window {
+    explicit DisassemblyWindow(Debugger*);
+    void Tick();
+
+    // Used to collect disassembled instructions.
+    std::array<Address, 65536> instrs;
+    int instr_count = 0;
+  };
+
+  struct EmulatorWindow : Window {
+    explicit EmulatorWindow(Debugger*);
+    void Tick();
+  };
+
+  struct MapWindow : Window {
+    explicit MapWindow(Debugger*);
+    void Tick();
+  };
+
+  struct MemoryWindow : Window {
+    explicit MemoryWindow(Debugger*);
+    void Tick();
+
+    MemoryEditor memory_editor;
+    Address memory_editor_base = 0;
+  };
+
+  struct ObjWindow : Window {
+    explicit ObjWindow(Debugger*);
+    void Tick();
+  };
+
+  struct RewindWindow : Window {
+    explicit RewindWindow(Debugger*);
+    ~RewindWindow();
+    void Tick();
+
+    FileData reverse_step_save_state;
+  };
+
+  struct ROMWindow : Window {
+    explicit ROMWindow(Debugger*);
+    void Init();
+    void Tick();
+
+    HostTexture* rom_texture = nullptr;
+    int rom_texture_width = 0;
+    int rom_texture_height = 0;
+  };
+
+  struct TiledataWindow : Window {
+    explicit TiledataWindow(Debugger*);
+    void Tick();
+  };
+
+  AudioWindow audio_window;
+  DisassemblyWindow disassembly_window;
+  EmulatorWindow emulator_window;
+  MapWindow map_window;
+  MemoryWindow memory_window;
+  ObjWindow obj_window;
+  RewindWindow rewind_window;
+  ROMWindow rom_window;
+  TiledataWindow tiledata_window;
 };
 
 #endif  // #define BINJGB_DEBUGGER_H__

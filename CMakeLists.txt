@@ -68,8 +68,17 @@ if (NOT EMSCRIPTEN)
       src/host-ui-imgui.cc
       src/joypad.c
       src/rewind.c
-      src/debugger/debugger.cc
       src/debugger/main.cc
+      src/debugger/debugger.cc
+      src/debugger/audio-window.cc
+      src/debugger/emulator-window.cc
+      src/debugger/disassembly-window.cc
+      src/debugger/map-window.cc
+      src/debugger/memory-window.cc
+      src/debugger/obj-window.cc
+      src/debugger/rewind-window.cc
+      src/debugger/rom-window.cc
+      src/debugger/tiledata-window.cc
     )
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD_REQUIRED ON)

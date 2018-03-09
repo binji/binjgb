@@ -1,0 +1,106 @@
+/*
+ * Copyright (C) 2018 Ben Smith
+ *
+ * This software may be modified and distributed under the terms
+ * of the MIT license.  See the LICENSE file for details.
+ */
+#include "debugger.h"
+
+#include "imgui.h"
+#include "imgui_dock.h"
+#include "imgui-helpers.h"
+
+Debugger::TiledataWindow::TiledataWindow(Debugger* d) : Window(d) {}
+
+void Debugger::TiledataWindow::Tick() {
+  ImGui::SetNextDockParentToRoot();
+  ImGui::SetNextDock(ImGuiDockSlot_Right);
+  if (ImGui::BeginDock("TileData", &is_open)) {
+    static const int kPaletteCustom = 3;
+    static const char* palette_names[] = {
+        "BGP",
+        "OBP0",
+        "OBP1",
+        "Custom",
+    };
+    static int scale = 3;
+    static int palette_type = PALETTE_TYPE_BGP;
+
+    ImGui::SliderInt("Scale", &scale, 1, 5);
+    ImGui::Combo("Palette", &palette_type, palette_names);
+    PaletteRGBA palette_rgba;
+
+    if (palette_type == kPaletteCustom) {
+      static Palette custom_palette = {
+          {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
+
+      for (int i = 0; i < 3; ++i) {
+        char label[16];
+        snprintf(label, sizeof(label), "Copy from %s", palette_names[i]);
+        if (ImGui::Button(label)) {
+          custom_palette =
+              emulator_get_palette(d->e, static_cast<PaletteType>(i));
+        }
+      }
+
+      static const char* color_names[] = {
+          "White",
+          "Light Gray",
+          "Dark Gray",
+          "Black",
+      };
+      ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
+      ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
+      ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
+      ImGui::Combo("Color 3", &custom_palette.color[3], color_names);
+      palette_rgba = palette_to_palette_rgba(custom_palette);
+    } else {
+      palette_rgba = emulator_get_palette_rgba(d->e, (PaletteType)palette_type);
+    }
+
+    static int tw = 16;
+    static bool size8x16 = false;
+    ImGui::Checkbox("8x16", &size8x16);
+    ImGui::SliderInt("Width", &tw, 1, 48);
+    ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    int th = (384 + tw - 1) / tw;
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    int width = TILE_DATA_TEXTURE_WIDTH / kTileSize.x;
+    if (size8x16) {
+      th = (th + 1) & ~1;
+    }
+    ImVec2 scaled_tile_size = kTileSize * scale;
+    for (int ty = 0; ty < th; ++ty) {
+      for (int tx = 0; tx < tw; ++tx) {
+        int tile_index;
+        if (size8x16) {
+          tile_index = (ty & ~1) * tw + (tx * 2);
+          if ((ty & 1) == 1) {
+            tile_index++;
+          }
+        } else {
+          tile_index = ty * tw + tx;
+        }
+        ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
+        ImVec2 br_pos = ul_pos + scaled_tile_size;
+        bool is_hovering = d->tiledata_image.DrawTile(
+            draw_list, tile_index, ul_pos, scale, palette_rgba);
+        if (d->highlight_tile && d->highlight_tile_index == tile_index) {
+          draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
+        }
+        if (is_hovering) {
+          ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
+                            0x8000 + tile_index * 16);
+        }
+      }
+    }
+    d->highlight_tile = false;
+    ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
+    ImGui::EndChild();
+  }
+  ImGui::EndDock();
+}
