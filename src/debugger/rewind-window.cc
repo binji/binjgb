@@ -21,7 +21,6 @@ Debugger::RewindWindow::~RewindWindow() {
 }
 
 void Debugger::RewindWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Rewind", &is_open)) {
     bool rewinding = host_is_rewinding(d->host);
     if (ImGui::Checkbox("Rewind", &rewinding)) {

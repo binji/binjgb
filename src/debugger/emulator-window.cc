@@ -14,7 +14,6 @@
 Debugger::EmulatorWindow::EmulatorWindow(Debugger* d) : Window(d) {}
 
 void Debugger::EmulatorWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Binjgb", &is_open)) {
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     HostTexture* fb_texture = host_get_frame_buffer_texture(d->host);

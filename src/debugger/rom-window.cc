@@ -32,7 +32,6 @@ void Debugger::ROMWindow::Init() {
 }
 
 void Debugger::ROMWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Right);
   if (ImGui::BeginDock("ROM", &is_open)) {
     host_upload_texture(d->host, rom_texture, rom_texture_width,
                         rom_texture_height, emulator_get_rom_usage(d->e));

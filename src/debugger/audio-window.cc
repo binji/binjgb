@@ -13,7 +13,6 @@
 Debugger::AudioWindow::AudioWindow(Debugger* d) : Window(d) {}
 
 void Debugger::AudioWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Bottom);
   if (ImGui::BeginDock("Audio", &is_open)) {
     EmulatorConfig config = emulator_get_config(d->e);
     ImGui::Text("channel enable");

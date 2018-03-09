@@ -210,16 +210,37 @@ void Debugger::Run() {
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     if (ImGui::Begin("##root", nullptr, flags)) {
       MainMenuBar();
+
       ImGui::BeginWorkspace();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       emulator_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Bottom);
       audio_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       rewind_window.Tick();
+
+      ImGui::SetNextDockParentToRoot();
+      ImGui::SetNextDock(ImGuiDockSlot_Right);
       tiledata_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       obj_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       map_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Right);
       rom_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       memory_window.Tick();
+
+      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       disassembly_window.Tick();
+
       ImGui::EndWorkspace();
     }
 

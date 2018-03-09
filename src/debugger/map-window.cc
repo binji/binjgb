@@ -13,7 +13,6 @@
 Debugger::MapWindow::MapWindow(Debugger* d) : Window(d) {}
 
 void Debugger::MapWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Map", &is_open)) {
     static const char* layer_names[] = {"BG", "Window"};
 

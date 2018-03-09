@@ -23,7 +23,6 @@ Debugger::MemoryWindow::MemoryWindow(Debugger* d) : Window(d) {
 }
 
 void Debugger::MemoryWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Memory", &is_open)) {
     static const char* region_names[] = {
         "ALL", "ROM", "VRAM", "EXT RAM", "WRAM", "OAM", "I/O",

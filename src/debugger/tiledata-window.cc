@@ -13,8 +13,6 @@
 Debugger::TiledataWindow::TiledataWindow(Debugger* d) : Window(d) {}
 
 void Debugger::TiledataWindow::Tick() {
-  ImGui::SetNextDockParentToRoot();
-  ImGui::SetNextDock(ImGuiDockSlot_Right);
   if (ImGui::BeginDock("TileData", &is_open)) {
     static const int kPaletteCustom = 3;
     static const char* palette_names[] = {"BGP", "OBP0", "OBP1", "Custom"};

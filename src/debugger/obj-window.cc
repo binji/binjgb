@@ -21,7 +21,6 @@ static ImVec2 GetObjSizeVec2(ObjSize obj_size, f32 scale) {
 Debugger::ObjWindow::ObjWindow(Debugger* d) : Window(d) {}
 
 void Debugger::ObjWindow::Tick() {
-  ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Obj", &is_open)) {
     ObjSize obj_size = emulator_get_obj_size(d->e);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
