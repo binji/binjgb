@@ -45,6 +45,7 @@ void Debugger::MapWindow::Tick() {
     PaletteRGBA palette_rgba =
         emulator_get_palette_rgba(d->e, PALETTE_TYPE_BGP);
 
+    const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
     const ImVec2 scaled_tile_size = kTileSize * scale;
     const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
     ImGui::BeginChild("Tiles", ImVec2(0, 0), false,

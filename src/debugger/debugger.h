@@ -19,14 +19,7 @@
 const ImVec2 kTileSize(8, 8);
 const ImVec2 k8x16OBJSize(8, 16);
 const ImVec2 kScreenSize(SCREEN_WIDTH, SCREEN_HEIGHT);
-const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
 const ImU32 kHighlightColor(IM_COL32(0, 255, 0, 192));
-const ImVec4 kPCColor(0.2f, 1.f, 0.1f, 1.f);
-const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
-
-void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
-                         const PaletteRGBA& palette);
-void DisablePalette(Host* host, ImDrawList* draw_list);
 
 class Debugger {
  public:
@@ -75,6 +68,8 @@ class Debugger {
               const ImVec2& ul_pos, f32 scale, PaletteRGBA palette, bool xflip,
               bool yflip);
 
+  void SetPaletteAndEnable(ImDrawList* draw_list, const PaletteRGBA& palette);
+  void DisablePalette(ImDrawList* draw_list);
 
   EmulatorInit emulator_init;
   HostInit host_init;

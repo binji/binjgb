@@ -79,7 +79,7 @@ void Debugger::ROMWindow::Tick() {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 cursor = ImGui::GetCursorScreenPos();
 
-    SetPaletteAndEnable(d->host, draw_list, palette);
+    d->SetPaletteAndEnable(draw_list, palette);
     ImTextureID texture_id = (ImTextureID)rom_texture->handle;
     draw_list->PushTextureID(texture_id);
     draw_list->PushClipRect(cursor, cursor + child_size, true);
@@ -123,7 +123,7 @@ void Debugger::ROMWindow::Tick() {
     }
 
     draw_list->PopTextureID();
-    DisablePalette(d->host, draw_list);
+    d->DisablePalette(draw_list);
 
     ImGui::PopClipRect();
     ImGui::Dummy(child_size);

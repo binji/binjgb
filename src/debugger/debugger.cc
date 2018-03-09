@@ -20,8 +20,8 @@
 #define SAVE_STATE_EXTENSION ".state"
 #define ROM_USAGE_EXTENSION ".romusage"
 
-void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
-                         const PaletteRGBA& palette) {
+void Debugger::SetPaletteAndEnable(ImDrawList* draw_list,
+                                   const PaletteRGBA& palette) {
   using Context = std::pair<Host*, PaletteRGBA>;
   auto func = [](const ImDrawList*, const ImDrawCmd* cmd) {
     Context* ctx = static_cast<Context*>(cmd->UserCallbackData);
@@ -34,7 +34,7 @@ void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
   draw_list->AddCallback(func, new Context(host, palette));
 }
 
-void DisablePalette(Host* host, ImDrawList* draw_list) {
+void Debugger::DisablePalette(ImDrawList* draw_list) {
   auto func = [](const ImDrawList*, const ImDrawCmd* cmd) {
     Host* host = static_cast<Host*>(cmd->UserCallbackData);
     host_enable_palette(host, FALSE);
@@ -59,10 +59,10 @@ bool Debugger::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
   if (yflip) {
     std::swap(ul_uv.y, br_uv.y);
   }
-  SetPaletteAndEnable(host, draw_list, palette);
+  SetPaletteAndEnable(draw_list, palette);
   draw_list->AddImage((ImTextureID)tile_data_texture->handle, ul_pos, br_pos,
                       ul_uv, br_uv);
-  DisablePalette(host, draw_list);
+  DisablePalette(draw_list);
   return ImGui::IsMouseHoveringRect(ul_pos, br_pos);
 }
 

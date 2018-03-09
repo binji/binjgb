@@ -15,6 +15,9 @@
 Debugger::DisassemblyWindow::DisassemblyWindow(Debugger* d) : Window(d) {}
 
 void Debugger::DisassemblyWindow::Tick() {
+  const ImVec4 kPCColor(0.2f, 1.f, 0.1f, 1.f);
+  const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Disassembly", &is_open)) {
     Cycles now = emulator_get_cycles(d->e);
