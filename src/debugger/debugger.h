@@ -134,6 +134,13 @@ class Debugger {
     explicit DisassemblyWindow(Debugger*);
     void Tick();
 
+    bool track_pc = true;
+    bool rom_only = true;
+    f32 last_scroll_y = 0;
+    Address scroll_addr = 0;
+    // Offset to add to prevent popping when dragging the scrollbar.
+    f32 scroll_addr_offset = 0;
+
     // Used to collect disassembled instructions.
     std::array<Address, 65536> instrs;
     int instr_count = 0;
@@ -147,12 +154,17 @@ class Debugger {
   struct MapWindow : Window {
     explicit MapWindow(Debugger*);
     void Tick();
+
+    int scale = 3;
+    LayerType layer_type = LAYER_TYPE_BG;
+    bool highlight = true;
   };
 
   struct MemoryWindow : Window {
     explicit MemoryWindow(Debugger*);
     void Tick();
 
+    int region = 0;
     MemoryEditor memory_editor;
     Address memory_editor_base = 0;
   };
@@ -160,6 +172,9 @@ class Debugger {
   struct ObjWindow : Window {
     explicit ObjWindow(Debugger*);
     void Tick();
+
+    int scale = 4;
+    int obj_index = 0;
   };
 
   struct RewindWindow : Window {
@@ -178,11 +193,23 @@ class Debugger {
     HostTexture* rom_texture = nullptr;
     int rom_texture_width = 0;
     int rom_texture_height = 0;
+
+    int scale = 1;
+    int counter = 60;
+    size_t usage_bytes[4];
   };
 
   struct TiledataWindow : Window {
     explicit TiledataWindow(Debugger*);
     void Tick();
+
+    int scale = 3;
+    int palette_type = PALETTE_TYPE_BGP;
+    Palette custom_palette = {
+        {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
+
+    int wrap_width = 16;
+    bool size8x16 = false;
   };
 
   AudioWindow audio_window;

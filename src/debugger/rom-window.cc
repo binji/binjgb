@@ -34,8 +34,6 @@ void Debugger::ROMWindow::Init() {
 void Debugger::ROMWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Right);
   if (ImGui::BeginDock("ROM", &is_open)) {
-    static int scale = 1;
-
     host_upload_texture(d->host, rom_texture, rom_texture_width,
                         rom_texture_height, emulator_get_rom_usage(d->e));
 
@@ -52,9 +50,6 @@ void Debugger::ROMWindow::Tick() {
       file_write(d->rom_usage_filename, &file_data);
     }
     ImGui::SliderInt("Scale", &scale, 1, 16);
-
-    static int counter = 60;
-    static size_t usage_bytes[4];
 
     if (--counter <= 0) {
       counter = 60;

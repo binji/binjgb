@@ -26,15 +26,8 @@ void Debugger::MemoryWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Memory", &is_open)) {
     static const char* region_names[] = {
-      "ALL",
-      "ROM",
-      "VRAM",
-      "EXT RAM",
-      "WRAM",
-      "OAM",
-      "I/O",
+        "ALL", "ROM", "VRAM", "EXT RAM", "WRAM", "OAM", "I/O",
     };
-    static int region = 0;
     ImGui::Combo("Region", &region, region_names);
     size_t size = 0x10000;
     switch (region) {

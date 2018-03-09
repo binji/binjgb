@@ -23,9 +23,6 @@ Debugger::ObjWindow::ObjWindow(Debugger* d) : Window(d) {}
 void Debugger::ObjWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Obj", &is_open)) {
-    static int scale = 4;
-    static int obj_index = 0;
-
     ObjSize obj_size = emulator_get_obj_size(d->e);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 

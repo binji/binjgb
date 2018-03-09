@@ -15,13 +15,7 @@ Debugger::MapWindow::MapWindow(Debugger* d) : Window(d) {}
 void Debugger::MapWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Map", &is_open)) {
-    static int scale = 3;
-    static const char* layer_names[] = {
-        "BG",
-        "Window",
-    };
-    static LayerType layer_type = LAYER_TYPE_BG;
-    static bool highlight = true;
+    static const char* layer_names[] = {"BG", "Window"};
 
     ImGui::SliderInt("Scale", &scale, 1, 5);
     ImGui::Combo("Layer", &layer_type, layer_names);

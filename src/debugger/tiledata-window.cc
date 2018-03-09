@@ -17,22 +17,13 @@ void Debugger::TiledataWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Right);
   if (ImGui::BeginDock("TileData", &is_open)) {
     static const int kPaletteCustom = 3;
-    static const char* palette_names[] = {
-        "BGP",
-        "OBP0",
-        "OBP1",
-        "Custom",
-    };
-    static int scale = 3;
-    static int palette_type = PALETTE_TYPE_BGP;
+    static const char* palette_names[] = {"BGP", "OBP0", "OBP1", "Custom"};
 
     ImGui::SliderInt("Scale", &scale, 1, 5);
     ImGui::Combo("Palette", &palette_type, palette_names);
     PaletteRGBA palette_rgba;
 
     if (palette_type == kPaletteCustom) {
-      static Palette custom_palette = {
-          {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
 
       for (int i = 0; i < 3; ++i) {
         char label[16];
@@ -43,12 +34,8 @@ void Debugger::TiledataWindow::Tick() {
         }
       }
 
-      static const char* color_names[] = {
-          "White",
-          "Light Gray",
-          "Dark Gray",
-          "Black",
-      };
+      static const char* color_names[] = {"White", "Light Gray", "Dark Gray",
+                                          "Black"};
       ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
       ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
       ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
@@ -58,12 +45,11 @@ void Debugger::TiledataWindow::Tick() {
       palette_rgba = emulator_get_palette_rgba(d->e, (PaletteType)palette_type);
     }
 
-    static int tw = 16;
-    static bool size8x16 = false;
     ImGui::Checkbox("8x16", &size8x16);
-    ImGui::SliderInt("Width", &tw, 1, 48);
+    ImGui::SliderInt("Width", &wrap_width, 1, 48);
     ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
                       ImGuiWindowFlags_HorizontalScrollbar);
+    int tw = wrap_width;
     int th = (384 + tw - 1) / tw;
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();

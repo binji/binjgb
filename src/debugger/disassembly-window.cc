@@ -17,13 +17,6 @@ Debugger::DisassemblyWindow::DisassemblyWindow(Debugger* d) : Window(d) {}
 void Debugger::DisassemblyWindow::Tick() {
   ImGui::SetNextDock(ImGuiDockSlot_Tab);
   if (ImGui::BeginDock("Disassembly", &is_open)) {
-    static bool track_pc = true;
-    static bool rom_only = true;
-    static f32 last_scroll_y = 0;
-    static Address scroll_addr = 0;
-    // Offset to add to prevent popping when dragging the scrollbar.
-    static f32 scroll_addr_offset = 0;
-
     Cycles now = emulator_get_cycles(d->e);
     u32 hr, min, sec, ms;
     emulator_cycles_to_time(now, &hr, &min, &sec, &ms);
