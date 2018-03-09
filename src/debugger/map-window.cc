@@ -59,8 +59,7 @@ void Debugger::MapWindow::Tick() {
         if (data_select == TILE_DATA_8800_97FF) {
           tile_index = 256 + (s8)tile_index;
         }
-        if (d->tiledata_image.DrawTile(draw_list, tile_index, ul_pos, scale,
-                                       palette_rgba)) {
+        if (d->DrawTile(draw_list, tile_index, ul_pos, scale, palette_rgba)) {
           ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
                             0x8000 + tile_index * 16);
           d->highlight_tile = true;

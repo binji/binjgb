@@ -44,9 +44,9 @@ void Debugger::ObjWindow::Tick() {
           PaletteRGBA palette_rgba = emulator_get_palette_rgba(
               d->e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
 
-          int tile_index = d->tiledata_image.DrawOBJ(
-              draw_list, obj_size, obj.tile, ImGui::GetCursorScreenPos(), scale,
-              palette_rgba, obj.xflip, obj.yflip);
+          int tile_index = d->DrawOBJ(draw_list, obj_size, obj.tile,
+                                      ImGui::GetCursorScreenPos(), scale,
+                                      palette_rgba, obj.xflip, obj.yflip);
 
           if (tile_index >= 0) {
             d->highlight_tile = true;

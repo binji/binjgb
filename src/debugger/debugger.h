@@ -28,27 +28,6 @@ void SetPaletteAndEnable(Host* host, ImDrawList* draw_list,
                          const PaletteRGBA& palette);
 void DisablePalette(Host* host, ImDrawList* draw_list);
 
-class TileImage {
- public:
-  TileImage();
-
-  void Init(Host* host);
-  void Upload(Emulator*);
-  // Return true if hovering on the tile.
-  bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
-                f32 scale, PaletteRGBA palette, bool xflip = false,
-                bool yflip = false);
-  // Return -1 if not hovering, or tile index if hovering.
-  int DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int index,
-              const ImVec2& ul_pos, f32 scale, PaletteRGBA palette, bool xflip,
-              bool yflip);
-
- private:
-  Host* host;
-  TileData tile_data;
-  HostTexture* texture;
-};
-
 class Debugger {
  public:
   Debugger();
@@ -62,8 +41,7 @@ class Debugger {
   void Run();
 
  private:
-  // static
-  std::string PrettySize(size_t size);
+  static std::string PrettySize(size_t size);
 
   void OnAudioBufferFull();
   void OnKeyDown(HostKeycode);
@@ -88,6 +66,16 @@ class Debugger {
   void AutoRewind(f64 ms);
   void RewindTo(Cycles cycles);
 
+  // Return true if hovering on the tile.
+  bool DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+                f32 scale, PaletteRGBA palette, bool xflip = false,
+                bool yflip = false);
+  // Return -1 if not hovering, or tile index if hovering.
+  int DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int index,
+              const ImVec2& ul_pos, f32 scale, PaletteRGBA palette, bool xflip,
+              bool yflip);
+
+
   EmulatorInit emulator_init;
   HostInit host_init;
   Emulator* e = nullptr;
@@ -107,7 +95,8 @@ class Debugger {
   };
   RunState run_state = Running;
 
-  TileImage tiledata_image;
+  TileData tile_data;
+  HostTexture* tile_data_texture;
 
   f32 audio_volume = 0.5f;
 

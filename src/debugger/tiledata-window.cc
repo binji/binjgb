@@ -73,8 +73,8 @@ void Debugger::TiledataWindow::Tick() {
         }
         ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
         ImVec2 br_pos = ul_pos + scaled_tile_size;
-        bool is_hovering = d->tiledata_image.DrawTile(
-            draw_list, tile_index, ul_pos, scale, palette_rgba);
+        bool is_hovering =
+            d->DrawTile(draw_list, tile_index, ul_pos, scale, palette_rgba);
         if (d->highlight_tile && d->highlight_tile_index == tile_index) {
           draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
         }

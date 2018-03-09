@@ -43,28 +43,13 @@ void DisablePalette(Host* host, ImDrawList* draw_list) {
   draw_list->AddCallback(func, host);
 }
 
-TileImage::TileImage() : host(nullptr), texture(nullptr) {}
-
-void TileImage::Init(Host* h) {
-  host = h;
-  texture =
-      host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
-                          TILE_DATA_TEXTURE_HEIGHT, HOST_TEXTURE_FORMAT_U8);
-}
-
-void TileImage::Upload(Emulator* e) {
-  emulator_get_tile_data(e, tile_data);
-  host_upload_texture(host, texture, TILE_DATA_TEXTURE_WIDTH,
-                      TILE_DATA_TEXTURE_HEIGHT, tile_data);
-}
-
-bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
-                         f32 scale, PaletteRGBA palette, bool xflip,
-                         bool yflip) {
+bool Debugger::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
+                        f32 scale, PaletteRGBA palette, bool xflip,
+                        bool yflip) {
   const int width = TILE_DATA_TEXTURE_WIDTH / 8;
   ImVec2 src(index % width, index / width);
-  ImVec2 duv =
-      kTileSize * ImVec2(1.0f / texture->width, 1.0f / texture->height);
+  ImVec2 duv = kTileSize * ImVec2(1.0f / tile_data_texture->width,
+                                  1.0f / tile_data_texture->height);
   ImVec2 br_pos = ul_pos + kTileSize * scale;
   ImVec2 ul_uv = src * duv;
   ImVec2 br_uv = ul_uv + duv;
@@ -75,15 +60,15 @@ bool TileImage::DrawTile(ImDrawList* draw_list, int index, const ImVec2& ul_pos,
     std::swap(ul_uv.y, br_uv.y);
   }
   SetPaletteAndEnable(host, draw_list, palette);
-  draw_list->AddImage((ImTextureID)texture->handle, ul_pos, br_pos, ul_uv,
-                      br_uv);
+  draw_list->AddImage((ImTextureID)tile_data_texture->handle, ul_pos, br_pos,
+                      ul_uv, br_uv);
   DisablePalette(host, draw_list);
   return ImGui::IsMouseHoveringRect(ul_pos, br_pos);
 }
 
-int TileImage::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
-                       const ImVec2& ul_pos, f32 scale, PaletteRGBA palette,
-                       bool xflip, bool yflip) {
+int Debugger::DrawOBJ(ImDrawList* draw_list, ObjSize obj_size, int tile,
+                      const ImVec2& ul_pos, f32 scale, PaletteRGBA palette,
+                      bool xflip, bool yflip) {
   const ImVec2 kScaledTileSize = kTileSize * scale;
   int result = -1;
   if (obj_size == OBJ_SIZE_8X16) {
@@ -166,7 +151,9 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     return false;
   }
 
-  tiledata_image.Init(host);
+  tile_data_texture =
+      host_create_texture(host, TILE_DATA_TEXTURE_WIDTH,
+                          TILE_DATA_TEXTURE_HEIGHT, HOST_TEXTURE_FORMAT_U8);
   rom_window.Init();
 
   save_filename = replace_extension(filename, SAVE_EXTENSION);
@@ -208,7 +195,9 @@ void Debugger::Run() {
         break;
     }
 
-    tiledata_image.Upload(e);
+    emulator_get_tile_data(e, tile_data);
+    host_upload_texture(host, tile_data_texture, TILE_DATA_TEXTURE_WIDTH,
+                        TILE_DATA_TEXTURE_HEIGHT, tile_data);
 
     // Create a frameless top-level window to hold the workspace.
     ImGuiWindowFlags flags =
