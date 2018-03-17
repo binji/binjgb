@@ -11,6 +11,8 @@
 
 #include "emulator.h"
 
+#define SANITY_CHECK 0
+
 #define INVALID_CYCLES (~0ULL)
 
 #define GET_CYCLES(x) ((x).cycles)
@@ -84,6 +86,8 @@
       }                                    \
     }                                      \
   } while (0)
+
+static void rewind_sanity_check(RewindBuffer*, struct Emulator*);
 
 RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
   RewindBuffer* buffer = malloc(sizeof(RewindBuffer));
@@ -285,6 +289,8 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
   /* Update stats. */
   buf->total_kind_bytes[kind] += new_info->size;
   buf->total_uncompressed_bytes += buf->last_state.size;
+
+  rewind_sanity_check(buf, e);
 }
 
 Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
@@ -359,7 +365,8 @@ Result rewind_to_cycles(RewindBuffer* buf, Cycles cycles,
   return OK;
 }
 
-void rewind_truncate_to(RewindBuffer* buffer, RewindResult* result) {
+void rewind_truncate_to(RewindBuffer* buffer, struct Emulator* e,
+                        RewindResult* result) {
   /* Remove data from rewind buffer that are now invalid. */
   int info_range_index = result->info_range_index;
   RewindInfo* info = result->info;
@@ -371,6 +378,8 @@ void rewind_truncate_to(RewindBuffer* buffer, RewindResult* result) {
     info_range[0].begin = info_range[0].end;
     data_range[0].end = data_range[0].begin;
   }
+
+  rewind_sanity_check(buffer, e);
 }
 
 static Bool is_rewind_range_empty(RewindInfoRange* r) {
@@ -430,4 +439,81 @@ RewindStats rewind_get_stats(RewindBuffer* buffer) {
   }
 
   return stats;
+}
+
+void rewind_sanity_check(RewindBuffer* buffer, struct Emulator* e) {
+#if SANITY_CHECK
+  assert(buffer->data_range[0].begin <= buffer->data_range[0].end);
+  assert(buffer->data_range[0].end <= buffer->data_range[1].begin);
+  assert((void*)buffer->data_range[0].end <=
+         (void*)buffer->info_range[1].begin);
+  assert(buffer->info_range[1].end <= buffer->info_range[0].begin);
+  assert(buffer->info_range[0].begin <= buffer->info_range[0].end);
+
+  Bool has_base = FALSE;
+  FileData base;
+  FileData diff;
+  FileData temp;
+  emulator_init_state_file_data(&base);
+  emulator_init_state_file_data(&diff);
+  emulator_init_state_file_data(&temp);
+
+  Result result = emulator_write_state(e, &temp);
+  assert(SUCCESS(result));
+
+  void* last_data_end = NULL;
+  Cycles last_cycles = 0;
+
+  int i;
+  for (i = 0; i < 2; ++i) {
+    RewindDataRange* data_range = &buffer->data_range[i];
+    RewindInfoRange* info_range = &buffer->info_range[i];
+
+    RewindInfo* info;
+    for (info = info_range->end - 1; info >= info_range->begin; --info) {
+      void* data_end = info->data + info->size;
+      if (last_data_end) {
+        assert(last_data_end < (void*)data_end);
+      }
+      last_data_end = data_end;
+    }
+  }
+
+  for (i = 1; i >= 0; --i) {
+    RewindDataRange* data_range = &buffer->data_range[i];
+    RewindInfoRange* info_range = &buffer->info_range[i];
+
+    RewindInfo* info;
+    for (info = info_range->end - 1; info >= info_range->begin; --info) {
+      assert(last_cycles <= info->cycles);
+      last_cycles = info->cycles;
+
+      FileData* fd = NULL;
+      if (info->kind == RewindInfoKind_Base) {
+        has_base = TRUE;
+        decode_rle(info->data, info->size, base.data, base.data + base.size);
+        fd = &base;
+      } else {
+        assert(info->kind == RewindInfoKind_Diff);
+        if (has_base) {
+          decode_diff(info->data, info->size, base.data, diff.data,
+                      diff.data + diff.size);
+          fd = &diff;
+        }
+      }
+
+      if (fd) {
+        emulator_read_state(e, fd);
+        assert(info->cycles == emulator_get_cycles(e));
+      }
+    }
+  }
+
+  result = emulator_read_state(e, &temp);
+  assert(SUCCESS(result));
+
+  file_data_delete(&temp);
+  file_data_delete(&diff);
+  file_data_delete(&base);
+#endif /* SANITY_CHECK */
 }

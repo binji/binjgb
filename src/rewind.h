@@ -104,7 +104,7 @@ RewindBuffer* rewind_new(const RewindInit*, struct Emulator*);
 void rewind_delete(RewindBuffer*);
 void rewind_append(RewindBuffer*, struct Emulator*);
 Result rewind_to_cycles(RewindBuffer*, Cycles, RewindResult*);
-void rewind_truncate_to(RewindBuffer*, RewindResult*);
+void rewind_truncate_to(RewindBuffer*, struct Emulator*, RewindResult*);
 Cycles rewind_get_oldest_cycles(RewindBuffer*);
 Cycles rewind_get_newest_cycles(RewindBuffer*);
 RewindStats rewind_get_stats(RewindBuffer*);

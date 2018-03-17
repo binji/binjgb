@@ -315,12 +315,12 @@ void host_begin_rewind(Host* host) {
 Result host_rewind_to_cycles(Host* host, Cycles cycles) {
   assert(host->rewind_state.rewinding);
 
-  RewindResult result;
-  CHECK(SUCCESS(rewind_to_cycles(host->rewind_buffer, cycles, &result)));
+  RewindResult* result = &host->rewind_state.rewind_result;
+  CHECK(SUCCESS(rewind_to_cycles(host->rewind_buffer, cycles, result)));
 
   struct Emulator* e = host_get_emulator(host);
-  CHECK(SUCCESS(emulator_read_state(e, &result.file_data)));
-  assert(emulator_get_cycles(e) == result.info->cycles);
+  CHECK(SUCCESS(emulator_read_state(e, &result->file_data)));
+  assert(emulator_get_cycles(e) == result->info->cycles);
 
   host->rewind_state.current =
       joypad_find_state(host->joypad_buffer, emulator_get_cycles(e));
@@ -343,9 +343,11 @@ void host_end_rewind(Host* host) {
   assert(host->rewind_state.rewinding);
 
   if (host->rewind_state.rewind_result.info) {
-    rewind_truncate_to(host->rewind_buffer, &host->rewind_state.rewind_result);
+    struct Emulator* e = host_get_emulator(host);
+    rewind_truncate_to(host->rewind_buffer, e,
+                       &host->rewind_state.rewind_result);
     joypad_truncate_to(host->joypad_buffer, host->rewind_state.current);
-    host->last_cycles = emulator_get_cycles(host_get_emulator(host));
+    host->last_cycles = emulator_get_cycles(e);
   }
 
   memset(&host->rewind_state, 0, sizeof(host->rewind_state));
