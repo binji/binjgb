@@ -70,6 +70,13 @@ void Debugger::DisassemblyWindow::Tick() {
 
     int scroll_delta = 0;
 
+    {
+      bool trace = d->trace();
+      ImGui::Checkbox("Trace", &trace);
+      d->SetTrace(trace);
+      ImGui::SameLine(0, 20);
+    }
+
     ImGui::Checkbox("Track PC", &track_pc);
     ImGui::SameLine(0, 20);
 

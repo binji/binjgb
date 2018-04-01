@@ -266,6 +266,18 @@ void Debugger::OnAudioBufferFull() {
 static void Toggle(Bool& value) { value = static_cast<Bool>(!value); }
 static void Toggle(bool& value) { value = !value; }
 
+void Debugger::ToggleTrace() {
+  if (run_state != Rewinding) {
+    SetTrace(!trace());
+  }
+}
+
+void Debugger::SetTrace(bool trace) {
+  if (run_state != Rewinding) {
+    emulator_set_trace(trace ? TRUE : FALSE);
+  }
+}
+
 void Debugger::OnKeyDown(HostKeycode code) {
   EmulatorConfig emu_config = emulator_get_config(e);
   HostConfig host_config = host_get_config(host);
@@ -278,6 +290,7 @@ void Debugger::OnKeyDown(HostKeycode code) {
     case HOST_KEYCODE_B: Toggle(emu_config.disable_bg); break;
     case HOST_KEYCODE_W: Toggle(emu_config.disable_window); break;
     case HOST_KEYCODE_O: Toggle(emu_config.disable_obj); break;
+    case HOST_KEYCODE_T: ToggleTrace(); break;
     case HOST_KEYCODE_F6: WriteStateToFile(); break;
     case HOST_KEYCODE_F9: ReadStateFromFile(); break;
     case HOST_KEYCODE_N: StepFrame(); break;
@@ -411,6 +424,7 @@ std::string Debugger::PrettySize(size_t size) {
 
 void Debugger::BeginAutoRewind() {
   if (run_state == Running || run_state == Paused) {
+    emulator_push_trace(FALSE);
     host_begin_rewind(host);
     run_state = AutoRewinding;
   }
@@ -420,6 +434,7 @@ void Debugger::EndAutoRewind() {
   if (run_state == AutoRewinding) {
     host_end_rewind(host);
     run_state = Running;
+    emulator_pop_trace();
   }
 }
 

@@ -50,6 +50,10 @@ class Debugger {
 
   void SetAudioVolume(f32 volume);
 
+  void ToggleTrace();
+  void SetTrace(bool);
+  bool trace() { return !!emulator_get_trace(); }
+
   void MainMenuBar();
 
   void BeginRewind();

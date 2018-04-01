@@ -9,8 +9,9 @@
 #include <inttypes.h>
 #include <stdarg.h>
 
-static Bool s_trace = 0;
-static unsigned s_trace_counter = 0;
+#define MAX_TRACE_STACK 16
+static Bool s_trace_stack[MAX_TRACE_STACK] = {FALSE};
+static size_t s_trace_stack_top = 1;
 static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
 
 #define HOOK0(name) HOOK_##name(e, __func__)
@@ -327,7 +328,7 @@ static void mark_rom_usage_for_pc(struct Emulator* e) {
 void HOOK_emulator_step(Emulator* e, const char* func_name) {
   mark_rom_usage_for_pc(e);
 
-  if (s_trace && !e->state.interrupt.halt) {
+  if (emulator_get_trace() && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
            REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
            REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);
@@ -341,11 +342,6 @@ void HOOK_emulator_step(Emulator* e, const char* func_name) {
     printf(" |");
     print_instruction(e, REG.PC);
     printf("\n");
-    if (s_trace_counter > 0) {
-      if (--s_trace_counter == 0) {
-        s_trace = FALSE;
-      }
-    }
   }
 }
 
@@ -379,8 +375,22 @@ SetLogLevelError emulator_set_log_level_from_string(const char* s) {
   return SET_LOG_LEVEL_ERROR_NONE;
 }
 
+Bool emulator_get_trace() {
+  return s_trace_stack[s_trace_stack_top - 1];
+}
+
 void emulator_set_trace(Bool trace) {
-  s_trace = TRUE;
+  s_trace_stack[s_trace_stack_top - 1] = trace;
+}
+
+void emulator_push_trace(Bool trace) {
+  assert(s_trace_stack_top < MAX_TRACE_STACK);
+  s_trace_stack[s_trace_stack_top++] = trace;
+}
+
+void emulator_pop_trace() {
+  assert(s_trace_stack_top > 1);
+  --s_trace_stack_top;
 }
 
 const char* emulator_get_log_system_name(LogSystem system) {

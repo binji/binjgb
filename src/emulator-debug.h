@@ -89,7 +89,10 @@ void emulator_set_hooks(struct Emulator*, EmulatorHooks*);
 
 void emulator_set_log_level(LogSystem, LogLevel);
 SetLogLevelError emulator_set_log_level_from_string(const char*);
+Bool emulator_get_trace();
 void emulator_set_trace(Bool trace);
+void emulator_push_trace(Bool trace);
+void emulator_pop_trace();
 const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 void emulator_print_log_systems();
