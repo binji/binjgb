@@ -88,6 +88,16 @@ $ ln -s ${PATH_TO_EMSCRIPTEN} emscripten
 $ make wasm
 ```
 
+### Changing the Build Configuration
+
+If you change the build config (e.g. update the submodules), you may need to run CMake again.
+The simplest way to do this is to remove the `out/` directory.
+
+```
+> rm -rf out/
+> make
+```
+
 ## Running
 
 ```
