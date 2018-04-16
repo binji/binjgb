@@ -127,9 +127,9 @@ static u8* write_varint(u32 value, u8* dst_begin, u8* dst_max_end) {
     *dst++ = 0x80 | (value & 0x7f);
     *dst++ = (value >> 7) & 0x7f;
   } else {
-    /* If this fires there is a run of 128K. In the current EmulatorState this
+    /* If this fires there is a run of 2Mib. In the current EmulatorState this
      * is impossible. */
-    assert(value < 0x20000);
+    assert(value < 0x200000);
     CHECK_WRITE(3, dst, dst_max_end);
     *dst++ = 0x80 | (value & 0x7f);
     *dst++ = 0x80 | ((value >> 7) & 0x7f);
