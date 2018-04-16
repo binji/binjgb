@@ -1543,9 +1543,7 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return IS_CGB ? (VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK))
                     : INVALID_READ_BYTE;
     case IO_HDMA5_ADDR:
-      return IS_CGB ? (PACK(HDMA.mode, HDMA5_TRANSFER_MODE) |
-                       PACK(HDMA.blocks, HDMA5_BLOCKS))
-                    : INVALID_READ_BYTE;
+      return IS_CGB ? HDMA.blocks : INVALID_READ_BYTE;
     case IO_RP_ADDR:
       return IS_CGB ? (RP_UNUSED | PACK(INFRARED.enabled, RP_DATA_READ_ENABLE) |
                        PACK(INFRARED.read, RP_READ_DATA) |
