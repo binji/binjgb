@@ -3860,6 +3860,7 @@ Result init_emulator(Emulator* e) {
   write_io(e, IO_OBP1_ADDR, 0xff);
   write_io(e, IO_IF_ADDR, 0x1);
   write_io(e, IO_IE_ADDR, 0x0);
+  HDMA.blocks = 0xff;
 
   APU.ticks = TICKS = 0;
   return OK;
