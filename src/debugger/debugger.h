@@ -75,6 +75,17 @@ class Debugger {
   void SetPaletteAndEnable(ImDrawList* draw_list, const PaletteRGBA& palette);
   void DisablePalette(ImDrawList* draw_list);
 
+  static int GetTileIndexInBank(int tile_index) {
+    return tile_index >= 384 ? tile_index - 384 : tile_index;
+  }
+  static int GetByteTileIndex(int tile_index) {
+    return GetTileIndexInBank(tile_index) & 255;
+  }
+  static int GetTileBank(int tile_index) { return tile_index > 384 ? 1 : 0; }
+  static Address GetTileAddr(int tile_index) {
+    return 0x8000 + GetTileIndexInBank(tile_index) * 16;
+  }
+
   EmulatorInit emulator_init;
   HostInit host_init;
   Emulator* e = nullptr;
@@ -96,6 +107,8 @@ class Debugger {
 
   TileData tile_data;
   HostTexture* tile_data_texture;
+
+  bool is_cgb = false;
 
   f32 audio_volume = 0.5f;
 
@@ -160,6 +173,7 @@ class Debugger {
   struct ObjWindow : Window {
     explicit ObjWindow(Debugger*);
     void Tick();
+    int GetObjTile(Obj);
 
     int scale = 4;
     int obj_index = 0;
@@ -197,6 +211,7 @@ class Debugger {
         {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
     int cgb_palette_type = CGB_PALETTE_TYPE_BGCP;
     int cgb_palette_index = 0;
+    int hovering_tile_index = 0;
 
     int wrap_width = 16;
     bool size8x16 = false;

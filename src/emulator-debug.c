@@ -477,24 +477,29 @@ PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator* e,
 void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
   assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
   assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
+  const int banks = 2;
   const int tw = TILE_DATA_TEXTURE_WIDTH / TILE_WIDTH;
-  const int th = TILE_DATA_TEXTURE_HEIGHT / TILE_HEIGHT;
-  int tx, ty, mx, my;
+  const int th = TILE_DATA_TEXTURE_HEIGHT / TILE_HEIGHT / banks;
+  int bank, tx, ty, mx, my;
   MaskedAddress addr = 0;
-  for (ty = 0; ty < th; ++ty) {
-    for (tx = 0; tx < tw; ++tx) {
-      int offset =
-          (ty * TILE_WIDTH) * TILE_DATA_TEXTURE_WIDTH + (tx * TILE_HEIGHT);
-      for (my = 0; my < TILE_HEIGHT; ++my) {
-        for (mx = 0; mx < TILE_WIDTH; ++mx) {
-          u8 lo = e->state.vram.data[addr];
-          u8 hi = e->state.vram.data[addr + 1];
-          u8 shift = 7 - (mx & 7);
-          u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
-          out_tile_data[offset + mx] = palette_index;
+  for (bank = 0; bank < banks; ++bank) {
+    addr = bank * 0x2000;
+    for (ty = 0; ty < th; ++ty) {
+      for (tx = 0; tx < tw; ++tx) {
+        int offset =
+            (((bank * th) + ty) * TILE_HEIGHT) * TILE_DATA_TEXTURE_WIDTH +
+            (tx * TILE_WIDTH);
+        for (my = 0; my < TILE_HEIGHT; ++my) {
+          for (mx = 0; mx < TILE_WIDTH; ++mx) {
+            u8 lo = e->state.vram.data[addr];
+            u8 hi = e->state.vram.data[addr + 1];
+            u8 shift = 7 - (mx & 7);
+            u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
+            out_tile_data[offset + mx] = palette_index;
+          }
+          addr += TILE_ROW_BYTES;
+          offset += TILE_DATA_TEXTURE_WIDTH;
         }
-        addr += TILE_ROW_BYTES;
-        offset += TILE_DATA_TEXTURE_WIDTH;
       }
     }
   }

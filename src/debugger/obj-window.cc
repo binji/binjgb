@@ -38,27 +38,28 @@ void Debugger::ObjWindow::Tick() {
         }
 
         ImVec2 button_size = GetObjSizeVec2(obj_size, scale);
-        bool clicked;
         if (visible) {
-          PaletteRGBA palette_rgba = emulator_get_palette_rgba(
-              d->e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
+          PaletteRGBA palette_rgba;
+          if (d->is_cgb) {
+            palette_rgba = emulator_get_cgb_palette_rgba(
+                d->e, CGB_PALETTE_TYPE_OBCP, obj.cgb_palette);
+          } else {
+            palette_rgba = emulator_get_palette_rgba(
+                d->e, (PaletteType)(PALETTE_TYPE_OBP0 + obj.palette));
+          }
 
-          int tile_index = d->DrawOBJ(draw_list, obj_size, obj.tile,
+          int tile_index = d->DrawOBJ(draw_list, obj_size, GetObjTile(obj),
                                       ImGui::GetCursorScreenPos(), scale,
                                       palette_rgba, obj.xflip, obj.yflip);
 
           if (tile_index >= 0) {
-            d->highlight_tile = true;
-            d->highlight_tile_index = tile_index;
+            d->highlight_obj_index = obj_index = button_index;
           }
-          clicked = ImGui::InvisibleButton(label, button_size);
+          ImGui::InvisibleButton(label, button_size);
         } else {
           ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32_BLACK);
-          clicked = ImGui::Button(label, button_size);
+          ImGui::Button(label, button_size);
           ImGui::PopStyleColor();
-        }
-        if (clicked) {
-          d->highlight_obj_index = obj_index = button_index;
         }
         if (obj_index == button_index) {
           ImGui::GetWindowDrawList()->AddRect(
@@ -72,15 +73,32 @@ void Debugger::ObjWindow::Tick() {
 
     Obj obj = emulator_get_obj(d->e, obj_index);
 
-    ImGui::LabelText("Index", "%d", obj_index);
-    ImGui::LabelText("Tile", "%d", obj.tile);
+    int tile_index = GetObjTile(obj);
+    ImGui::LabelText("Obj Index", "%d", obj_index);
+    ImGui::LabelText("OAM Address", "%04x", 0xfe00 + obj_index * 4);
+    ImGui::LabelText("Tile Index", "%02x", d->GetByteTileIndex(tile_index));
+    ImGui::LabelText("Tile Address", "%d:%04x", d->GetTileBank(tile_index),
+                     d->GetTileAddr(tile_index));
     ImGui::LabelText("Pos", "%d, %d", obj.x, obj.y);
     ImGui::LabelText(
         "Priority", "%s",
         obj.priority == OBJ_PRIORITY_ABOVE_BG ? "Above BG" : "Behind BG");
     ImGui::LabelText("Flip", "%c%c", obj.xflip ? 'X' : '_',
                      obj.yflip ? 'Y' : '_');
-    ImGui::LabelText("Palette", "OBP%d", obj.palette);
+    if (d->is_cgb) {
+      ImGui::LabelText("Bank", "%d", obj.bank);
+      ImGui::LabelText("Palette", "OBCP%d", obj.cgb_palette);
+    } else {
+      ImGui::LabelText("Palette", "OBP%d", obj.palette);
+    }
   }
   ImGui::EndDock();
+}
+
+int Debugger::ObjWindow::GetObjTile(Obj obj) {
+  if (d->is_cgb && obj.bank) {
+    return obj.tile + 0x180;
+  } else{
+    return obj.tile;
+  }
 }

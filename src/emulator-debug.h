@@ -67,7 +67,7 @@ typedef enum {
 
 struct Emulator;
 
-#define TILE_DATA_TEXTURE_WIDTH 128
+#define TILE_DATA_TEXTURE_WIDTH 256
 #define TILE_DATA_TEXTURE_HEIGHT 192
 typedef u8 TileData[TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT];
 

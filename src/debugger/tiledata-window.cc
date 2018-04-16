@@ -18,7 +18,7 @@ void Debugger::TiledataWindow::Tick() {
 
     PaletteRGBA palette_rgba;
 
-    if (emulator_is_cgb(d->e)) {
+    if (d->is_cgb) {
       static const char* palette_names[] = {"BGCP", "OBCP"};
 
       ImGui::Combo("Palette", &cgb_palette_type, palette_names);
@@ -58,10 +58,16 @@ void Debugger::TiledataWindow::Tick() {
 
     ImGui::Checkbox("8x16", &size8x16);
     ImGui::SliderInt("Width", &wrap_width, 1, 48);
-    ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
-                      ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::Separator();
+
+    int tile_count = 384 * (d->is_cgb ? 2 : 1);
     int tw = wrap_width;
-    int th = (384 + tw - 1) / tw;
+    int th = (tile_count + tw - 1) / tw;
+
+    int space_at_end = 3 * ImGui::GetTextLineHeightWithSpacing();
+
+    ImGui::BeginChild("Tiles", ImVec2(0, -space_at_end), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
@@ -90,14 +96,19 @@ void Debugger::TiledataWindow::Tick() {
           draw_list->AddRectFilled(ul_pos, br_pos, kHighlightColor);
         }
         if (is_hovering) {
-          ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
-                            0x8000 + tile_index * 16);
+          hovering_tile_index = tile_index;
         }
       }
     }
     d->highlight_tile = false;
     ImGui::Dummy(ImVec2(tw, th) * scaled_tile_size);
     ImGui::EndChild();
+    ImGui::Separator();
+
+    ImGui::LabelText("Tile Index", "%02x",
+                     d->GetByteTileIndex(hovering_tile_index));
+    ImGui::LabelText("Address", "%d:%04x", d->GetTileBank(hovering_tile_index),
+                     d->GetTileAddr(hovering_tile_index));
   }
   ImGui::EndDock();
 }
