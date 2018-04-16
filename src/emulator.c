@@ -896,7 +896,7 @@ typedef struct Emulator {
 #define NR52_SOUND2_ON(X) BIT(X, 1)
 #define NR52_SOUND1_ON(X) BIT(X, 0)
 
-#define KEY1_UNUSED 0x7f
+#define KEY1_UNUSED 0x7e
 #define KEY1_CURRENT_SPEED(X) BIT(X, 7)
 #define KEY1_PREPARE_SPEED_SWITCH(X) BIT(X, 0)
 #define RP_UNUSED 0x3c
@@ -1537,7 +1537,8 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_WX_ADDR:
       return PPU.wx;
     case IO_KEY1_ADDR:
-      return IS_CGB ? (KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED))
+      return IS_CGB ? (KEY1_UNUSED | PACK(CPU_SPEED.speed, KEY1_CURRENT_SPEED) |
+                       PACK(CPU_SPEED.switching, KEY1_PREPARE_SPEED_SWITCH))
                     : INVALID_READ_BYTE;
     case IO_VBK_ADDR:
       return IS_CGB ? (VBK_UNUSED | PACK(VRAM.bank, VBK_VRAM_BANK))
