@@ -2572,8 +2572,9 @@ static void ppu_mode3_tick(Emulator* e) {
   /* Each tick writes 4 pixels. */
   RGBA pixels[4];
   ZERO_MEMORY(pixels);
-  Bool bg_is_zero[4];
+  Bool bg_is_zero[4], bg_priority[4];
   memset(bg_is_zero, TRUE, sizeof(bg_is_zero));
+  ZERO_MEMORY(bg_priority);
 
   TileDataSelect data_select = LCDC.bg_tile_data_select;
   for (i = 0; i < 4; ++i) {
@@ -2610,7 +2611,7 @@ static void ppu_mode3_tick(Emulator* e) {
         cp = &PPU.bgcp.palettes[attr & 0x7];
         if (attr & 0x08) { tile_index += 0x200; }
         if (attr & 0x40) { my = 7 - my; }
-        /* TODO(binji): BG priority attribute */
+        if (attr & 0x80) { bg_priority[i] = TRUE; }
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + my) * TILE_ROW_BYTES;
       u8 lo = VRAM.data[tile_addr];
@@ -2683,7 +2684,7 @@ static void ppu_mode3_tick(Emulator* e) {
       assert(end >= 0 && end < 4);
       for (i = start; i <= end; ++i, lo >>= 1, hi >>= 1) {
         u8 palette_index = ((hi & 1) << 1) | (lo & 1);
-        if (palette_index != 0 &&
+        if (palette_index != 0 && (!bg_priority[i] || bg_is_zero[i]) &&
             (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
           if (IS_CGB) {
             pixels[i] = cp->color[palette_index];
