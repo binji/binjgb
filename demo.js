@@ -13,10 +13,10 @@ const SCREEN_HEIGHT = 144;
 const AUDIO_FRAMES = 4096;
 const AUDIO_LATENCY_SEC = 0.1;
 const MAX_UPDATE_SEC = 5 / 60;
-const CPU_CYCLES_PER_SECOND = 4194304;
+const CPU_TICKS_PER_SECOND = 4194304;
 const EVENT_NEW_FRAME = 1;
 const EVENT_AUDIO_BUFFER_FULL = 2;
-const EVENT_UNTIL_CYCLES = 4;
+const EVENT_UNTIL_TICKS = 4;
 const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 
@@ -97,7 +97,7 @@ function Emulator(romArrayBuffer) {
 
   this.lastSec = 0;
   this.startAudioSec = 0;
-  this.leftoverCycles = 0;
+  this.leftoverTicks = 0;
   this.fps = 60;
 }
 
@@ -119,10 +119,10 @@ Emulator.prototype.addEventListener = function(el, name, func) {
 Emulator.prototype.showRewindBar = function(show) {
   if (show) {
     rewindBarEl.removeAttribute('hidden');
-    rewindEl.setAttribute('min', _rewind_get_oldest_cycles(this.rewindBuffer));
-    rewindEl.setAttribute('max', _rewind_get_newest_cycles(this.rewindBuffer));
+    rewindEl.setAttribute('min', _rewind_get_oldest_ticks(this.rewindBuffer));
+    rewindEl.setAttribute('max', _rewind_get_newest_ticks(this.rewindBuffer));
     rewindEl.setAttribute('step', 1);
-    rewindEl.value = this.getCycles();
+    rewindEl.value = this.getTicks();
     this.updateRewindTime();
   } else {
     rewindBarEl.setAttribute('hidden', '');
@@ -181,11 +181,11 @@ Emulator.prototype.keyRewind = function(e, isKeyDown) {
 
       this.setPaused(true);
       this.rewindIntervalId = setInterval(() => {
-        var oldest = _rewind_get_oldest_cycles(this.rewindBuffer);
-        var start = this.getCycles();
-        var delta = rewindFactor * updateMs / 1000 * CPU_CYCLES_PER_SECOND;
+        var oldest = _rewind_get_oldest_ticks(this.rewindBuffer);
+        var start = this.getTicks();
+        var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
         var rewindTo = Math.max(oldest, start - delta);
-        this.rewindToCycles(rewindTo);
+        this.rewindToTicks(rewindTo);
       }, updateMs);
     } else {
       clearInterval(this.rewindIntervalId);
@@ -197,22 +197,22 @@ Emulator.prototype.keyRewind = function(e, isKeyDown) {
 
 Emulator.prototype.bindKeyInput = function(el) {
   var keyFuncs = {
-    8: _set_joyp_select,
-    13: _set_joyp_start,
-    37: _set_joyp_left,
-    38: _set_joyp_up,
-    39: _set_joyp_right,
-    40: _set_joyp_down,
-    88: _set_joyp_A,
-    90: _set_joyp_B,
-    32: this.keyTogglePaused.bind(this),
-    192: this.keyRewind.bind(this),
+    'ArrowDown': _set_joyp_down,
+    'ArrowLeft': _set_joyp_left,
+    'ArrowRight': _set_joyp_right,
+    'ArrowUp': _set_joyp_up,
+    'KeyX': _set_joyp_B,
+    'KeyZ': _set_joyp_A,
+    'Enter': _set_joyp_start,
+    'Tab': _set_joyp_select,
+    'Backspace': this.keyRewind.bind(this),
+    'Space': this.keyTogglePaused.bind(this),
   };
 
   var makeKeyFunc = (isKeyDown) => {
     return (event) => {
-      if (event.keyCode in keyFuncs) {
-        keyFuncs[event.keyCode](this.e, isKeyDown);
+      if (event.code in keyFuncs) {
+        keyFuncs[event.code](this.e, isKeyDown);
         event.preventDefault();
       }
     };
@@ -224,7 +224,7 @@ Emulator.prototype.bindKeyInput = function(el) {
 
 Emulator.prototype.bindRewindSlider = function(el) {
   this.addEventListener(el, 'input', (event) => {
-    this.rewindToCycles(+event.target.value);
+    this.rewindToTicks(+event.target.value);
     this.updateRewindTime();
   });
 };
@@ -237,16 +237,16 @@ function zeroPadLeft(num, width) {
   return num;
 }
 
-function cyclesToTime(cycles) {
-  var hr = (cycles / (60 * 60 * CPU_CYCLES_PER_SECOND)) | 0;
-  var min = zeroPadLeft((cycles / (60 * CPU_CYCLES_PER_SECOND)) % 60, 2);
-  var sec = zeroPadLeft((cycles / CPU_CYCLES_PER_SECOND) % 60, 2);
-  var ms = zeroPadLeft((cycles / (CPU_CYCLES_PER_SECOND / 1000)) % 1000, 3);
+function ticksToTime(ticks) {
+  var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
+  var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
+  var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
+  var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
   return `${hr}:${min}:${sec}.${ms}`;
 }
 
 Emulator.prototype.updateRewindTime = function() {
-  rewindTimeEl.textContent = cyclesToTime(rewindEl.value);
+  rewindTimeEl.textContent = ticksToTime(rewindEl.value);
 };
 
 Emulator.prototype.requestAnimationFrame = function() {
@@ -263,17 +263,17 @@ Emulator.prototype.run = function() {
   this.defer(() => this.cancelAnimationFrame());
 };
 
-Emulator.prototype.getCycles = function() {
-  return _emulator_get_cycles(this.e) >>> 0;
+Emulator.prototype.getTicks = function() {
+  return _emulator_get_ticks(this.e) >>> 0;
 };
 
 Emulator.prototype.isRewinding = function() {
   return this.rewindState !== null;
 };
 
-Emulator.prototype.runUntil = function(cycles) {
+Emulator.prototype.runUntil = function(ticks) {
   while (true) {
-    var event = _emulator_run_until(this.e, cycles);
+    var event = _emulator_run_until(this.e, ticks);
     if (event & EVENT_NEW_FRAME) {
       if (!this.isRewinding()) {
         _rewind_append(this.rewindBuffer, this.e);
@@ -310,7 +310,7 @@ Emulator.prototype.runUntil = function(cycles) {
         this.startAudioSec = nowPlusLatency;
       }
     }
-    if (event & EVENT_UNTIL_CYCLES) {
+    if (event & EVENT_UNTIL_TICKS) {
       break;
     }
   }
@@ -326,15 +326,15 @@ Emulator.prototype.renderVideo = function(startMs) {
   if (!this.isRewinding()) {
     var startSec = startMs / 1000;
     var deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
-    var startCycles = this.getCycles();
-    var deltaCycles =
-        Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_CYCLES_PER_SECOND;
-    var runUntilCycles =
-        (startCycles + deltaCycles - this.leftoverCycles) >>> 0;
+    var startTicks = this.getTicks();
+    var deltaTicks =
+        Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
+    var runUntilTicks =
+        (startTicks + deltaTicks - this.leftoverTicks) >>> 0;
 
-    this.runUntil(runUntilCycles);
+    this.runUntil(runUntilTicks);
 
-    this.leftoverCycles = (this.getCycles() - runUntilCycles) | 0;
+    this.leftoverTicks = (this.getTicks() - runUntilTicks) | 0;
     this.lastSec = startSec;
   }
 
@@ -350,14 +350,14 @@ Emulator.prototype.beginRewind = function() {
       _rewind_begin(this.e, this.rewindBuffer, this.joypadBuffer);
 };
 
-Emulator.prototype.rewindToCycles = function(cycles) {
+Emulator.prototype.rewindToTicks = function(ticks) {
   if (!this.isRewinding()) {
     throw Error('Not rewinding!');
   }
-  var result = _rewind_to_cycles_wrapper(this.rewindState, cycles);
+  var result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
   if (result === RESULT_OK) {
     _emulator_set_rewind_joypad_callback(this.rewindState);
-    this.runUntil(cycles);
+    this.runUntil(ticks);
     this.renderer.renderTexture();
   }
 };
@@ -371,7 +371,7 @@ Emulator.prototype.endRewind = function() {
   this.rewindState = null;
   this.lastSec = 0;
   this.startAudioSec = 0;
-  this.leftoverCycles = 0;
+  this.leftoverTicks = 0;
 };
 
 
