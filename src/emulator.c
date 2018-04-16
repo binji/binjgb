@@ -3493,6 +3493,7 @@ static void execute_instruction(Emulator* e) {
       CPU_SPEED.speed = SPEED_DOUBLE;
       INTR.stop = FALSE;
     } else {
+      TICKS += CPU_TICK;
       return;
     }
   }
