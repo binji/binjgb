@@ -2585,7 +2585,7 @@ static void ppu_mode3_tick(Emulator* e) {
                            (LCDC.window_display && !e->config.disable_window &&
                             xi + WINDOW_X_OFFSET >= PPU.wx &&
                             PPU.wx <= WINDOW_MAX_X && y >= PPU.frame_wy);
-    Bool display_bg = LCDC.bg_display && !e->config.disable_bg;
+    Bool display_bg = (IS_CGB || LCDC.bg_display) && !e->config.disable_bg;
     if (PPU.rendering_window || display_bg) {
       TileMapSelect map_select;
       u8 mx, my;
