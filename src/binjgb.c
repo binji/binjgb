@@ -269,19 +269,19 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_N: s_step_frame = TRUE; s_paused = FALSE; break;
     case HOST_KEYCODE_SPACE: s_paused ^= 1; break;
     case HOST_KEYCODE_ESCAPE: s_running = FALSE; break;
-    case HOST_KEYCODE_TAB: set_no_sync(TRUE); break;
+    case HOST_KEYCODE_LSHIFT: set_no_sync(TRUE); break;
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
-    case HOST_KEYCODE_GRAVE: begin_rewind(); break;
+    case HOST_KEYCODE_BACKSPACE: begin_rewind(); break;
     default: break;
   }
 }
 
 static void key_up(HostHookContext* ctx, HostKeycode code) {
   switch (code) {
-    case HOST_KEYCODE_TAB: set_no_sync(FALSE); break;
+    case HOST_KEYCODE_LSHIFT: set_no_sync(FALSE); break;
     case HOST_KEYCODE_F11: toggle_fullscreen(); break;
-    case HOST_KEYCODE_GRAVE: end_rewind(); break;
+    case HOST_KEYCODE_BACKSPACE: end_rewind(); break;
     default: break;
   }
 }

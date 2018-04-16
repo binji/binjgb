@@ -233,7 +233,7 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->B = state[SDL_SCANCODE_Z];
   joyp->A = state[SDL_SCANCODE_X];
   joyp->start = state[SDL_SCANCODE_RETURN];
-  joyp->select = state[SDL_SCANCODE_BACKSPACE];
+  joyp->select = state[SDL_SCANCODE_TAB];
 
   Ticks ticks = emulator_get_ticks(host_get_emulator(host));
   joypad_append_if_new(host->joypad_buffer, joyp, ticks);

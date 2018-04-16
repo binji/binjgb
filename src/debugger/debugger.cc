@@ -296,10 +296,10 @@ void Debugger::OnKeyDown(HostKeycode code) {
     case HOST_KEYCODE_N: StepFrame(); break;
     case HOST_KEYCODE_SPACE: TogglePause(); break;
     case HOST_KEYCODE_ESCAPE: Exit(); break;
-    case HOST_KEYCODE_TAB: host_config.no_sync = TRUE; break;
+    case HOST_KEYCODE_LSHIFT: host_config.no_sync = TRUE; break;
     case HOST_KEYCODE_MINUS: SetAudioVolume(audio_volume - 0.05f); break;
     case HOST_KEYCODE_EQUALS: SetAudioVolume(audio_volume + 0.05f); break;
-    case HOST_KEYCODE_GRAVE: BeginAutoRewind(); break;
+    case HOST_KEYCODE_BACKSPACE: BeginAutoRewind(); break;
     default: return;
   }
 
@@ -311,9 +311,9 @@ void Debugger::OnKeyUp(HostKeycode code) {
   HostConfig host_config = host_get_config(host);
 
   switch (code) {
-    case HOST_KEYCODE_TAB: host_config.no_sync = FALSE; break;
+    case HOST_KEYCODE_LSHIFT: host_config.no_sync = FALSE; break;
     case HOST_KEYCODE_F11: Toggle(host_config.fullscreen); break;
-    case HOST_KEYCODE_GRAVE: EndAutoRewind(); break;
+    case HOST_KEYCODE_BACKSPACE: EndAutoRewind(); break;
     default: return;
   }
 

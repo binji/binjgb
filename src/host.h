@@ -88,7 +88,8 @@ extern "C" {
   _(RIGHT)                      \
   _(LEFT)                       \
   _(DOWN)                       \
-  _(UP)
+  _(UP)                         \
+  _(LSHIFT)
 
 typedef enum HostKeycode {
   HOST_KEYCODE_UNKNOWN,

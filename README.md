@@ -116,7 +116,7 @@ Keys:
 | B | <kbd>Z</kbd> |
 | A | <kbd>X</kbd> |
 | START | <kbd>Enter</kbd> |
-| SELECT | <kbd>Backspace</kbd> |
+| SELECT | <kbd>Tab</kbd> |
 | Quit | <kbd>Esc</kbd> |
 | Save state | <kbd>F6</kbd> |
 | Load state | <kbd>F9</kbd> |
@@ -125,8 +125,8 @@ Keys:
 | Disable BG layer | <kbd>B</kbd> |
 | Disable Window layer | <kbd>W</kbd> |
 | Disable OBJ (sprites) | <kbd>O</kbd> |
-| Fast-forward | <kbd>Tab</kbd> |
-| Rewind | <kbd>`</kbd> |
+| Fast-forward | <kbd>Lshift</kbd> |
+| Rewind | <kbd>Backspace</kbd> |
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
 
