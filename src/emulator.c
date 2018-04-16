@@ -586,6 +586,7 @@ typedef struct {
 typedef struct {
   Speed speed;
   Bool switching;
+  Bool tick_hack;
 } CpuSpeed;
 
 typedef struct {
@@ -3173,11 +3174,13 @@ static void serial_tick(Emulator* e) {
 static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
   dma_tick(e);
-  hdma_tick(e);
-  ppu_tick(e);
-  timer_tick(e);
   serial_tick(e);
-  TICKS += CPU_TICK;
+  timer_tick(e);
+  if (CPU_SPEED.speed != SPEED_DOUBLE || (CPU_SPEED.tick_hack ^= 1)) {
+    hdma_tick(e);
+    ppu_tick(e);
+    TICKS += CPU_TICK;
+  }
 }
 
 static u8 read_u8_tick(Emulator* e, Address addr) {
