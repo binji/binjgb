@@ -41,8 +41,8 @@ struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
 static void default_joypad_callback(JoypadButtons* joyp, void* user_data) {
   JoypadBuffer* joypad_buffer = user_data;
   *joyp = s_buttons;
-  Cycles cycles = emulator_get_cycles(e);
-  joypad_append_if_new(joypad_buffer, joyp, cycles);
+  Ticks ticks = emulator_get_ticks(e);
+  joypad_append_if_new(joypad_buffer, joyp, ticks);
 }
 
 void emulator_set_default_joypad_callback(struct Emulator* e,
@@ -70,8 +70,8 @@ RewindState* rewind_begin(struct Emulator* e, RewindBuffer* rewind_buffer,
 static void rewind_joypad_callback(struct JoypadButtons* joyp,
                                    void* user_data) {
   RewindState* state = user_data;
-  Cycles cycles = emulator_get_cycles(state->e);
-  while (state->next.state && state->next.state->cycles <= cycles) {
+  Ticks ticks = emulator_get_ticks(state->e);
+  while (state->next.state && state->next.state->ticks <= ticks) {
     state->current = state->next;
     state->next = joypad_get_next_state(state->next);
   }
@@ -83,14 +83,14 @@ void emulator_set_rewind_joypad_callback(RewindState* state) {
   emulator_set_joypad_callback(e, rewind_joypad_callback, state);
 }
 
-Result rewind_to_cycles_wrapper(RewindState* state, Cycles cycles) {
+Result rewind_to_ticks_wrapper(RewindState* state, Ticks ticks) {
   CHECK(SUCCESS(
-      rewind_to_cycles(state->rewind_buffer, cycles, &state->rewind_result)));
+      rewind_to_ticks(state->rewind_buffer, ticks, &state->rewind_result)));
   CHECK(SUCCESS(emulator_read_state(e, &state->rewind_result.file_data)));
-  assert(emulator_get_cycles(e) == state->rewind_result.info->cycles);
+  assert(emulator_get_ticks(e) == state->rewind_result.info->ticks);
 
   state->current =
-      joypad_find_state(state->joypad_buffer, emulator_get_cycles(state->e));
+      joypad_find_state(state->joypad_buffer, emulator_get_ticks(state->e));
   state->next = joypad_get_next_state(state->current);
 
   return OK;
@@ -99,7 +99,7 @@ Result rewind_to_cycles_wrapper(RewindState* state, Cycles cycles) {
 
 void rewind_end(RewindState* state) {
   if (state->rewind_result.info) {
-    rewind_truncate_to(state->rewind_buffer, &state->rewind_result);
+    rewind_truncate_to(state->rewind_buffer, state->e, &state->rewind_result);
     joypad_truncate_to(state->joypad_buffer, state->current);
   }
   free(state);
