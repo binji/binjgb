@@ -2509,14 +2509,17 @@ static void ppu_mode2_tick(Emulator* e) {
   u8 y = PPU.line_y;
   for (i = 0; i < 2 && PPU.line_obj_count < OBJ_PER_LINE_COUNT; ++i) {
     /* Put the visible sprites into line_obj, but insert them so sprites with
-     * smaller X-coordinates are earlier. */
+     * smaller X-coordinates are earlier, but only on DMG. On CGB, they are
+     * always ordered by obj index. */
     Obj* o = &OAM[PPU.oam_index];
     u8 rel_y = y - o->y;
     if (rel_y < obj_height) {
       int j = PPU.line_obj_count;
-      while (j > 0 && o->x < PPU.line_obj[j - 1].x) {
-        PPU.line_obj[j] = PPU.line_obj[j - 1];
-        j--;
+      if (!IS_CGB) {
+        while (j > 0 && o->x < PPU.line_obj[j - 1].x) {
+          PPU.line_obj[j] = PPU.line_obj[j - 1];
+          j--;
+        }
       }
       PPU.line_obj[j] = *o;
       PPU.line_obj_count++;
