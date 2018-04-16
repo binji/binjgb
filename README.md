@@ -94,8 +94,8 @@ If you change the build config (e.g. update the submodules), you may need to run
 The simplest way to do this is to remove the `out/` directory.
 
 ```
-> rm -rf out/
-> make
+$ rm -rf out/
+$ make
 ```
 
 ## Running
