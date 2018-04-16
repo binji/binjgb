@@ -3828,7 +3828,8 @@ Result init_emulator(Emulator* e) {
   log_cart_info(e->cart_info);
   MMAP_STATE.rom_base[0] = 0;
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
-  IS_CGB = e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED;
+  IS_CGB = e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
+           e->cart_info->cgb_flag == CGB_FLAG_REQUIRED;
   set_af_reg(e, 0xb0);
   REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
