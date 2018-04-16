@@ -537,11 +537,7 @@ typedef struct {
 } Stat;
 
 typedef struct {
-  RGBA color[PALETTE_COLOR_COUNT];
-} ColorPalette;
-
-typedef struct {
-  ColorPalette palettes[8];
+  PaletteRGBA palettes[8];
   u8 data[64];
   u8 index;
   Bool auto_increment;
@@ -2607,7 +2603,7 @@ static void ppu_mode3_tick(Emulator* e) {
         tile_index = 256 + (s8)tile_index;
       }
       u8 attr = 0;
-      ColorPalette* cp = NULL;
+      PaletteRGBA* cp = NULL;
       if (IS_CGB) {
         attr = VRAM.data[0x2000 + map_addr];
         cp = &PPU.bgcp.palettes[attr & 0x7];
@@ -2662,7 +2658,7 @@ static void ppu_mode3_tick(Emulator* e) {
           oy -= 8;
         }
       }
-      ColorPalette* cp = NULL;
+      PaletteRGBA* cp = NULL;
       if (IS_CGB) {
         cp = &PPU.obcp.palettes[o->cgb_palette & 0x7];
         if (o->bank) { tile_index += 0x200; }

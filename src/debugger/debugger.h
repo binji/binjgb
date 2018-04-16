@@ -195,6 +195,8 @@ class Debugger {
     int palette_type = PALETTE_TYPE_BGP;
     Palette custom_palette = {
         {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
+    int cgb_palette_type = CGB_PALETTE_TYPE_BGCP;
+    int cgb_palette_index = 0;
 
     int wrap_width = 16;
     bool size8x16 = false;

@@ -49,6 +49,11 @@ typedef enum PaletteType {
   PALETTE_TYPE_OBP1,
 } PaletteType;
 
+typedef enum CgbPaletteType {
+  CGB_PALETTE_TYPE_BGCP,
+  CGB_PALETTE_TYPE_OBCP,
+} CgbPaletteType;
+
 typedef enum LayerType {
   LAYER_TYPE_BG,
   LAYER_TYPE_WINDOW,
@@ -70,8 +75,6 @@ typedef u8 TileData[TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT];
 #define TILE_MAP_HEIGHT 32
 #define TILE_MAP_SIZE (TILE_MAP_WIDTH * TILE_MAP_HEIGHT)
 typedef u8 TileMap[TILE_MAP_SIZE];
-
-typedef struct PaletteRGBA { RGBA color[PALETTE_COLOR_COUNT]; } PaletteRGBA;
 
 #if 0
 typedef struct EmulatorHookContext {
@@ -97,6 +100,8 @@ const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 void emulator_print_log_systems();
 
+Bool emulator_is_cgb(struct Emulator*);
+
 int emulator_get_rom_size(struct Emulator*);
 u8* emulator_get_rom_usage(struct Emulator*);
 void emulator_clear_rom_usage(struct Emulator* e);
@@ -113,6 +118,8 @@ TileDataSelect emulator_get_tile_data_select(struct Emulator*);
 TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
 Palette emulator_get_palette(struct Emulator*, PaletteType);
 PaletteRGBA emulator_get_palette_rgba(struct Emulator*, PaletteType);
+PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator*, CgbPaletteType,
+                                          int index);
 void emulator_get_tile_data(struct Emulator*, TileData);
 void emulator_get_tile_map(struct Emulator*, TileMapSelect, TileMap);
 void emulator_get_bg_scroll(struct Emulator*, u8* x, u8* y);

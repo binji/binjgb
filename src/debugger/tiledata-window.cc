@@ -14,33 +14,46 @@ Debugger::TiledataWindow::TiledataWindow(Debugger* d) : Window(d) {}
 
 void Debugger::TiledataWindow::Tick() {
   if (ImGui::BeginDock("TileData", &is_open)) {
-    static const int kPaletteCustom = 3;
-    static const char* palette_names[] = {"BGP", "OBP0", "OBP1", "Custom"};
-
     ImGui::SliderInt("Scale", &scale, 1, 5);
-    ImGui::Combo("Palette", &palette_type, palette_names);
+
     PaletteRGBA palette_rgba;
 
-    if (palette_type == kPaletteCustom) {
+    if (emulator_is_cgb(d->e)) {
+      static const char* palette_names[] = {"BGCP", "OBCP"};
 
-      for (int i = 0; i < 3; ++i) {
-        char label[16];
-        snprintf(label, sizeof(label), "Copy from %s", palette_names[i]);
-        if (ImGui::Button(label)) {
-          custom_palette =
-              emulator_get_palette(d->e, static_cast<PaletteType>(i));
-        }
-      }
+      ImGui::Combo("Palette", &cgb_palette_type, palette_names);
+      ImGui::SliderInt("Index", &cgb_palette_index, 0, 7);
+      cgb_palette_index = CLAMP(cgb_palette_index, 0, 7);
 
-      static const char* color_names[] = {"White", "Light Gray", "Dark Gray",
-                                          "Black"};
-      ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
-      ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
-      ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
-      ImGui::Combo("Color 3", &custom_palette.color[3], color_names);
-      palette_rgba = palette_to_palette_rgba(custom_palette);
+      palette_rgba = emulator_get_cgb_palette_rgba(
+          d->e, (CgbPaletteType)cgb_palette_type, cgb_palette_index);
     } else {
-      palette_rgba = emulator_get_palette_rgba(d->e, (PaletteType)palette_type);
+      static const int kPaletteCustom = 3;
+      static const char* palette_names[] = {"BGP", "OBP0", "OBP1", "Custom"};
+
+      ImGui::Combo("Palette", &palette_type, palette_names);
+
+      if (palette_type == kPaletteCustom) {
+        for (int i = 0; i < 3; ++i) {
+          char label[16];
+          snprintf(label, sizeof(label), "Copy from %s", palette_names[i]);
+          if (ImGui::Button(label)) {
+            custom_palette =
+                emulator_get_palette(d->e, static_cast<PaletteType>(i));
+          }
+        }
+
+        static const char* color_names[] = {"White", "Light Gray", "Dark Gray",
+                                            "Black"};
+        ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
+        ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
+        ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
+        ImGui::Combo("Color 3", &custom_palette.color[3], color_names);
+        palette_rgba = palette_to_palette_rgba(custom_palette);
+      } else {
+        palette_rgba =
+            emulator_get_palette_rgba(d->e, (PaletteType)palette_type);
+      }
     }
 
     ImGui::Checkbox("8x16", &size8x16);

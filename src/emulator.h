@@ -108,6 +108,10 @@ typedef struct Obj {
 
 typedef struct { Color color[PALETTE_COLOR_COUNT]; } Palette;
 
+typedef struct PaletteRGBA {
+  RGBA color[PALETTE_COLOR_COUNT];
+} PaletteRGBA;
+
 typedef struct AudioBuffer {
   u32 frequency;    /* Sample frequency, as N samples per second */
   u32 freq_counter; /* Used for resampling; [0..APU_TICKS_PER_SECOND). */

@@ -418,6 +418,8 @@ void emulator_print_log_systems(void) {
   }
 }
 
+Bool emulator_is_cgb(struct Emulator* e) { return e->state.is_cgb; }
+
 int emulator_get_rom_size(struct Emulator* e) {
   return s_rom_bank_count[e->cart_info->rom_size] << ROM_BANK_SHIFT;
 }
@@ -459,6 +461,17 @@ Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
 
 PaletteRGBA emulator_get_palette_rgba(struct Emulator* e, PaletteType type) {
   return palette_to_palette_rgba(emulator_get_palette(e, type));
+}
+
+PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator* e,
+                                          CgbPaletteType type, int index) {
+  assert(e->state.is_cgb);
+  assert(index < 8);
+  switch (type) {
+    default:
+    case CGB_PALETTE_TYPE_BGCP: return e->state.ppu.bgcp.palettes[index];
+    case CGB_PALETTE_TYPE_OBCP: return e->state.ppu.obcp.palettes[index];
+  }
 }
 
 void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
