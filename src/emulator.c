@@ -1952,10 +1952,18 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case IO_STAT_ADDR: {
+      Bool new_vblank_irq = UNPACK(value, STAT_VBLANK_INTR);
+      Bool new_hblank_irq = UNPACK(value, STAT_HBLANK_INTR);
       if (LCDC.display) {
         Bool hblank = TRIGGER_MODE_IS(HBLANK) && !STAT.hblank.irq;
         Bool vblank = TRIGGER_MODE_IS(VBLANK) && !STAT.vblank.irq;
         Bool y_compare = STAT.new_ly_eq_lyc && !STAT.y_compare.irq;
+        if (IS_CGB) {
+          /* CGB only triggers on STAT write if the value being written
+           * actually sets that IRQ */
+          hblank = hblank && new_hblank_irq;
+          vblank = vblank && new_vblank_irq;
+        }
         if (!STAT.if_ && (hblank || vblank || y_compare)) {
           HOOK(trigger_stat_from_write_cccii, y_compare ? 'Y' : '.',
                vblank ? 'V' : '.', hblank ? 'H' : '.', PPU.ly,
@@ -1967,8 +1975,8 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       }
       STAT.y_compare.irq = UNPACK(value, STAT_YCOMPARE_INTR);
       STAT.mode2.irq = UNPACK(value, STAT_MODE2_INTR);
-      STAT.vblank.irq = UNPACK(value, STAT_VBLANK_INTR);
-      STAT.hblank.irq = UNPACK(value, STAT_HBLANK_INTR);
+      STAT.vblank.irq = new_vblank_irq;
+      STAT.hblank.irq = new_hblank_irq;
       break;
     }
     case IO_SCY_ADDR:

@@ -116,6 +116,7 @@
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/ly_lyc_write-GS.gb", 10, "dbb4741d3314417ae6edca0eaeaa838ffbf9b0e8"],
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/ly_new_frame-GS.gb", 18, "407bff6902e048c307868b1feddcdc4cfa79d3f8"],
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/stat_write_if-GS.gb", 300, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
+  ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/stat_write_if-C.gb", 300, "d2c5e9902e751f0ac0dc9cd2438c9b54d76dc125"],
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/gpu/vblank_if_timing.gb", 9, "dbd9b17120938b29f38da7d6b0004afff70b0419"],
   ["wilbertpol", "test/mooneye-gb-wp/build/acceptance/timer/timer_if.gb", 1, "2ff8a38f7421feb1e86de059ed47fb908501ed8a"],
 

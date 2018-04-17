@@ -4,6 +4,7 @@
 
 | Test | Result |
 | --- | --- |
+| cgb\_sound | :ok: |
 | cpu\_instrs | :ok: |
 | dmg\_sound | :ok: |
 | halt\_bug | :ok: |
@@ -83,6 +84,9 @@
 | emulator-only/mbc1/rom\_512Kb | :ok: |
 | emulator-only/mbc1/rom\_8Mb | :ok: |
 | manual-only/sprite\_priority | :ok: |
+| misc/bits/unused\_hwio-C | :x: |
+| misc/boot\_hwio-C | :x: |
+| misc/gpu/vblank\_stat\_intr-C | :x: |
 
 [Wilbert Pol's mooneye-gb tests](https://github.com/wilbertpol/mooneye-gb):
 
@@ -124,6 +128,7 @@
 | acceptance/gpu/ly\_lyc\_153\_write-GS | :ok: |
 | acceptance/gpu/ly\_lyc\_write-GS | :ok: |
 | acceptance/gpu/ly\_new\_frame-GS | :ok: |
+| acceptance/gpu/stat\_write\_if-C | :ok: |
 | acceptance/gpu/stat\_write\_if-GS | :ok: |
 | acceptance/gpu/vblank\_if\_timing | :ok: |
 | acceptance/timer/timer\_if | :ok: |
