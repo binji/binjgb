@@ -20,7 +20,7 @@ MOONEYE_GB_GIT_SHA = 'fbef416596240ddb4347e208dcb81d845ae874ec'
 
 MOONEYE_GB_WP_DIR = os.path.join(common.TEST_DIR, 'mooneye-gb-wp')
 MOONEYE_GB_WP_GIT_REPO = 'https://github.com/binji/mooneye-gb-tests'
-MOONEYE_GB_WP_GIT_SHA = 'fe917d6ae1eb39c14a16932c6a5c51f77ac1cf13'
+MOONEYE_GB_WP_GIT_SHA = '862912f5d22bd624ed11fc244000b0a38630c3d4'
 
 WLA_DX_DIR = os.path.join(common.THIRD_PARTY_DIR, 'wla-dx')
 WLA_DX_BUILD_DIR = os.path.join(WLA_DX_DIR, 'build')
