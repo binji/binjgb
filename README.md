@@ -2,21 +2,22 @@
 
 # binjgb
 
-A simple GB emulator.
+A simple GB/GBC emulator.
 
 ## Features
 
+* [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
+* Hacky-but-passable **CGB support**!
 * Cycle accurate, passes many timing tests (see below)
 * Supports MBC1, MBC1M, MMM01, MBC2, MBC3, MBC5 and HuC1
 * Save/load battery backup
 * Save/load emulator state to file
-* Fast-forward, pause and step one frame
-* Rewind and seek to specific cycle
+* **Fast-forward**, pause and step one frame
+* **Rewind** and seek to specific cycle
 * Disable/enable each audio channel
 * Disable/enable BG, Window and Sprite layers
 * Convenient Python test harness using hashes to validate
-* (WIP) Debugger with various visualizations (see below)
-* [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
+* (WIP) **Debugger** with various visualizations (see below)
 
 ## DMG Screenshots
 
