@@ -64,7 +64,7 @@ void Debugger::TiledataWindow::Tick() {
     int tw = wrap_width;
     int th = (tile_count + tw - 1) / tw;
 
-    int space_at_end = 3 * ImGui::GetTextLineHeightWithSpacing();
+    int space_at_end = (2 + 1) * ImGui::GetFrameHeightWithSpacing();
 
     ImGui::BeginChild("Tiles", ImVec2(0, -space_at_end), false,
                       ImGuiWindowFlags_HorizontalScrollbar);

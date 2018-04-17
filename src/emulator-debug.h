@@ -122,6 +122,7 @@ PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator*, CgbPaletteType,
                                           int index);
 void emulator_get_tile_data(struct Emulator*, TileData);
 void emulator_get_tile_map(struct Emulator*, TileMapSelect, TileMap);
+void emulator_get_tile_map_attr(struct Emulator*, TileMapSelect, TileMap);
 void emulator_get_bg_scroll(struct Emulator*, u8* x, u8* y);
 void emulator_get_window_scroll(struct Emulator*, u8* x, u8* y);
 

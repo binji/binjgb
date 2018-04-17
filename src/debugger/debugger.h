@@ -159,6 +159,7 @@ class Debugger {
     int scale = 3;
     LayerType layer_type = LAYER_TYPE_BG;
     bool highlight = true;
+    int hovering_map_index = 0;
   };
 
   struct MemoryWindow : Window {

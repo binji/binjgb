@@ -511,6 +511,14 @@ void emulator_get_tile_map(struct Emulator* e, TileMapSelect map_select,
   memcpy(out_tile_map, &e->state.vram.data[offset], TILE_MAP_SIZE);
 }
 
+void emulator_get_tile_map_attr(struct Emulator* e, TileMapSelect map_select,
+                                TileMap out_tile_map) {
+  assert(emulator_is_cgb(e));
+  size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
+  memcpy(out_tile_map, &e->state.vram.data[offset + 0x2000], TILE_MAP_SIZE);
+}
+
+
 void emulator_get_bg_scroll(struct Emulator* e, u8* x, u8* y) {
   *x = PPU.scx;
   *y = PPU.scy;

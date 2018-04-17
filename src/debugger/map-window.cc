@@ -41,29 +41,46 @@ void Debugger::MapWindow::Tick() {
     TileDataSelect data_select = emulator_get_tile_data_select(d->e);
     TileMap tile_map;
     emulator_get_tile_map(d->e, map_select, tile_map);
-    PaletteRGBA palette_rgba =
-        emulator_get_palette_rgba(d->e, PALETTE_TYPE_BGP);
+
+    PaletteRGBA palette_rgba;
+    TileMap tile_map_attr;
+    if (d->is_cgb) {
+      emulator_get_tile_map_attr(d->e, map_select, tile_map_attr);
+    } else {
+      palette_rgba = emulator_get_palette_rgba(d->e, PALETTE_TYPE_BGP);
+    }
+
+    int space_at_end =
+        ((d->is_cgb ? 7 : 4) + 1) * ImGui::GetFrameHeightWithSpacing();
 
     const ImVec2 kTileMapSize(TILE_MAP_WIDTH, TILE_MAP_HEIGHT);
     const ImVec2 scaled_tile_size = kTileSize * scale;
     const ImVec2 scaled_tile_map_size = kTileMapSize * scaled_tile_size;
-    ImGui::BeginChild("Tiles", ImVec2(0, 0), false,
+    ImGui::BeginChild("Tiles", ImVec2(0, -space_at_end), false,
                       ImGuiWindowFlags_HorizontalScrollbar);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImGui::PushClipRect(cursor, cursor + scaled_tile_map_size, true);
     for (int ty = 0; ty < TILE_MAP_HEIGHT; ++ty) {
       for (int tx = 0; tx < TILE_MAP_WIDTH; ++tx) {
+        bool xflip = false, yflip = false;
         ImVec2 ul_pos = cursor + ImVec2(tx, ty) * scaled_tile_size;
-        int tile_index = tile_map[ty * TILE_MAP_WIDTH + tx];
+        int map_index = ty * TILE_MAP_WIDTH + tx;
+        int tile_index = tile_map[map_index];
         if (data_select == TILE_DATA_8800_97FF) {
           tile_index = 256 + (s8)tile_index;
         }
-        if (d->DrawTile(draw_list, tile_index, ul_pos, scale, palette_rgba)) {
-          ImGui::SetTooltip("tile: %u (0x%04x)", tile_index,
-                            0x8000 + tile_index * 16);
-          d->highlight_tile = true;
-          d->highlight_tile_index = tile_index;
+        if (d->is_cgb) {
+          u8 attr = tile_map_attr[map_index];
+          int palette_index = attr & 7;
+          if (attr & 0x08) { tile_index += 0x180; }
+          if (attr & 0x20) { xflip = true; }
+          if (attr & 0x40) { yflip = true; }
+          palette_rgba = emulator_get_cgb_palette_rgba(
+              d->e, CGB_PALETTE_TYPE_BGCP, palette_index);
+        }
+        if (d->DrawTile(draw_list, tile_index, ul_pos, scale, palette_rgba,
+                        xflip, yflip)) {
+          hovering_map_index = map_index;
         }
       }
     }
@@ -94,9 +111,31 @@ void Debugger::MapWindow::Tick() {
       }
     }
 
-    ImGui::PopClipRect();
     ImGui::Dummy(scaled_tile_map_size);
     ImGui::EndChild();
+    ImGui::Separator();
+
+    int map_index = hovering_map_index;
+    Address map_address =
+        (map_select == TILE_MAP_9800_9BFF ? 0x9800 : 0x9c00) + map_index;
+    int tile_index = tile_map[hovering_map_index];
+    if (data_select == TILE_DATA_8800_97FF) {
+      tile_index = 256 + (s8)tile_index;
+    }
+
+    ImGui::LabelText("Pos", "%d, %d", map_index & 31, map_index >> 5);
+    ImGui::LabelText("Map Address", "%04x", map_address);
+    ImGui::LabelText("Tile Index", "%02x", d->GetByteTileIndex(tile_index));
+    ImGui::LabelText("Tile Address", "%d:%04x", d->GetTileBank(tile_index),
+                     d->GetTileAddr(tile_index));
+    if (d->is_cgb) {
+      u8 attr = tile_map_attr[hovering_map_index];
+      ImGui::LabelText("Flip", "%c%c", (attr & 0x20) ? 'X' : '_',
+                       (attr & 0x40) ? 'Y' : '_');
+      ImGui::LabelText("Palette", "BGCP%d", attr & 7);
+      ImGui::LabelText("Priority", "%s",
+                       (attr & 0x80) ? "Above Obj" : "Normal");
+    }
   }
   ImGui::EndDock();
 }
