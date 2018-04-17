@@ -3864,6 +3864,18 @@ Result init_emulator(Emulator* e) {
   write_io(e, IO_IE_ADDR, 0x0);
   HDMA.blocks = 0xff;
 
+  /* Set initial CGB palettes to white. */
+  int pal_index;
+  for (pal_index = 0; pal_index < 2; ++pal_index) {
+    ColorPalettes* palette = pal_index == 0 ? &PPU.bgcp : &PPU.obcp;
+    int i;
+    for (i = 0; i < 32; ++i) {
+      palette->palettes[i >> 2].color[i & 3] = RGBA_WHITE;
+      palette->data[i * 2] = 0xff;
+      palette->data[i * 2 + 1] = 0x7f;
+    }
+  }
+
   APU.ticks = TICKS = 0;
   return OK;
   ON_ERROR_RETURN;
