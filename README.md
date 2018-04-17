@@ -18,7 +18,7 @@ A simple GB emulator.
 * (WIP) Debugger with various visualizations (see below)
 * [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
 
-## Screenshots
+## DMG Screenshots
 
 ![Bionic Commando](/images/bionic.png)
 ![Donkey Kong](/images/dk.png)
@@ -29,6 +29,16 @@ A simple GB emulator.
 ![Wario Land](/images/wario.png)
 ![Game Boy Wars](/images/wars.png)
 ![Is That a Demo in Your Pocket?](/images/pocket.png)
+
+## CGB Screenshots
+
+![Dragon Warrior](/images/dw.png)
+![Hamtaro](/images/ham.png)
+![Metal Gear Solid](/images/mgs.png)
+![It Came From Planet Zilog](/images/pz.png)
+![Survival Kids](/images/sk.png)
+![Toki Tori](/images/toki.png)
+![Wario 3](/images/wario3.png)
 
 ## Debugger Screenshots
 
