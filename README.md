@@ -38,6 +38,7 @@ A simple GB/GBC emulator.
 ![Metal Gear Solid](/images/mgs.png)
 ![It Came From Planet Zilog](/images/pz.png)
 ![Survival Kids](/images/sk.png)
+![Aevilia](/images/aevilia.png)
 ![Toki Tori](/images/toki.png)
 ![Wario 3](/images/wario3.png)
 
