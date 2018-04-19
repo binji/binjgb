@@ -1372,6 +1372,7 @@ static Result init_memory_map(Emulator* e) {
       break;
     case MBC_TYPE_MBC5:
       memory_map->write_rom = mbc5_write_rom;
+      MMAP_STATE.mbc5.byte_2000_2fff = 1;
       break;
     case MBC_TYPE_HUC1:
       memory_map->write_rom = huc1_write_rom;
