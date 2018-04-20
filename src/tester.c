@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 
 #include "emulator-debug.h"
 #include "options.h"
@@ -60,14 +60,10 @@ void usage(int argc, char** argv) {
   emulator_print_log_systems();
 }
 
-static time_t s_start_time;
-static void init_time(void) {
-  s_start_time = time(NULL);
-}
-
 static f64 get_time_sec(void) {
-  time_t now = time(NULL);
-  return now - s_start_time;
+  struct timeval tp;
+  gettimeofday(&tp, NULL);
+  return (f64)tp.tv_sec + (f64)tp.tv_usec / 1000000.0;
 }
 
 void parse_options(int argc, char**argv) {
@@ -182,7 +178,6 @@ int main(int argc, char** argv) {
   int result = 1;
   struct Emulator* e = NULL;
 
-  init_time();
   parse_options(argc, argv);
 
   FileData rom;
@@ -203,6 +198,7 @@ int main(int argc, char** argv) {
   u32 animation_frame = 0; /* Will likely differ from PPU frame. */
   u32 next_input_frame = 0;
   u32 next_input_frame_buttons = 0;
+  f64 start_time = get_time_sec();
   while (TRUE) {
     EmulatorEvent event = emulator_run_until(e, until_ticks);
     if (event & EMULATOR_EVENT_NEW_FRAME) {
@@ -262,6 +258,12 @@ int main(int argc, char** argv) {
       finish_at_next_frame = TRUE;
     }
   }
+  f64 host_time = get_time_sec() - start_time;
+  Ticks real_total_ticks = emulator_get_ticks(e);
+  f64 gb_time = (f64)real_total_ticks / CPU_TICKS_PER_SECOND;
+  printf("time: gb=%.1fs host=%.1fs (%.1fx)\n", gb_time, host_time,
+         gb_time / host_time);
+
   if (s_output_ppm && !s_animate) {
     CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
   }
