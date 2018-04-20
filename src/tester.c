@@ -7,7 +7,10 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef _MSC_VER
 #include <sys/time.h>
+#endif
 
 #include "emulator-debug.h"
 #include "options.h"
@@ -61,9 +64,14 @@ void usage(int argc, char** argv) {
 }
 
 static f64 get_time_sec(void) {
+#ifdef _MSC_VER
+  // TODO(binji): Windows equivalent of gettimeofday.
+  return 0;
+#else
   struct timeval tp;
   gettimeofday(&tp, NULL);
   return (f64)tp.tv_sec + (f64)tp.tv_usec / 1000000.0;
+#endif
 }
 
 void parse_options(int argc, char**argv) {
