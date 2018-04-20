@@ -21,28 +21,49 @@ const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 
 var $ = document.querySelector.bind(document);
-var canvasEl = $('canvas');
 var emulator = null;
+var dbPromise = null;
 
 var data = {
   fps: 60,
   ticks: 0,
+  name: '',
+  loaded: false,
   paused: false,
+  canvas: {
+    show: false,
+    scale: 3,
+  },
   rewind: {
     minTicks: 0,
     maxTicks: 0,
+  },
+  files: {
+    show: true,
+    selected: 0,
+    list: []
   }
 };
 
 var vm = new Vue({
-  el: '.bar-wrap',
+  el: '.main',
   data: data,
   created: function() {
     setInterval(() => {
       this.fps = emulator ? emulator.fps : 60;
     }, 500);
+    this.readFiles();
+  },
+  mounted: function() {
+    $('.main').classList.add('ready');
   },
   computed: {
+    canvasWidthPx: function() {
+      return (160 * this.canvas.scale) + 'px';
+    },
+    canvasHeightPx: function() {
+      return (144 * this.canvas.scale) + 'px';
+    },
     rewindTime: function() {
       function zeroPadLeft(num, width) {
         num = '' + (num | 0);
@@ -59,23 +80,18 @@ var vm = new Vue({
       var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
       return `${hr}:${min}:${sec}.${ms}`;
     },
-    pauseText: function() {
+    pauseLabel: function() {
       return this.paused ? 'resume' : 'pause';
-    }
+    },
+    isFilesListEmpty: function() {
+      return this.files.list.length == 0;
+    },
   },
-  methods: {
-    setScale: function(scale) {
-      canvasEl.style.width = canvasEl.width * scale + 'px';
-      canvasEl.style.height = canvasEl.height * scale + 'px';
-    },
-    updateTicks: function() {
-      this.ticks = _emulator_get_ticks_f64(emulator.e);
-    },
-    setPaused: function(paused) {
+  watch: {
+    paused: function(newPaused, oldPaused) {
       if (!emulator) return;
-      if (paused == this.paused) return;
-      this.paused = paused;
-      if (paused) {
+      if (newPaused == oldPaused) return;
+      if (newPaused) {
         emulator.pause();
         this.updateTicks();
         this.rewind.minTicks =
@@ -85,33 +101,140 @@ var vm = new Vue({
       } else {
         emulator.resume();
       }
+    }
+  },
+  methods: {
+    updateTicks: function() {
+      this.ticks = _emulator_get_ticks_f64(emulator.e);
     },
     togglePause: function() {
-      this.setPaused(!this.paused);
+      this.paused = !this.paused;
     },
     rewindTo: function(event) {
       if (!emulator) return;
       emulator.rewindToTicks(+event.target.value);
       this.updateTicks();
-    }
+    },
+    selectFile: function(index) {
+      this.files.selected = index;
+    },
+    playFile: function(index) {
+      let file = this.files.list[index];
+      let reader = new FileReader();
+      reader.onerror = (event) => console.log("Can't play!");
+      reader.onloadend = (event) => {
+        this.paused = false;
+        this.loaded = true;
+        this.canvas.show = true;
+        this.files.show = false;
+        this.name = file.name;
+        startEmulator(event.target.result);
+      };
+      reader.readAsArrayBuffer(file.rom);
+    },
+    uploadClicked: function() {
+      $('#upload').click();
+    },
+    uploadFile: function(event) {
+      (new Promise((resolve, reject) => {
+        let name = event.target.files[0].name;
+        let reader = new FileReader();
+        reader.onerror = (event) => reject(event.target.error);
+        reader.onloadend = (event) =>
+            resolve({name, buffer: event.target.result});
+        reader.readAsArrayBuffer(event.target.files[0]);
+      })).then(({name, buffer}) => {
+        return crypto.subtle.digest('SHA-1', buffer).then((digest) => {
+          return {name, digest, buffer};
+        });
+      }).then(({name, digest, buffer}) => {
+        const array = Array.from(new Uint8Array(digest));
+        const sha1 = array.map(b => ('00' + b.toString(16)).slice(-2)).join('');
+        return dbPromise.then((db) => {
+          return new Promise((resolve, reject) => {
+            let transaction = db.transaction('games', 'readwrite');
+            let data = {sha1, name, rom: new Blob([buffer])};
+            transaction.onerror = (event) => {
+              if (event.target.error.name === 'ConstraintError') {
+                console.log(`ROM with sha1 '${sha1}' already in database.`);
+                resolve(buffer);
+              } else {
+                reject(event.target.error);
+              }
+            };
+            transaction.oncomplete = (event) => {
+              this.files.list.push(data);
+              resolve(buffer);
+            };
+            transaction.objectStore('games').add(data);
+          });
+        });
+      });
+    },
+    toggleOpenDialog: function() {
+      this.files.show = !this.files.show;
+      if (this.files.show) {
+        this.paused = true;
+      }
+    },
+    readFiles: function() {
+      this.files.list.length = 0;
+
+      dbPromise.then((db) => {
+        let transaction = db.transaction('games');
+        return new Promise((resolve, reject) => {
+          transaction.onerror = resolve(db);
+          transaction.onsuccess = resolve(db);
+          let request = transaction.objectStore('games').openCursor();
+          request.onsuccess = (event) => {
+            let cursor = event.target.result;
+            if (cursor) {
+              this.files.list.push(cursor.value);
+              cursor.continue();
+            }
+          };
+        });
+      });
+    },
+    prettySize: function(size) {
+      if (size >= 1024 * 1024) {
+        return `${(size / (1024 * 1024)).toFixed(1)}Mib`;
+      } else if (size >= 1024) {
+        return `${(size / 1024).toFixed(1)}Kib`;
+      } else {
+        return `${size}b`;
+      }
+    },
   }
 });
 
-$('#file').addEventListener('change', (event) => {
-  var reader = new FileReader();
-  reader.onloadend = () => startEmulator(reader.result);
-  reader.readAsArrayBuffer(event.target.files[0]);
-});
+(function initIndexedDB() {
+  dbPromise = new Promise((resolve, reject) => {
+    var request = window.indexedDB.open('db', 1);
+    request.onerror = (event) => {
+      reject(event);
+    };
+    request.onsuccess = (event) => {
+      resolve(event.target.result);
+    };
+    request.onupgradeneeded = (event) => {
+      var db = event.target.result;
+      var objectStore = db.createObjectStore('games', {keyPath: 'sha1'});
+      objectStore.createIndex('sha1', 'sha1', {unique: true});
+      resolve(db);
+    };
+  });
+})();
 
 (function bindKeyInput() {
   var keyRewind = function(e, isKeyDown) {
     if (emulator.isRewinding() !== isKeyDown) {
       if (isKeyDown) {
-        vm.setPaused(true);
+        vm.paused = true;
         emulator.setAutoRewind(true);
       } else {
         emulator.setAutoRewind(false);
-        vm.setPaused(false);
+        vm.paused = false;
       }
     }
   };
@@ -153,6 +276,7 @@ function startEmulator(romArrayBuffer) {
 }
 
 function Emulator(romArrayBuffer) {
+  let canvasEl = $('canvas');
   this.cleanupFuncs = [];
   this.renderer = new WebGLRenderer(canvasEl);
   // this.renderer = new Canvas2DRenderer(canvasEl);
@@ -206,30 +330,23 @@ Emulator.prototype.cleanup = function() {
   }
 };
 
-Emulator.prototype.addEventListener = function(el, name, func) {
-  el.addEventListener(name, func);
-  this.defer(() => el.removeEventListener(name, func));
-};
-
 Emulator.prototype.isPaused = function() {
   return this.rafCancelToken === null;
 };
 
 Emulator.prototype.pause = function() {
-  this.cancelAnimationFrame();
-  this.audio.suspend();
-  this.beginRewind();
+  if (!this.isPaused()) {
+    this.cancelAnimationFrame();
+    this.audio.suspend();
+    this.beginRewind();
+  }
 };
 
 Emulator.prototype.resume = function() {
-  this.endRewind();
-  this.requestAnimationFrame();
-  this.audio.resume();
-};
-
-Emulator.prototype.keyTogglePaused = function(e, isKeyDown) {
-  if (isKeyDown) {
-    vm.togglePause();
+  if (this.isPaused()) {
+    this.endRewind();
+    this.requestAnimationFrame();
+    this.audio.resume();
   }
 };
 
@@ -244,6 +361,7 @@ Emulator.prototype.setAutoRewind = function(enabled) {
       var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
       var rewindTo = Math.max(oldest, start - delta);
       this.rewindToTicks(rewindTo);
+      vm.ticks = emulator.getTicks();
     }, updateMs);
     this.defer(() => clearInterval(this.rewindIntervalId));
   } else {
