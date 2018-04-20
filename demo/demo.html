@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <head>
   <title>binjgb</title>
+  <link href="reset.css" rel="stylesheet">
   <style>
+    /* https://css-tricks.com/box-sizing/ */
+    html {
+      box-sizing: border-box;
+    }
+    *, *:before, *:after {
+      box-sizing: inherit;
+    }
     body {
       display: grid;
       position: absolute;
@@ -44,7 +52,12 @@
     }
     #rewind {
       height: 1em;
+      width: 100%;
       grid-column: 2;
+      margin : 2px;
+    }
+    #rewindTime {
+      padding: 0 8px;
     }
     .left {
       grid-column: 1;
