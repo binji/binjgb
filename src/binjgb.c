@@ -240,10 +240,11 @@ static void rewind_by(Ticks delta) {
   buffer[GLYPHS_PER_LINE - 1] = '|';
   buffer[GLYPHS_PER_LINE] = 0;
 
-  u32 hr, min, sec, ms;
-  emulator_ticks_to_time(then, &hr, &min, &sec, &ms);
+  u32 day, hr, min, sec, ms;
+  emulator_ticks_to_time(then, &day, &hr, &min, &sec, &ms);
   char time[64];
-  snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", hr, min, sec, ms / 10);
+  snprintf(time, sizeof(time), "%u:%02u:%02u.%02u", day * 24 + hr, min, sec,
+           ms / 10);
   size_t len = strlen(time);
   memcpy(&buffer[(GLYPHS_PER_LINE - len) / 2], time, len);
 

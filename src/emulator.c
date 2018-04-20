@@ -97,36 +97,35 @@
   V(SGB_FLAG_NONE, 0)       \
   V(SGB_FLAG_SUPPORTED, 3)
 
-#define FOREACH_CART_TYPE(V)                                               \
-  V(CART_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY)                   \
-  V(CART_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY)                         \
-  V(CART_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY)                   \
-  V(CART_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY)         \
-  V(CART_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY)                         \
-  V(CART_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY)               \
-  V(CART_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY)                       \
-  V(CART_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY)                 \
-  V(CART_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY)       \
-  V(CART_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY)         \
-  V(CART_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY)  \
-  V(CART_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC4, 0x15, MBC4, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC4_RAM, 0x16, MBC4, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC4_RAM_BATTERY, 0x17, MBC4, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY)                  \
-  V(CART_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY)        \
-  V(CART_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY)                 \
-  V(CART_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY)           \
-  V(CART_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM, WITH_BATTERY) \
-  V(CART_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY)             \
-  V(CART_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY)               \
-  V(CART_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY)                        \
-  V(CART_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY)
+#define FOREACH_CART_TYPE(V)                                                   \
+  V(CART_TYPE_ROM_ONLY, 0x0, NO_MBC, NO_RAM, NO_BATTERY, NO_TIMER)             \
+  V(CART_TYPE_MBC1, 0x1, MBC1, NO_RAM, NO_BATTERY, NO_TIMER)                   \
+  V(CART_TYPE_MBC1_RAM, 0x2, MBC1, WITH_RAM, NO_BATTERY, NO_TIMER)             \
+  V(CART_TYPE_MBC1_RAM_BATTERY, 0x3, MBC1, WITH_RAM, WITH_BATTERY, NO_TIMER)   \
+  V(CART_TYPE_MBC2, 0x5, MBC2, NO_RAM, NO_BATTERY, NO_TIMER)                   \
+  V(CART_TYPE_MBC2_BATTERY, 0x6, MBC2, NO_RAM, WITH_BATTERY, NO_TIMER)         \
+  V(CART_TYPE_ROM_RAM, 0x8, NO_MBC, WITH_RAM, NO_BATTERY, NO_TIMER)            \
+  V(CART_TYPE_ROM_RAM_BATTERY, 0x9, NO_MBC, WITH_RAM, WITH_BATTERY, NO_TIMER)  \
+  V(CART_TYPE_MMM01, 0xb, MMM01, NO_RAM, NO_BATTERY, NO_TIMER)                 \
+  V(CART_TYPE_MMM01_RAM, 0xc, MMM01, WITH_RAM, NO_BATTERY, NO_TIMER)           \
+  V(CART_TYPE_MMM01_RAM_BATTERY, 0xd, MMM01, WITH_RAM, WITH_BATTERY, NO_TIMER) \
+  V(CART_TYPE_MBC3_TIMER_BATTERY, 0xf, MBC3, NO_RAM, WITH_BATTERY, WITH_TIMER) \
+  V(CART_TYPE_MBC3_TIMER_RAM_BATTERY, 0x10, MBC3, WITH_RAM, WITH_BATTERY,      \
+    WITH_TIMER)                                                                \
+  V(CART_TYPE_MBC3, 0x11, MBC3, NO_RAM, NO_BATTERY, NO_TIMER)                  \
+  V(CART_TYPE_MBC3_RAM, 0x12, MBC3, WITH_RAM, NO_BATTERY, NO_TIMER)            \
+  V(CART_TYPE_MBC3_RAM_BATTERY, 0x13, MBC3, WITH_RAM, WITH_BATTERY, NO_TIMER)  \
+  V(CART_TYPE_MBC5, 0x19, MBC5, NO_RAM, NO_BATTERY, NO_TIMER)                  \
+  V(CART_TYPE_MBC5_RAM, 0x1a, MBC5, WITH_RAM, NO_BATTERY, NO_TIMER)            \
+  V(CART_TYPE_MBC5_RAM_BATTERY, 0x1b, MBC5, WITH_RAM, WITH_BATTERY, NO_TIMER)  \
+  V(CART_TYPE_MBC5_RUMBLE, 0x1c, MBC5, NO_RAM, NO_BATTERY, NO_TIMER)           \
+  V(CART_TYPE_MBC5_RUMBLE_RAM, 0x1d, MBC5, WITH_RAM, NO_BATTERY, NO_TIMER)     \
+  V(CART_TYPE_MBC5_RUMBLE_RAM_BATTERY, 0x1e, MBC5, WITH_RAM, WITH_BATTERY,     \
+    NO_TIMER)                                                                  \
+  V(CART_TYPE_POCKET_CAMERA, 0xfc, NO_MBC, NO_RAM, NO_BATTERY, NO_TIMER)       \
+  V(CART_TYPE_BANDAI_TAMA5, 0xfd, TAMA5, NO_RAM, NO_BATTERY, NO_TIMER)         \
+  V(CART_TYPE_HUC3, 0xfe, HUC3, NO_RAM, NO_BATTERY, NO_TIMER)                  \
+  V(CART_TYPE_HUC1_RAM_BATTERY, 0xff, HUC1, WITH_RAM, WITH_BATTERY, NO_TIMER)
 
 #define FOREACH_ROM_SIZE(V) \
   V(ROM_SIZE_32K, 0, 2)     \
@@ -207,7 +206,6 @@ typedef enum {
   MBC_TYPE_MBC1,
   MBC_TYPE_MBC2,
   MBC_TYPE_MBC3,
-  MBC_TYPE_MBC4,
   MBC_TYPE_MBC5,
   MBC_TYPE_MMM01,
   MBC_TYPE_TAMA5,
@@ -225,10 +223,16 @@ typedef enum {
   BATTERY_TYPE_WITH_BATTERY,
 } BatteryType;
 
+typedef enum {
+  TIMER_TYPE_NO_TIMER,
+  TIMER_TYPE_WITH_TIMER,
+} TimerType;
+
 typedef struct {
   MbcType mbc_type;
   ExtRamType ext_ram_type;
   BatteryType battery_type;
+  TimerType timer_type;
 } CartTypeInfo;
 
 typedef enum {
@@ -363,6 +367,14 @@ typedef struct {
 } Mbc1, Huc1, Mmm01;
 
 typedef struct {
+  Ticks offset_ticks;
+  Ticks latch_ticks;
+  u8 rtc_reg;
+  Bool rtc_halt;
+  Bool latched;
+} Mbc3;
+
+typedef struct {
   u8 byte_2000_2fff;
   u8 byte_3000_3fff;
 } Mbc5;
@@ -380,6 +392,7 @@ typedef struct {
   union {
     Mbc1 mbc1;
     Mmm01 mmm01;
+    Mbc3 mbc3;
     Huc1 huc1;
     Mbc5 mbc5;
   };
@@ -923,6 +936,10 @@ typedef struct Emulator {
 #define OBJ_BANK(X) BIT(X, 3)
 #define OBJ_CGB_PALETTE(X) BITS(X, 2, 0)
 
+#define MBC3_RTC_DAY_CARRY(X) BIT(X, 7)
+#define MBC3_RTC_HALT(X) BIT(X, 6)
+#define MBC3_RTC_DAY_HI(X) BIT(X, 0)
+
 static u32 s_rom_bank_count[] = {
 #define V(name, code, bank_count) [code] = bank_count,
     FOREACH_ROM_SIZE(V)
@@ -940,8 +957,9 @@ static u32 s_ext_ram_byte_size[] = {
 #define EXT_RAM_BYTE_SIZE_MASK(e) (EXT_RAM_BYTE_SIZE(e) - 1)
 
 static CartTypeInfo s_cart_type_info[] = {
-#define V(name, code, mbc, ram, battery) \
-  [code] = {MBC_TYPE_##mbc, EXT_RAM_TYPE_##ram, BATTERY_TYPE_##battery},
+#define V(name, code, mbc, ram, battery, timer)                         \
+  [code] = {MBC_TYPE_##mbc, EXT_RAM_TYPE_##ram, BATTERY_TYPE_##battery, \
+            TIMER_TYPE_##timer},
     FOREACH_CART_TYPE(V)
 #undef V
 };
@@ -1246,11 +1264,102 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case 2: /* 4000-5fff */
-      set_ext_ram_bank(e, value & MBC3_RAM_BANK_SELECT_MASK);
+      MMAP_STATE.mbc3.rtc_reg = value;
+      if (value < 8) {
+        set_ext_ram_bank(e, value & MBC3_RAM_BANK_SELECT_MASK);
+      }
       break;
+    case 3: { /* 6000-7fff */
+      Bool was_latched = MMAP_STATE.mbc3.latched;
+      Bool latched = value == 1;
+      if (!was_latched && latched) {
+        MMAP_STATE.mbc3.latch_ticks = TICKS;
+      }
+      MMAP_STATE.mbc3.latched = latched;
+      break;
+    }
     default:
       break;
   }
+}
+
+static u8 mbc3_read_ext_ram(Emulator* e, MaskedAddress addr) {
+  if (!MMAP_STATE.ext_ram_enabled) {
+    return INVALID_READ_BYTE;
+  }
+
+  Mbc3* mbc3 = &MMAP_STATE.mbc3;
+  if (mbc3->rtc_reg <= 3) {
+    return gb_read_ext_ram(e, addr);
+  }
+
+  if (!mbc3->latched) {
+    return INVALID_READ_BYTE;
+  }
+
+  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
+  u32 ms, sec, min, hr, day;
+  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
+                         &sec, &ms);
+  u8 result = INVALID_READ_BYTE;
+  switch (mbc3->rtc_reg) {
+    case 8: result = sec; break;
+    case 9: result = min; break;
+    case 10: result = hr; break;
+    case 11: result = day & 0xff; break;
+    case 12: {
+      u8 day_carry = day >= 512;
+      result = PACK(day_carry, MBC3_RTC_DAY_CARRY) |
+               PACK(mbc3->rtc_halt, MBC3_RTC_HALT) |
+               PACK(day & 1, MBC3_RTC_DAY_HI);
+      break;
+    }
+  }
+  return result;
+}
+
+static void mbc3_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
+  if (!MMAP_STATE.ext_ram_enabled) {
+    return;
+  }
+
+  Mbc3* mbc3 = &MMAP_STATE.mbc3;
+  if (mbc3->rtc_reg <= 3) {
+    gb_write_ext_ram(e, addr, value);
+    return;
+  }
+
+  if (!mbc3->latched) {
+    return;
+  }
+
+  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
+  u32 ms, sec, min, hr, day;
+  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
+                         &sec, &ms);
+  u8 day_lo = day & 0xff;
+  u8 day_hi = (day >> 8) & 1;
+  Bool carry = FALSE;
+
+  switch (mbc3->rtc_reg) {
+    case 8: sec = value % 60; break;
+    case 9: min = value % 60; break;
+    case 10: hr = value % 24; break;
+    case 11: day_lo = value; break;
+    case 12:
+      day_hi = UNPACK(value, MBC3_RTC_DAY_HI);
+      mbc3->rtc_halt = UNPACK(value, MBC3_RTC_HALT);
+      latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
+      carry = UNPACK(value, MBC3_RTC_DAY_CARRY);
+      break;
+    default:
+      return;
+  }
+  day = (day_hi << 8) | day_lo;
+  u64 new_total =
+      ((((((((u64)carry * 512 + day) * 24) + hr) * 60) + min) * 60) + sec) *
+      CPU_TICKS_PER_SECOND;
+  mbc3->offset_ticks = new_total - latch_ticks;
 }
 
 static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1366,10 +1475,14 @@ static Result init_memory_map(Emulator* e) {
     case MBC_TYPE_MMM01:
       memory_map->write_rom = mmm01_write_rom;
       break;
-    case MBC_TYPE_MBC3:
+    case MBC_TYPE_MBC3: {
       memory_map->write_rom = mbc3_write_rom;
-      /* TODO handle MBC3 RTC */
+      if (cart_type_info->timer_type == TIMER_TYPE_WITH_TIMER) {
+        memory_map->read_ext_ram = mbc3_read_ext_ram;
+        memory_map->write_ext_ram = mbc3_write_ext_ram;
+      }
       break;
+    }
     case MBC_TYPE_MBC5:
       memory_map->write_rom = mbc5_write_rom;
       MMAP_STATE.mbc5.byte_2000_2fff = 1;
@@ -4066,9 +4179,12 @@ void emulator_delete(Emulator* e) {
   }
 }
 
-void emulator_ticks_to_time(Ticks ticks, u32* hr, u32* min, u32* sec, u32* ms) {
-  *hr = ticks / (60 * 60 * (Ticks)CPU_TICKS_PER_SECOND);
-  *min = (ticks / (60 * (Ticks)CPU_TICKS_PER_SECOND)) % 60;
-  *sec = (ticks / (Ticks)CPU_TICKS_PER_SECOND) % 60;
-  *ms = (ticks / ((Ticks)CPU_TICKS_PER_SECOND / 1000)) % 1000;
+void emulator_ticks_to_time(Ticks ticks, u32* day, u32* hr, u32* min, u32* sec,
+                            u32* ms) {
+  u64 secs = ticks / CPU_TICKS_PER_SECOND;
+  *ms = (secs / 1000) % 1000;
+  *sec = secs % 60;
+  *min = (secs / 60) % 60;
+  *hr = (secs / (60 * 60)) % 24;
+  *day = secs / (60 * 60 * 24);
 }

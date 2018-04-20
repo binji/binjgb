@@ -160,7 +160,8 @@ Ticks emulator_get_ticks(struct Emulator*);
 u32 emulator_get_ppu_frame(struct Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
-void emulator_ticks_to_time(Ticks, u32* hr, u32* min, u32* sec, u32* ms);
+void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
+                            u32* ms);
 
 void emulator_init_state_file_data(FileData*);
 Result emulator_read_state(struct Emulator*, const FileData*);

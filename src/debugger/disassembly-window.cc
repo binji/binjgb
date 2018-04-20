@@ -20,12 +20,12 @@ void Debugger::DisassemblyWindow::Tick() {
 
   if (ImGui::BeginDock("Disassembly", &is_open)) {
     Ticks now = emulator_get_ticks(d->e);
-    u32 hr, min, sec, ms;
-    emulator_ticks_to_time(now, &hr, &min, &sec, &ms);
+    u32 day, hr, min, sec, ms;
+    emulator_ticks_to_time(now, &day, &hr, &min, &sec, &ms);
 
     Registers regs = emulator_get_registers(d->e);
-    ImGui::Text("Ticks: %" PRIu64 " Time: %u:%02u:%02u.%02u", now, hr, min, sec,
-                ms / 10);
+    ImGui::Text("Ticks: %" PRIu64 " Time: %u:%02u:%02u.%02u", now,
+                day * 24 + hr, min, sec, ms / 10);
     ImGui::Separator();
 
     auto&& text_reg8 = [&](const char* name, u8 value) {
