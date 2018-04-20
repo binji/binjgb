@@ -3,20 +3,29 @@
   <title>binjgb</title>
   <style>
     body {
-      display: flex;
+      display: grid;
       position: absolute;
       margin: 0;
       width: 100%;
       height: 100%;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: 1fr auto;
     }
     canvas {
       width: 480px;
       height: 432px;
       border: 1px solid gray;
-      margin: auto;
+      grid-column: 1;
+      grid-row: 1;
+      align-self: center;
+      justify-self: center;
+    }
+    .sidebar {
+      width: 0;
+      grid-column: 2;
+      grid-row: 1 / 2;
+      overflow: auto;
+      transition: width .2s ease-in-out;
     }
     .top-line {
       border-top: 1px solid gray;
@@ -24,25 +33,33 @@
     .bar-wrap {
       width: 100%;
       padding: 8px 0;
+      grid-column: 1 / 3;
+      grid-row: 2;
     }
     .bar {
-      display: flex;
+      display: grid;
       width: 800px;
       margin: auto;
-      flex-direction: row;
+      grid-template-columns: auto 1fr auto;
     }
     #rewind {
-      margin: auto;
-      width: 100%;
       height: 1em;
+      grid-column: 2;
     }
     .left {
-      margin-right: auto;
+      grid-column: 1;
+    }
+    .right {
+      grid-column: 3;
     }
   </style>
 </head>
 <body>
   <canvas width="160" height="144"></canvas>
+  <!--
+  <div class="sidebar">
+  </div>
+  -->
   <div class="bar-wrap top-line">
     <div class="bar">
       <div class="left">
@@ -53,15 +70,15 @@
         <button id="pause">pause</button>
         <input id="file" type="file">
       </div>
-      <div>
+      <div class="right">
         <span id="fps">0</span> FPS
       </div>
     </div>
-  </div>
-  <div id="rewindBar" class="bar-wrap" hidden>
-    <div class="bar">
-      <input id="rewind" type="range">
-      <span id="rewindTime"></span>
+    <div id="rewindBar" hidden>
+      <div class="bar">
+        <input id="rewind" type="range">
+        <span id="rewindTime" class="right"></span>
+      </div>
     </div>
   </div>
   <script src="binjgb.js"></script>
