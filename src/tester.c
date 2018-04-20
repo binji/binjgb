@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
         snprintf(buffer, sizeof(buffer), ".%08d.ppm", animation_frame++);
         const char* result = replace_extension(s_output_ppm, buffer);
         CHECK(SUCCESS(write_frame_ppm(e, result)));
-        free((char*)result);
+        xfree((char*)result);
       }
 
       /* TODO(binji): use timer rather than NEW_FRAME for timing button

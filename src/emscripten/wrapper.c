@@ -58,13 +58,14 @@ RewindBuffer* rewind_new_simple(struct Emulator* e, int frames_per_base_state,
   return rewind_new(&init, e);
 }
 
+static RewindState s_rewind_state;
+
 RewindState* rewind_begin(struct Emulator* e, RewindBuffer* rewind_buffer,
                           JoypadBuffer* joypad_buffer) {
-  RewindState* state = malloc(sizeof(RewindState));
-  state->e = e;
-  state->rewind_buffer = rewind_buffer;
-  state->joypad_buffer = joypad_buffer;
-  return state;
+  s_rewind_state.e = e;
+  s_rewind_state.rewind_buffer = rewind_buffer;
+  s_rewind_state.joypad_buffer = joypad_buffer;
+  return &s_rewind_state;
 }
 
 static void rewind_joypad_callback(struct JoypadButtons* joyp,
@@ -102,7 +103,6 @@ void rewind_end(RewindState* state) {
     rewind_truncate_to(state->rewind_buffer, state->e, &state->rewind_result);
     joypad_truncate_to(state->joypad_buffer, state->current);
   }
-  free(state);
 }
 
 #define DEFINE_JOYP_SET(name) \

@@ -88,16 +88,16 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
 }
 
 struct HostUI* host_ui_new(struct SDL_Window* window) {
-  HostUI* ui = calloc(1, sizeof(HostUI));
+  HostUI* ui = xcalloc(1, sizeof(HostUI));
   CHECK(SUCCESS(host_ui_init(ui, window)));
   return ui;
 error:
-  free(ui);
+  xfree(ui);
   return NULL;
 }
 
 void host_ui_delete(struct HostUI* ui) {
-  free(ui);
+  xfree(ui);
 }
 
 void host_ui_event(struct HostUI* ui, union SDL_Event* event) {

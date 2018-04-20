@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "memory.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

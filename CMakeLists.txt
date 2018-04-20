@@ -39,6 +39,7 @@ if (NOT EMSCRIPTEN)
 
   if (SDL2_FOUND AND OPENGL_FOUND)
     add_executable(binjgb
+      src/memory.c
       src/common.c
       src/emulator.c
       src/host.c
@@ -60,6 +61,7 @@ if (NOT EMSCRIPTEN)
       third_party/imgui/imgui.cpp
       third_party/imgui/imgui_draw.cpp
       third_party/imgui_dock/imgui_dock.cpp
+      src/memory.c
       src/common.c
       src/options.c
       src/emulator-debug.c
@@ -104,6 +106,7 @@ if (NOT EMSCRIPTEN)
   endif ()
 
   add_executable(binjgb-tester
+    src/memory.c
     src/common.c
     src/options.c
     src/emulator-debug.c
@@ -113,6 +116,7 @@ if (NOT EMSCRIPTEN)
   target_copy_to_bin(binjgb-tester)
 else (EMSCRIPTEN)
   add_executable(binjgb
+    src/memory.c
     src/emulator.c
     src/joypad.c
     src/rewind.c

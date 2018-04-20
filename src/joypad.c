@@ -15,7 +15,7 @@
 #define CMP_LT(x, y) ((x) < (y))
 
 JoypadBuffer* joypad_new(void) {
-  JoypadBuffer* buffer = malloc(sizeof(JoypadBuffer));
+  JoypadBuffer* buffer = xmalloc(sizeof(JoypadBuffer));
   ZERO_MEMORY(*buffer);
   buffer->sentinel.next = buffer->sentinel.prev = &buffer->sentinel;
   joypad_append(buffer, &buffer->last_buttons, 0);
@@ -26,16 +26,17 @@ void joypad_delete(JoypadBuffer* buffer) {
   JoypadChunk* current = buffer->sentinel.next;
   while (current != &buffer->sentinel) {
     JoypadChunk* next = current->next;
-    free(current->data);
-    free(current);
+    xfree(current->data);
+    xfree(current);
     current = next;
   }
+  xfree(buffer);
 }
 
 static JoypadChunk* alloc_joypad_chunk(size_t capacity) {
-  JoypadChunk* chunk = malloc(sizeof(JoypadChunk));
+  JoypadChunk* chunk = xmalloc(sizeof(JoypadChunk));
   ZERO_MEMORY(*chunk);
-  chunk->data = malloc(capacity * sizeof(JoypadState));
+  chunk->data = xmalloc(capacity * sizeof(JoypadState));
   chunk->capacity = capacity;
   return chunk;
 }
@@ -124,8 +125,8 @@ void joypad_truncate_to(JoypadBuffer* buffer, JoypadStateIter iter) {
   JoypadChunk* sentinel = &buffer->sentinel;
   while (chunk != sentinel) {
     JoypadChunk* temp = chunk->next;
-    free(chunk->data);
-    free(chunk);
+    xfree(chunk->data);
+    xfree(chunk);
     chunk = temp;
   }
   iter.chunk->next = sentinel;

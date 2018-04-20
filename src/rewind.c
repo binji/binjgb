@@ -90,12 +90,12 @@
 static void rewind_sanity_check(RewindBuffer*, struct Emulator*);
 
 RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
-  RewindBuffer* buffer = malloc(sizeof(RewindBuffer));
+  RewindBuffer* buffer = xmalloc(sizeof(RewindBuffer));
   ZERO_MEMORY(*buffer);
   buffer->init = *init;
 
   size_t capacity = init->buffer_capacity;
-  u8* data = malloc(capacity);
+  u8* data = xmalloc(capacity);
   emulator_init_state_file_data(&buffer->last_state);
   emulator_init_state_file_data(&buffer->last_base_state);
   emulator_init_state_file_data(&buffer->rewind_diff_state);
@@ -113,8 +113,11 @@ RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
 }
 
 void rewind_delete(RewindBuffer* buffer) {
-  free(buffer->data_range[0].begin);
-  free(buffer);
+  xfree(buffer->rewind_diff_state.data);
+  xfree(buffer->last_base_state.data);
+  xfree(buffer->last_state.data);
+  xfree(buffer->data_range[0].begin);
+  xfree(buffer);
 }
 
 static u8* write_varint(u32 value, u8* dst_begin, u8* dst_max_end) {

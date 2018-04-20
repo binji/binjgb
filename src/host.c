@@ -128,7 +128,7 @@ static Result host_init_audio(Host* host) {
   host->audio.dev = SDL_OpenAudioDevice(NULL, 0, &want, &host->audio.spec, 0);
   CHECK_MSG(host->audio.dev != 0, "SDL_OpenAudioDevice failed.\n");
 
-  host->audio.buffer = calloc(1, host->audio.spec.size);
+  host->audio.buffer = xcalloc(1, host->audio.spec.size);
   CHECK_MSG(host->audio.buffer != NULL, "Audio buffer allocation failed.\n");
   return OK;
   ON_ERROR_RETURN;
@@ -388,7 +388,7 @@ void host_step(Host* host) {
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {
-  Host* host = calloc(1, sizeof(Host));
+  Host* host = xcalloc(1, sizeof(Host));
   host->init = *init;
   host->hook_ctx.host = host;
   host->hook_ctx.e = e;
@@ -396,7 +396,7 @@ Host* host_new(const HostInit *init, struct Emulator* e) {
   CHECK(SUCCESS(host_init(host, e)));
   return host;
 error:
-  free(host);
+  xfree(host);
   return NULL;
 }
 
@@ -408,8 +408,8 @@ void host_delete(Host* host) {
     SDL_Quit();
     joypad_delete(host->joypad_buffer);
     rewind_delete(host->rewind_buffer);
-    free(host->audio.buffer);
-    free(host);
+    xfree(host->audio.buffer);
+    xfree(host);
   }
 }
 
@@ -492,7 +492,7 @@ static GLTextureFormat host_apply_texture_format(HostTextureFormat format) {
 
 HostTexture* host_create_texture(Host* host, int w, int h,
                                  HostTextureFormat format) {
-  HostTexture* texture = malloc(sizeof(HostTexture));
+  HostTexture* texture = xmalloc(sizeof(HostTexture));
   texture->width = next_power_of_two(w);
   texture->height = next_power_of_two(h);
 
@@ -523,7 +523,7 @@ void host_upload_texture(Host* host, HostTexture* texture, int w, int h,
 void host_destroy_texture(Host* host, HostTexture* texture) {
   GLuint tex = texture->handle;
   glDeleteTextures(1, &tex);
-  free(texture);
+  xfree(texture);
 }
 
 void host_render_screen_overlay(struct Host* host,

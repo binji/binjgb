@@ -69,6 +69,7 @@ function Emulator(romArrayBuffer) {
   this.defer(() => _joypad_delete(this.joypadBuffer));
 
   var romData = _malloc(romArrayBuffer.byteLength);
+  this.defer(() => _free(romData));
   HEAPU8.set(
       new Uint8Array(romArrayBuffer), romData, romArrayBuffer.byteLength);
   this.e = _emulator_new_simple(

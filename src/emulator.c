@@ -3932,7 +3932,7 @@ Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   audio_buffer->frames = frames;
   size_t buffer_size =
       (frames + AUDIO_BUFFER_EXTRA_FRAMES) * SOUND_OUTPUT_COUNT;
-  audio_buffer->data = malloc(buffer_size); /* Leaks. */
+  audio_buffer->data = xmalloc(buffer_size);
   CHECK_MSG(audio_buffer->data != NULL, "Audio buffer allocation failed.\n");
   audio_buffer->end = audio_buffer->data + buffer_size;
   audio_buffer->position = audio_buffer->data;
@@ -4057,7 +4057,7 @@ static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
 
 void emulator_init_state_file_data(FileData* file_data) {
   file_data->size = sizeof(EmulatorState);
-  file_data->data = malloc(file_data->size);
+  file_data->data = xmalloc(file_data->size);
 }
 
 Result emulator_read_state(Emulator* e, const FileData* file_data) {
@@ -4127,7 +4127,7 @@ Result emulator_write_ext_ram_to_file(struct Emulator* e,
   Result result = ERROR;
   FileData file_data;
   file_data.size = EXT_RAM.size;
-  file_data.data = malloc(file_data.size);
+  file_data.data = xmalloc(file_data.size);
   CHECK(SUCCESS(emulator_write_ext_ram(e, &file_data)));
   CHECK(SUCCESS(file_write(filename, &file_data)));
   result = OK;
@@ -4161,7 +4161,7 @@ error:
 }
 
 Emulator* emulator_new(const EmulatorInit* init) {
-  Emulator* e = calloc(1, sizeof(Emulator));
+  Emulator* e = xcalloc(1, sizeof(Emulator));
   CHECK(SUCCESS(set_rom_file_data(e, &init->rom)));
   CHECK(SUCCESS(init_emulator(e)));
   CHECK(
@@ -4174,8 +4174,8 @@ error:
 
 void emulator_delete(Emulator* e) {
   if (e) {
-    free(e->audio_buffer.data);
-    free(e);
+    xfree(e->audio_buffer.data);
+    xfree(e);
   }
 }
 

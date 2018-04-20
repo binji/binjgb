@@ -12,7 +12,7 @@
 
 const char* replace_extension(const char* filename, const char* extension) {
   size_t length = strlen(filename) + strlen(extension) + 1; /* +1 for \0. */
-  char* result = malloc(length);
+  char* result = xmalloc(length);
   char* last_dot = strrchr(filename, '.');
   if (last_dot == NULL) {
     snprintf(result, length, "%s%s", filename, extension);
@@ -38,7 +38,7 @@ Result file_read(const char* filename, FileData* out_file_data) {
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   long size;
   CHECK(SUCCESS(get_file_size(f, &size)));
-  u8* data = malloc(size);
+  u8* data = xmalloc(size);
   CHECK_MSG(data, "allocation failed.\n");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
   fclose(f);
@@ -59,5 +59,5 @@ Result file_write(const char* filename, const FileData* file_data) {
 }
 
 void file_data_delete(const FileData* file_data) {
-  free(file_data->data);
+  xfree(file_data->data);
 }

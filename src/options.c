@@ -9,6 +9,8 @@
 
 #include <string.h>
 
+#include "common.h"
+
 typedef struct OptionParser {
   const Option* options;
   size_t num_options;
@@ -19,7 +21,7 @@ typedef struct OptionParser {
 
 OptionParser* option_parser_new(const Option* options, size_t num_options,
                                 int argc, char** argv) {
-  OptionParser* parser = calloc(1, sizeof(OptionParser));
+  OptionParser* parser = xcalloc(1, sizeof(OptionParser));
   parser->options = options;
   parser->num_options = num_options;
   parser->argc = argc;
@@ -124,5 +126,5 @@ OptionResult option_parser_next(OptionParser* parser) {
 }
 
 void option_parser_delete(OptionParser* parser) {
-  free(parser);
+  xfree(parser);
 }
