@@ -265,6 +265,10 @@ int main(int argc, char** argv) {
     if (event & EMULATOR_EVENT_UNTIL_TICKS) {
       finish_at_next_frame = TRUE;
     }
+    if (event & EMULATOR_EVENT_INVALID_OPCODE) {
+      printf("!! hit invalid opcode, pc=%04x\n", emulator_get_registers(e).PC);
+      break;
+    }
   }
   f64 host_time = get_time_sec() - start_time;
   Ticks real_total_ticks = emulator_get_ticks(e);

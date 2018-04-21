@@ -10,12 +10,19 @@
 #include <stdarg.h>
 
 #define MAX_TRACE_STACK 16
+#define MAX_BREAKPOINTS 256
 static Bool s_trace_stack[MAX_TRACE_STACK] = {FALSE};
 static size_t s_trace_stack_top = 1;
 static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
+static Breakpoint s_breakpoints[MAX_BREAKPOINTS];
+static Address s_breakpoint_mask[2];
+static const Breakpoint s_invalid_breakpoint;
+static int s_breakpoint_count;
+static int s_breakpoint_max_id;
 
 #define HOOK0(name) HOOK_##name(e, __func__)
 #define HOOK(name, ...) HOOK_##name(e, __func__, __VA_ARGS__)
+#define HOOK_FALSE(name, ...) HOOK_##name(e, __func__, __VA_ARGS__)
 
 #define DECLARE_LOG_HOOK(system, level, name, format) \
   static void HOOK_##name(struct Emulator* e, const char* func_name, ...);
@@ -105,6 +112,8 @@ static LogLevel s_log_level[NUM_LOG_SYSTEMS] = {1, 1, 1, 1, 1, 1};
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
 static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
+static Bool HOOK_read_op_api(struct Emulator* e, const char* func_name,
+                             Address pc, MemoryTypeAddressPair, u8 value);
 static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
                              u32 rom_addr, u8 value);
 
@@ -266,9 +275,123 @@ static void print_instruction(Emulator* e, Address addr) {
 
 Registers emulator_get_registers(struct Emulator* e) { return REG; }
 
+int emulator_get_max_breakpoint_id(void) {
+  return s_breakpoint_max_id;
+}
+
+static Bool is_breakpoint_valid(int id) {
+  return id >= 0 && id < s_breakpoint_max_id && s_breakpoints[id].valid;
+}
+
+Breakpoint emulator_get_breakpoint(int id) {
+  return is_breakpoint_valid(id) ? s_breakpoints[id] : s_invalid_breakpoint;
+}
+
+static Bool address_matches_bank(Emulator* e, Address addr, int bank) {
+  MemoryTypeAddressPair pair = map_address(addr);
+  return (pair.type != MEMORY_MAP_ROM0 && pair.type != MEMORY_MAP_ROM1) ||
+         emulator_get_rom_bank(e, pair.type) == bank;
+}
+
+Breakpoint emulator_get_breakpoint_by_address(Emulator* e, Address addr) {
+  if (s_breakpoint_count == 0) {
+    return s_invalid_breakpoint;
+  }
+  int id;
+  for (id = 0; id < s_breakpoint_max_id; ++id) {
+    Breakpoint* bp = &s_breakpoints[id];
+    if (bp->valid && bp->addr == addr &&
+        address_matches_bank(e, addr, bp->bank)) {
+      return s_breakpoints[id];
+    }
+  }
+  return s_invalid_breakpoint;
+}
+
+static void calculate_breakpoint_mask(void) {
+  s_breakpoint_mask[0] = 0xffffu;
+  s_breakpoint_mask[1] = 0xffffu;
+  int id;
+  for (id = 0; id < s_breakpoint_max_id; ++id) {
+    Breakpoint* bp = &s_breakpoints[id];
+    if (!(bp->valid && bp->enabled)) {
+      continue;
+    }
+    s_breakpoint_mask[0] &= ~bp->addr;
+    s_breakpoint_mask[1] &= bp->addr;
+  }
+}
+
+int emulator_add_empty_breakpoint(void) {
+  int id;
+  for (id = 0; id < MAX_BREAKPOINTS; ++id) {
+    Breakpoint* bp = &s_breakpoints[id];
+    if (!bp->valid) {
+      bp->id = id;
+      bp->addr = bp->bank = 0;
+      bp->enabled = FALSE;
+      bp->valid = TRUE;
+      s_breakpoint_max_id = MAX(id + 1, s_breakpoint_max_id);
+      ++s_breakpoint_count;
+      return id;
+    }
+  }
+  return -1;
+}
+
+int emulator_add_breakpoint(Emulator* e, Address addr, Bool enabled) {
+  int id = emulator_add_empty_breakpoint();
+  if (id < 0) {
+    return id;
+  }
+  emulator_set_breakpoint_address(e, id, addr);
+  emulator_enable_breakpoint(id, enabled);
+  return id;
+}
+
+int emulator_get_rom_bank_from_address(Emulator* e, Address addr) {
+  return emulator_get_rom_bank(e, map_address(addr).type);
+}
+
+void emulator_set_breakpoint_address(Emulator* e, int id, Address addr) {
+  if (!is_breakpoint_valid(id)) {
+    return;
+  }
+  Breakpoint* bp = &s_breakpoints[id];
+  bp->addr = addr;
+  bp->bank = emulator_get_rom_bank_from_address(e, addr);
+  calculate_breakpoint_mask();
+}
+
+void emulator_enable_breakpoint(int id, Bool enabled) {
+  if (!is_breakpoint_valid(id)) {
+    return;
+  }
+  s_breakpoints[id].enabled = enabled;
+  calculate_breakpoint_mask();
+}
+
+void emulator_remove_breakpoint(int id) {
+  if (!is_breakpoint_valid(id)) {
+    return;
+  }
+  s_breakpoints[id].valid = FALSE;
+  if (id + 1 == s_breakpoint_max_id) {
+    while (s_breakpoint_max_id > 0 &&
+           !s_breakpoints[s_breakpoint_max_id - 1].valid) {
+      s_breakpoint_max_id--;
+    }
+  }
+  calculate_breakpoint_mask();
+  --s_breakpoint_count;
+}
+
 int emulator_get_rom_bank(struct Emulator* e, int region) {
-  assert(region < 2);
-  return MMAP_STATE.rom_base[region] >> ROM_BANK_SHIFT;
+  if (region < 2) {
+    return MMAP_STATE.rom_base[region] >> ROM_BANK_SHIFT;
+  } else {
+    return -1;
+  }
 }
 
 u8 emulator_read_u8_raw(struct Emulator* e, Address addr) {
@@ -300,8 +423,8 @@ void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
   mark_rom_usage(rom_addr, ROM_USAGE_DATA);
 }
 
-static void mark_rom_usage_for_pc(struct Emulator* e) {
-  MemoryTypeAddressPair pair = map_address(e->state.reg.PC);
+static void mark_rom_usage_for_pc(struct Emulator* e,
+                                  MemoryTypeAddressPair pair) {
   u32 rom_addr = 0;
   switch (pair.type) {
     case MEMORY_MAP_ROM0:
@@ -326,8 +449,6 @@ static void mark_rom_usage_for_pc(struct Emulator* e) {
 }
 
 void HOOK_emulator_step(Emulator* e, const char* func_name) {
-  mark_rom_usage_for_pc(e);
-
   if (emulator_get_trace() && !e->state.interrupt.halt) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
            REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
@@ -343,6 +464,47 @@ void HOOK_emulator_step(Emulator* e, const char* func_name) {
     print_instruction(e, REG.PC);
     printf("\n");
   }
+}
+
+static Bool address_matches_breakpoint_mask(Address addr) {
+  return (addr & s_breakpoint_mask[0]) == 0 &&
+         (addr & s_breakpoint_mask[1]) == s_breakpoint_mask[1];
+}
+
+static inline Bool hit_breakpoint(Emulator* e) {
+  if (s_breakpoint_count == 0) {
+    return FALSE;
+  }
+  u16 pc = e->state.reg.PC;
+  if (!address_matches_breakpoint_mask(pc)) {
+    return FALSE;
+  }
+  Bool hit = FALSE;
+  int id;
+  for (id = 0; id < s_breakpoint_max_id; ++id) {
+    Breakpoint* bp = &s_breakpoints[id];
+    if (!(bp->valid && bp->enabled && bp->addr == pc &&
+          address_matches_bank(e, pc, bp->bank))) {
+      continue;
+    }
+    /* Don't hit the same breakpoint twice in a row. */
+    if (bp->hit) {
+      bp->hit = FALSE;
+      continue;
+    }
+
+    hit = bp->hit = TRUE;
+  }
+  return hit;
+}
+
+Bool HOOK_read_op_api(Emulator* e, const char* func_name, Address pc,
+                      MemoryTypeAddressPair pair, u8 value) {
+  if (hit_breakpoint(e)) {
+    return TRUE;
+  }
+  mark_rom_usage_for_pc(e, pair);
+  return FALSE;
 }
 
 void emulator_set_log_level(LogSystem system, LogLevel level) {

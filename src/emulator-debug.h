@@ -90,6 +90,15 @@ typedef struct EmulatorHooks {
 void emulator_set_hooks(struct Emulator*, EmulatorHooks*);
 #endif
 
+typedef struct {
+  int id;
+  Address addr;
+  u8 bank;
+  unsigned valid : 1;
+  unsigned enabled : 1;
+  unsigned hit : 1;
+} Breakpoint;
+
 void emulator_set_log_level(LogSystem, LogLevel);
 SetLogLevelError emulator_set_log_level_from_string(const char*);
 Bool emulator_get_trace();
@@ -109,7 +118,17 @@ void emulator_clear_rom_usage(struct Emulator* e);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
 Registers emulator_get_registers(struct Emulator*);
 
+int emulator_get_max_breakpoint_id(void);
+Breakpoint emulator_get_breakpoint(int id);
+Breakpoint emulator_get_breakpoint_by_address(struct Emulator*, Address addr);
+int emulator_add_empty_breakpoint(void);
+int emulator_add_breakpoint(struct Emulator*, Address, Bool enabled);
+void emulator_set_breakpoint_address(struct Emulator*, int id, Address);
+void emulator_enable_breakpoint(int id, Bool enabled);
+void emulator_remove_breakpoint(int id);
+
 int emulator_get_rom_bank(struct Emulator*, int region);
+int emulator_get_rom_bank_from_address(struct Emulator*, Address);
 
 u8 emulator_read_u8_raw(struct Emulator*, Address);
 void emulator_write_u8_raw(struct Emulator*, Address, u8);

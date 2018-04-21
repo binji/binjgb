@@ -174,13 +174,18 @@ void Debugger::Run() {
     host_begin_video(host);
     switch (run_state) {
       case Running:
-      case SteppingFrame:
-        host_run_ms(host, refresh_ms);
+      case SteppingFrame: {
+        EmulatorEvent event = host_run_ms(host, refresh_ms);
         if (run_state == SteppingFrame) {
           host_reset_audio(host);
           run_state = Paused;
         }
+        if (event &
+            (EMULATOR_EVENT_BREAKPOINT | EMULATOR_EVENT_INVALID_OPCODE)) {
+          run_state = Paused;
+        }
         break;
+      }
 
       case SteppingInstruction:
         host_step(host);

@@ -32,6 +32,26 @@ extern "C" {
 
 struct Emulator;
 
+typedef enum {
+  MEMORY_MAP_ROM0,
+  MEMORY_MAP_ROM1,
+  MEMORY_MAP_VRAM,
+  MEMORY_MAP_EXT_RAM,
+  MEMORY_MAP_WORK_RAM0,
+  MEMORY_MAP_WORK_RAM1,
+  MEMORY_MAP_OAM,
+  MEMORY_MAP_UNUSED,
+  MEMORY_MAP_IO,
+  MEMORY_MAP_APU,
+  MEMORY_MAP_WAVE_RAM,
+  MEMORY_MAP_HIGH_RAM,
+} MemoryMapType;
+
+typedef struct {
+  MemoryMapType type;
+  MaskedAddress addr;
+} MemoryTypeAddressPair;
+
 enum {
   APU_CHANNEL1,
   APU_CHANNEL2,
@@ -141,6 +161,8 @@ enum {
   EMULATOR_EVENT_NEW_FRAME = 0x1,
   EMULATOR_EVENT_AUDIO_BUFFER_FULL = 0x2,
   EMULATOR_EVENT_UNTIL_TICKS = 0x4,
+  EMULATOR_EVENT_BREAKPOINT = 0x8,
+  EMULATOR_EVENT_INVALID_OPCODE = 0x10,
 };
 
 extern const size_t s_emulator_state_size;

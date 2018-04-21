@@ -282,16 +282,16 @@ static void host_handle_event(Host* host, EmulatorEvent event) {
   }
 }
 
-static void host_run_until_ticks(struct Host* host, Ticks ticks) {
+static EmulatorEvent host_run_until_ticks(struct Host* host, Ticks ticks) {
   struct Emulator* e = host_get_emulator(host);
   assert(emulator_get_ticks(e) <= ticks);
-  while (1) {
-    EmulatorEvent event = emulator_run_until(e, ticks);
+  EmulatorEvent event;
+  do {
+    event = emulator_run_until(e, ticks);
     host_handle_event(host, event);
-    if (event & EMULATOR_EVENT_UNTIL_TICKS) {
-      break;
-    }
-  }
+  } while (!(event & (EMULATOR_EVENT_UNTIL_TICKS | EMULATOR_EVENT_BREAKPOINT |
+                      EMULATOR_EVENT_INVALID_OPCODE)));
+  return event;
 }
 
 static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
@@ -370,21 +370,23 @@ Result host_init(Host* host, struct Emulator* e) {
   ON_ERROR_RETURN;
 }
 
-void host_run_ms(struct Host* host, f64 delta_ms) {
+EmulatorEvent host_run_ms(struct Host* host, f64 delta_ms) {
   assert(!host->rewind_state.rewinding);
   struct Emulator* e = host_get_emulator(host);
   Ticks delta_ticks = (Ticks)(delta_ms * CPU_TICKS_PER_SECOND / 1000);
   Ticks until_ticks = emulator_get_ticks(e) + delta_ticks;
-  host_run_until_ticks(host, until_ticks);
+  EmulatorEvent event = host_run_until_ticks(host, until_ticks);
   host->last_ticks = emulator_get_ticks(e);
+  return event;
 }
 
-void host_step(Host* host) {
+EmulatorEvent host_step(Host* host) {
   assert(!host->rewind_state.rewinding);
   struct Emulator* e = host_get_emulator(host);
   EmulatorEvent event = emulator_step(e);
   host_handle_event(host, event);
   host->last_ticks = emulator_get_ticks(e);
+  return event;
 }
 
 Host* host_new(const HostInit *init, struct Emulator* e) {

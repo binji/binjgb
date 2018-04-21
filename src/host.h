@@ -147,8 +147,8 @@ typedef struct HostTexture {
 struct Host* host_new(const HostInit*, struct Emulator*);
 void host_delete(struct Host*);
 Bool host_poll_events(struct Host*);
-void host_run_ms(struct Host*, f64 delta_ms);
-void host_step(struct Host*);
+EmulatorEvent host_run_ms(struct Host*, f64 delta_ms);
+EmulatorEvent host_step(struct Host*);
 void host_render_audio(struct Host*);
 void host_reset_audio(struct Host*);
 void host_set_audio_volume(struct Host*, f32 volume);

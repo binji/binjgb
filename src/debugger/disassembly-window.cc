@@ -17,6 +17,7 @@ Debugger::DisassemblyWindow::DisassemblyWindow(Debugger* d) : Window(d) {}
 void Debugger::DisassemblyWindow::Tick() {
   const ImVec4 kPCColor(0.2f, 1.f, 0.1f, 1.f);
   const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+  const ImU32 kBreakpointColor = IM_COL32(192, 0, 0, 255);
 
   if (ImGui::BeginDock("Disassembly", &is_open)) {
     Ticks now = emulator_get_ticks(d->e);
@@ -220,11 +221,47 @@ void Debugger::DisassemblyWindow::Tick() {
       }
     }
 
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImGuiListClipper clipper(instr_count, line_height);
 
     while (clipper.Step()) {
       for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
         Address addr = instrs[i];
+        Breakpoint bp = emulator_get_breakpoint_by_address(d->e, addr);
+        ImGui::PushID(i);
+
+        const ImVec2 bp_size = ImVec2(line_height, line_height);
+        const float bp_radius = bp_size.x * 0.4f;
+        if (ImGui::InvisibleButton("##bp", bp_size)) {
+          if (bp.valid) {
+            if (bp.enabled) {
+              emulator_enable_breakpoint(bp.id, FALSE);
+            } else {
+              emulator_remove_breakpoint(bp.id);
+            }
+          } else {
+            emulator_add_breakpoint(d->e, addr, TRUE);
+          }
+        }
+        if (bp.valid && ImGui::IsItemHovered()) {
+          ImGui::SetTooltip("breakpoint %d: $%04x [%s]", bp.id, bp.addr,
+                            bp.enabled ? "enabled" : "disabled");
+        }
+
+        ImVec2 rect_min = ImGui::GetItemRectMin();
+        ImVec2 rect_max = ImGui::GetItemRectMax();
+        ImVec2 center = (rect_max + rect_min) * 0.5f;
+        if (bp.valid) {
+          if (bp.enabled) {
+            draw_list->AddCircleFilled(center, bp_radius, kBreakpointColor);
+          } else {
+            draw_list->AddCircle(center, bp_radius, kBreakpointColor);
+          }
+        }
+
+        ImGui::SameLine();
+        ImGui::PopID();
+
         char buffer[64];
         emulator_disassemble(d->e, addr, buffer, sizeof(buffer));
         if (addr == regs.PC) {

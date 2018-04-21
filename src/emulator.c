@@ -236,21 +236,6 @@ typedef struct {
 } CartTypeInfo;
 
 typedef enum {
-  MEMORY_MAP_ROM0,
-  MEMORY_MAP_ROM1,
-  MEMORY_MAP_VRAM,
-  MEMORY_MAP_EXT_RAM,
-  MEMORY_MAP_WORK_RAM0,
-  MEMORY_MAP_WORK_RAM1,
-  MEMORY_MAP_OAM,
-  MEMORY_MAP_UNUSED,
-  MEMORY_MAP_IO,
-  MEMORY_MAP_APU,
-  MEMORY_MAP_WAVE_RAM,
-  MEMORY_MAP_HIGH_RAM,
-} MemoryMapType;
-
-typedef enum {
   BANK_MODE_ROM = 0,
   BANK_MODE_RAM = 1,
 } BankMode;
@@ -397,11 +382,6 @@ typedef struct {
     Mbc5 mbc5;
   };
 } MemoryMapState;
-
-typedef struct {
-  MemoryMapType type;
-  MaskedAddress addr;
-} MemoryTypeAddressPair;
 
 typedef struct {
   JoypadButtons buttons;
@@ -706,6 +686,10 @@ typedef struct Emulator {
 #define HOOK(name, ...)
 #endif
 
+#ifndef HOOK_FALSE
+#define HOOK_FALSE(name, ...) FALSE
+#endif
+
 /* Configurable constants */
 #define RGBA_WHITE 0xffffffffu
 #define RGBA_LIGHT_GRAY 0xffaaaaaau
@@ -812,6 +796,7 @@ typedef struct Emulator {
 #define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
 #define INVALID_READ_BYTE 0xff
+#define BREAKPOINT 0x100
 
 #define GET_LO(HI, LO) (LO)
 #define GET_BITMASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
@@ -1845,6 +1830,21 @@ static u8 read_u8(Emulator* e, Address addr) {
   }
 
   return read_u8_pair(e, pair, FALSE);
+}
+
+static int read_op(Emulator* e) {
+  Address addr = e->state.reg.PC;
+  MemoryTypeAddressPair pair = map_address(addr);
+  if (!is_dma_access_ok(e, pair)) {
+    HOOK(read_during_dma_a, addr);
+    return INVALID_READ_BYTE;
+  }
+
+  u8 value = read_u8_pair(e, pair, FALSE);
+  if (HOOK_FALSE(read_op_api, addr, pair, value)) {
+    return BREAKPOINT;
+  }
+  return value;
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
@@ -3353,9 +3353,12 @@ static u8 s_opcode_bytes[] = {
     /* a0 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     /* b0 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     /* c0 */ 1, 1, 3, 3, 3, 1, 2, 1, 1, 1, 3, 2, 3, 3, 2, 1,
-    /* d0 */ 1, 1, 3, 0, 3, 1, 2, 1, 1, 1, 3, 0, 3, 0, 2, 1,
-    /* e0 */ 2, 1, 1, 0, 0, 1, 2, 1, 2, 1, 3, 0, 0, 0, 2, 1,
-    /* f0 */ 2, 1, 1, 1, 0, 1, 2, 1, 2, 1, 3, 1, 0, 0, 2, 1,
+    /* d0 */ 1, 1, 3, 1, 3, 1, 2, 1, 1, 1, 3, 1, 3, 1, 2, 1,
+    /* e0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
+    /* f0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
+    /* Dummy value at 0x100 for debug break, return 0 bytes so the instruction
+     * is not skipped when continuing. */
+    0,
 };
 
 #define TICK tick(e)
@@ -3599,9 +3602,10 @@ static void dispatch_interrupt(Emulator* e) {
   tick(e);
 }
 
-static void execute_instruction(Emulator* e) {
+static EmulatorEvent execute_instruction(Emulator* e) {
+  int opcode;
   s8 s;
-  u8 u, c, opcode;
+  u8 u, c;
   u16 u16;
   Address new_pc;
 
@@ -3616,7 +3620,7 @@ static void execute_instruction(Emulator* e) {
       INTR.stop = FALSE;
     } else {
       TICKS += CPU_TICK;
-      return;
+      return 0;
     }
   }
 
@@ -3628,11 +3632,12 @@ static void execute_instruction(Emulator* e) {
   if (INTR.halt_bug) {
     /* When interrupts are disabled during a HALT, the following byte will be
      * duplicated when decoding. */
-    opcode = read_u8(e, REG.PC);
+    opcode = read_op(e);
     REG.PC--;
     INTR.halt_bug = FALSE;
   } else {
-    opcode = read_u8_tick(e, REG.PC);
+    tick(e);
+    opcode = read_op(e);
   }
 
   if (should_dispatch) {
@@ -3641,12 +3646,12 @@ static void execute_instruction(Emulator* e) {
       INTR.halt = INTR.halt_di = FALSE;
     } else {
       dispatch_interrupt(e);
-      return;
+      return 0;
     }
   }
 
   if (INTR.halt) {
-    return;
+    return 0;
   }
 
   new_pc = REG.PC + s_opcode_bytes[opcode];
@@ -3847,18 +3852,24 @@ static void execute_instruction(Emulator* e) {
     case 0xfb: EI; break;
     case 0xfe: CP_N; break;
     case 0xff: CALL(0x38); break;
-    default: UNREACHABLE("invalid opcode 0x%02x!\n", opcode); break;
+    case BREAKPOINT:
+      return EMULATOR_EVENT_BREAKPOINT;
+    default:
+      REG.PC = new_pc;
+      return EMULATOR_EVENT_INVALID_OPCODE;
   }
   REG.PC = new_pc;
+  return 0;
 }
 
-static void emulator_step_internal(Emulator* e) {
+static EmulatorEvent emulator_step_internal(Emulator* e) {
   HOOK0(emulator_step);
   if (HDMA.state == DMA_INACTIVE) {
-    execute_instruction(e);
+    return execute_instruction(e);
   } else {
     tick(e);
   }
+  return 0;
 }
 
 EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
@@ -3877,7 +3888,10 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
       (u32)DIV_CEIL(frames_left * CPU_TICKS_PER_SECOND, ab->frequency);
   EmulatorEvent event = 0;
   while (event == 0) {
-    emulator_step_internal(e);
+    EmulatorEvent step_event = emulator_step_internal(e);
+    if (step_event) {
+      event |= step_event;
+    }
     if (PPU.new_frame_edge) {
       event |= EMULATOR_EVENT_NEW_FRAME;
     }

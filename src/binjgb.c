@@ -330,7 +330,11 @@ int main(int argc, char** argv) {
     if (s_rewinding) {
       rewind_by(REWIND_CYCLES_PER_FRAME);
     } else if (!s_paused) {
-      host_run_ms(host, refresh_ms);
+      EmulatorEvent event = host_run_ms(host, refresh_ms);
+      if (event & EMULATOR_EVENT_INVALID_OPCODE) {
+        set_status_text("invalid opcode!");
+        s_paused = TRUE;
+      }
       if (s_step_frame) {
         host_reset_audio(host);
         s_paused = TRUE;
