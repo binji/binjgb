@@ -38,6 +38,22 @@ struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
   return e;
 }
 
+f64 emulator_get_ticks_f64(struct Emulator* e) {
+  return (f64)emulator_get_ticks(e);
+}
+
+EmulatorEvent emulator_run_until_f64(struct Emulator* e, f64 until_ticks_f64) {
+  return emulator_run_until(e, (Ticks)until_ticks_f64);
+}
+
+f64 rewind_get_newest_ticks_f64(RewindBuffer* buf) {
+  return (f64)rewind_get_newest_ticks(buf);
+}
+
+f64 rewind_get_oldest_ticks_f64(RewindBuffer* buf) {
+  return (f64)rewind_get_oldest_ticks(buf);
+}
+
 static void default_joypad_callback(JoypadButtons* joyp, void* user_data) {
   JoypadBuffer* joypad_buffer = user_data;
   *joyp = s_buttons;
@@ -84,7 +100,8 @@ void emulator_set_rewind_joypad_callback(RewindState* state) {
   emulator_set_joypad_callback(e, rewind_joypad_callback, state);
 }
 
-Result rewind_to_ticks_wrapper(RewindState* state, Ticks ticks) {
+Result rewind_to_ticks_wrapper(RewindState* state, f64 ticks_f64) {
+  Ticks ticks = (Ticks)ticks_f64;
   CHECK(SUCCESS(
       rewind_to_ticks(state->rewind_buffer, ticks, &state->rewind_result)));
   CHECK(SUCCESS(emulator_read_state(e, &state->rewind_result.file_data)));

@@ -218,48 +218,55 @@ void rewind_append(RewindBuffer* buf, struct Emulator* e) {
     kind = RewindInfoKind_Diff;
   }
 
+  u8* data_begin = NULL;
+  u8* data_end_max = NULL;
+  u8* data_end = NULL;
   RewindDataRange* data_range = buf->data_range;
   RewindInfoRange* info_range = buf->info_range;
   RewindInfo* new_info = --info_range[0].begin;
-  if ((u8*)new_info <= data_range[1].end) {
-  wrap:
-    /* Need to wrap, roll back decrement and swap ranges. */
-    info_range[0].begin++;
-    info_range[1] = info_range[0];
-    info_range[0].begin = info_range[0].end;
-    data_range[1] = data_range[0];
-    data_range[0].end = data_range[0].begin;
+  Bool wrap = (u8*)new_info <= data_range[1].end;
+  while (1) {
+    if (wrap) {
+      /* Need to wrap, roll back decrement and swap ranges. */
+      info_range[0].begin++;
+      info_range[1] = info_range[0];
+      info_range[0].begin = info_range[0].end;
+      data_range[1] = data_range[0];
+      data_range[0].end = data_range[0].begin;
 
-    new_info = --info_range[0].begin;
-    assert((u8*)new_info > data_range[1].end);
-  }
+      new_info = --info_range[0].begin;
+      assert((u8*)new_info > data_range[1].end);
+    }
 
-  u8* data_begin = data_range[0].end;
-  u8* data_end_max = (u8*)MIN(info_range[1].begin, new_info);
-  u8* data_end;
-  switch (kind) {
-    case RewindInfoKind_Diff:
-      if (buf->last_base_state_ticks != INVALID_TICKS) {
-        data_end = encode_diff(buf->last_state.data, buf->last_base_state.data,
-                               buf->last_state.size, data_begin, data_end_max);
+    data_begin = data_range[0].end;
+    data_end_max = (u8*)MIN(info_range[1].begin, new_info);
+    switch (kind) {
+      case RewindInfoKind_Diff:
+        if (buf->last_base_state_ticks != INVALID_TICKS) {
+          data_end =
+              encode_diff(buf->last_state.data, buf->last_base_state.data,
+                          buf->last_state.size, data_begin, data_end_max);
+          break;
+        }
+        /* There is no previous base state, so we can't diff. Fallthrough to
+         * writing a base state. */
+
+      case RewindInfoKind_Base:
+        kind = RewindInfoKind_Base;
+        data_end = encode_rle(buf->last_state.data, buf->last_state.size,
+                              data_begin, data_end_max);
+        memcpy(buf->last_base_state.data, buf->last_state.data,
+               buf->last_state.size);
+        buf->last_base_state_ticks = ticks;
         break;
-      }
-      /* There is no previous base state, so we can't diff. Fallthrough to
-       * writing a base state. */
+    }
 
-    case RewindInfoKind_Base:
-      kind = RewindInfoKind_Base;
-      data_end = encode_rle(buf->last_state.data, buf->last_state.size,
-                            data_begin, data_end_max);
-      memcpy(buf->last_base_state.data, buf->last_state.data,
-             buf->last_state.size);
-      buf->last_base_state_ticks = ticks;
-      break;
-  }
-
-  if (data_end == NULL) {
-    /* Failed to write, need to wrap. */
-    goto wrap;
+    if (data_end == NULL) {
+      /* Failed to write, need to wrap. */
+      wrap = TRUE;
+      continue;
+    }
+    break;
   }
 
   assert(data_end <= data_end_max);

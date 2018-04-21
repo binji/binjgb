@@ -120,8 +120,10 @@ Emulator.prototype.addEventListener = function(el, name, func) {
 Emulator.prototype.showRewindBar = function(show) {
   if (show) {
     rewindBarEl.removeAttribute('hidden');
-    rewindEl.setAttribute('min', _rewind_get_oldest_ticks(this.rewindBuffer));
-    rewindEl.setAttribute('max', _rewind_get_newest_ticks(this.rewindBuffer));
+    rewindEl.setAttribute(
+        'min', _rewind_get_oldest_ticks_f64(this.rewindBuffer));
+    rewindEl.setAttribute(
+        'max', _rewind_get_newest_ticks_f64(this.rewindBuffer));
     rewindEl.setAttribute('step', 1);
     rewindEl.value = this.getTicks();
     this.updateRewindTime();
@@ -265,7 +267,7 @@ Emulator.prototype.run = function() {
 };
 
 Emulator.prototype.getTicks = function() {
-  return _emulator_get_ticks(this.e) >>> 0;
+  return _emulator_get_ticks_f64(this.e);
 };
 
 Emulator.prototype.isRewinding = function() {
@@ -274,7 +276,7 @@ Emulator.prototype.isRewinding = function() {
 
 Emulator.prototype.runUntil = function(ticks) {
   while (true) {
-    var event = _emulator_run_until(this.e, ticks);
+    var event = _emulator_run_until_f64(this.e, ticks);
     if (event & EVENT_NEW_FRAME) {
       if (!this.isRewinding()) {
         _rewind_append(this.rewindBuffer, this.e);
@@ -330,8 +332,7 @@ Emulator.prototype.renderVideo = function(startMs) {
     var startTicks = this.getTicks();
     var deltaTicks =
         Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
-    var runUntilTicks =
-        (startTicks + deltaTicks - this.leftoverTicks) >>> 0;
+    var runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
 
     this.runUntil(runUntilTicks);
 
