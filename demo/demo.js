@@ -22,21 +22,80 @@ const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 
 var $ = document.querySelector.bind(document);
 var canvasEl = $('canvas');
-var pauseEl = $('#pause');
-var rewindEl = $('#rewind');
-var rewindBarEl = $('#rewindBar');
-var rewindTimeEl = $('#rewindTime');
 var emulator = null;
 
-function setScale(scale) {
-  canvasEl.style.width = canvasEl.width * scale + 'px';
-  canvasEl.style.height = canvasEl.height * scale + 'px';
-}
+var data = {
+  fps: 60,
+  ticks: 0,
+  paused: false,
+  rewind: {
+    minTicks: 0,
+    maxTicks: 0,
+  }
+};
 
-$('#_1x').addEventListener('click', (event) => setScale(1));
-$('#_2x').addEventListener('click', (event) => setScale(2));
-$('#_3x').addEventListener('click', (event) => setScale(3));
-$('#_4x').addEventListener('click', (event) => setScale(4));
+var vm = new Vue({
+  el: '.bar-wrap',
+  data: data,
+  created: function() {
+    setInterval(() => {
+      this.fps = emulator ? emulator.fps : 60;
+    }, 500);
+  },
+  computed: {
+    rewindTime: function() {
+      function zeroPadLeft(num, width) {
+        num = '' + (num | 0);
+        while (num.length < width) {
+          num = '0' + num;
+        }
+        return num;
+      }
+
+      var ticks = this.ticks;
+      var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
+      var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
+      var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
+      var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
+      return `${hr}:${min}:${sec}.${ms}`;
+    },
+    pauseText: function() {
+      return this.paused ? 'resume' : 'pause';
+    }
+  },
+  methods: {
+    setScale: function(scale) {
+      canvasEl.style.width = canvasEl.width * scale + 'px';
+      canvasEl.style.height = canvasEl.height * scale + 'px';
+    },
+    updateTicks: function() {
+      this.ticks = _emulator_get_ticks_f64(emulator.e);
+    },
+    setPaused: function(paused) {
+      if (!emulator) return;
+      if (paused == this.paused) return;
+      this.paused = paused;
+      if (paused) {
+        emulator.pause();
+        this.updateTicks();
+        this.rewind.minTicks =
+            _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+        this.rewind.maxTicks =
+            _rewind_get_newest_ticks_f64(emulator.rewindBuffer);
+      } else {
+        emulator.resume();
+      }
+    },
+    togglePause: function() {
+      this.setPaused(!this.paused);
+    },
+    rewindTo: function(event) {
+      if (!emulator) return;
+      emulator.rewindToTicks(+event.target.value);
+      this.updateTicks();
+    }
+  }
+});
 
 $('#file').addEventListener('change', (event) => {
   var reader = new FileReader();
@@ -44,17 +103,52 @@ $('#file').addEventListener('change', (event) => {
   reader.readAsArrayBuffer(event.target.files[0]);
 });
 
+(function bindKeyInput() {
+  var keyRewind = function(e, isKeyDown) {
+    if (emulator.isRewinding() !== isKeyDown) {
+      if (isKeyDown) {
+        vm.setPaused(true);
+        emulator.setAutoRewind(true);
+      } else {
+        emulator.setAutoRewind(false);
+        vm.setPaused(false);
+      }
+    }
+  };
+
+  var keyFuncs = {
+    'ArrowDown': _set_joyp_down,
+    'ArrowLeft': _set_joyp_left,
+    'ArrowRight': _set_joyp_right,
+    'ArrowUp': _set_joyp_up,
+    'KeyZ': _set_joyp_B,
+    'KeyX': _set_joyp_A,
+    'Enter': _set_joyp_start,
+    'Tab': _set_joyp_select,
+    'Backspace': keyRewind,
+    'Space': (e, isKeyDown) => { if (isKeyDown) vm.togglePause(); },
+  };
+
+  var makeKeyFunc = (isKeyDown) => {
+    return (event) => {
+      if (!emulator) return;
+      if (event.code in keyFuncs) {
+        keyFuncs[event.code](emulator.e, isKeyDown);
+        event.preventDefault();
+      }
+    };
+  };
+
+  window.addEventListener('keydown', makeKeyFunc(true));
+  window.addEventListener('keyup', makeKeyFunc(false));
+})();
+
 function startEmulator(romArrayBuffer) {
   if (emulator) {
     emulator.cleanup();
   }
 
   emulator = new Emulator(romArrayBuffer);
-  emulator.bindPauseButton(pauseEl);
-  emulator.bindFpsCounter($('#fps'), 500);
-  emulator.bindKeyInput(window);
-  emulator.bindRewindSlider($('#rewind'));
-  emulator.showRewindBar(false);
   emulator.run();
 }
 
@@ -117,139 +211,45 @@ Emulator.prototype.addEventListener = function(el, name, func) {
   this.defer(() => el.removeEventListener(name, func));
 };
 
-Emulator.prototype.showRewindBar = function(show) {
-  if (show) {
-    rewindBarEl.removeAttribute('hidden');
-    rewindEl.setAttribute(
-        'min', _rewind_get_oldest_ticks_f64(this.rewindBuffer));
-    rewindEl.setAttribute(
-        'max', _rewind_get_newest_ticks_f64(this.rewindBuffer));
-    rewindEl.setAttribute('step', 1);
-    rewindEl.value = this.getTicks();
-    this.updateRewindTime();
-  } else {
-    rewindBarEl.setAttribute('hidden', '');
-  }
-};
-
 Emulator.prototype.isPaused = function() {
   return this.rafCancelToken === null;
 };
 
-Emulator.prototype.setPaused = function(isPaused) {
-  var wasPaused = this.isPaused();
-  if (wasPaused === isPaused) {
-    return;
-  }
-
-  if (isPaused) {
-    pauseEl.textContent = "resume";
-    this.cancelAnimationFrame();
-    this.audio.suspend();
-    this.beginRewind();
-  } else {
-    this.endRewind();
-    pauseEl.textContent = "pause";
-    this.requestAnimationFrame();
-    this.audio.resume();
-  }
+Emulator.prototype.pause = function() {
+  this.cancelAnimationFrame();
+  this.audio.suspend();
+  this.beginRewind();
 };
 
-Emulator.prototype.bindPauseButton = function(el) {
-  pauseEl.textContent = 'pause';
-  this.addEventListener(el, 'click', (event) => {
-    this.setPaused(!this.isPaused());
-    this.showRewindBar(this.isPaused());
-  });
-};
-
-Emulator.prototype.bindFpsCounter = function(el, updateMs) {
-  var func = () => el.textContent = this.fps.toFixed(1);
-  var intervalId = setInterval(func, updateMs);
-  this.defer(() => clearInterval(intervalId));
+Emulator.prototype.resume = function() {
+  this.endRewind();
+  this.requestAnimationFrame();
+  this.audio.resume();
 };
 
 Emulator.prototype.keyTogglePaused = function(e, isKeyDown) {
   if (isKeyDown) {
-    this.setPaused(!this.isPaused());
-    this.showRewindBar(this.isPaused());
+    vm.togglePause();
   }
 };
 
-Emulator.prototype.keyRewind = function(e, isKeyDown) {
-  if (this.isRewinding() !== isKeyDown) {
-    if (isKeyDown) {
-      const rewindFactor = 1.5;
-      const updateMs = 16;
+Emulator.prototype.setAutoRewind = function(enabled) {
+  if (enabled) {
+    const rewindFactor = 1.5;
+    const updateMs = 16;
 
-      this.setPaused(true);
-      this.rewindIntervalId = setInterval(() => {
-        var oldest = _rewind_get_oldest_ticks_f64(this.rewindBuffer);
-        var start = this.getTicks();
-        var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
-        var rewindTo = Math.max(oldest, start - delta);
-        this.rewindToTicks(rewindTo);
-      }, updateMs);
-    } else {
-      clearInterval(this.rewindIntervalId);
-      this.rewindIntervalId = 0;
-      this.setPaused(false);
-    }
+    this.rewindIntervalId = setInterval(() => {
+      var oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+      var start = emulator.getTicks();
+      var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
+      var rewindTo = Math.max(oldest, start - delta);
+      this.rewindToTicks(rewindTo);
+    }, updateMs);
+    this.defer(() => clearInterval(this.rewindIntervalId));
+  } else {
+    clearInterval(this.rewindIntervalId);
+    this.rewindIntervalId = 0;
   }
-};
-
-Emulator.prototype.bindKeyInput = function(el) {
-  var keyFuncs = {
-    'ArrowDown': _set_joyp_down,
-    'ArrowLeft': _set_joyp_left,
-    'ArrowRight': _set_joyp_right,
-    'ArrowUp': _set_joyp_up,
-    'KeyZ': _set_joyp_B,
-    'KeyX': _set_joyp_A,
-    'Enter': _set_joyp_start,
-    'Tab': _set_joyp_select,
-    'Backspace': this.keyRewind.bind(this),
-    'Space': this.keyTogglePaused.bind(this),
-  };
-
-  var makeKeyFunc = (isKeyDown) => {
-    return (event) => {
-      if (event.code in keyFuncs) {
-        keyFuncs[event.code](this.e, isKeyDown);
-        event.preventDefault();
-      }
-    };
-  };
-
-  this.addEventListener(el, 'keydown', makeKeyFunc(true));
-  this.addEventListener(el, 'keyup', makeKeyFunc(false));
-};
-
-Emulator.prototype.bindRewindSlider = function(el) {
-  this.addEventListener(el, 'input', (event) => {
-    this.rewindToTicks(+event.target.value);
-    this.updateRewindTime();
-  });
-};
-
-function zeroPadLeft(num, width) {
-  num = '' + (num | 0);
-  while (num.length < width) {
-    num = '0' + num;
-  }
-  return num;
-}
-
-function ticksToTime(ticks) {
-  var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
-  var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
-  var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
-  var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
-  return `${hr}:${min}:${sec}.${ms}`;
-}
-
-Emulator.prototype.updateRewindTime = function() {
-  rewindTimeEl.textContent = ticksToTime(rewindEl.value);
 };
 
 Emulator.prototype.requestAnimationFrame = function() {
@@ -319,10 +319,6 @@ Emulator.prototype.runUntil = function(ticks) {
   }
 };
 
-function lerp(from, to, alpha) {
-  return (alpha * from) + (1 - alpha) * to;
-}
-
 Emulator.prototype.renderVideo = function(startMs) {
   this.requestAnimationFrame();
 
@@ -338,6 +334,10 @@ Emulator.prototype.renderVideo = function(startMs) {
 
     this.leftoverTicks = (this.getTicks() - runUntilTicks) | 0;
     this.lastSec = startSec;
+  }
+
+  function lerp(from, to, alpha) {
+    return (alpha * from) + (1 - alpha) * to;
   }
 
   this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);

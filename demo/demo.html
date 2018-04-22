@@ -70,6 +70,7 @@
   </style>
 </head>
 <body>
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.5.16/dist/vue.min.js"></script>
   <canvas width="160" height="144"></canvas>
   <!--
   <div class="sidebar">
@@ -78,21 +79,23 @@
   <div class="bar-wrap top-line">
     <div class="bar">
       <div class="left">
-        <button id="_1x">1x</button>
-        <button id="_2x">2x</button>
-        <button id="_3x">3x</button>
-        <button id="_4x">4x</button>
-        <button id="pause">pause</button>
+        <button v-on:click="setScale(1)">1x</button>
+        <button v-on:click="setScale(2)">2x</button>
+        <button v-on:click="setScale(3)">3x</button>
+        <button v-on:click="setScale(4)">4x</button>
+        <button v-on:click="togglePause">{{pauseText}}</button>
         <input id="file" type="file">
       </div>
       <div class="right">
-        <span id="fps">0</span> FPS
+        <span>{{fps.toFixed(1)}}</span> FPS
       </div>
     </div>
-    <div id="rewindBar" hidden>
+    <div v-if="paused">
       <div class="bar">
-        <input id="rewind" type="range">
-        <span id="rewindTime" class="right"></span>
+        <input id="rewind" type="range"
+          :min="rewind.minTicks" :max="rewind.maxTicks"
+          :value="ticks" v-on:input="rewindTo">
+        <span id="rewindTime" class="right">{{rewindTime}}</span>
       </div>
     </div>
   </div>
