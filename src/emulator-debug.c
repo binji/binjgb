@@ -605,11 +605,11 @@ TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
 Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   switch (type) {
     case PALETTE_TYPE_BGP:
-      return PPU.bgp;
+      return PPU.bgp.palette;
     case PALETTE_TYPE_OBP0:
-      return PPU.obp[0];
+      return PPU.obp[0].palette;
     case PALETTE_TYPE_OBP1:
-      return PPU.obp[1];
+      return PPU.obp[1].palette;
     default: {
       Palette palette;
       palette.color[0] = COLOR_WHITE;

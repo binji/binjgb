@@ -530,6 +530,11 @@ typedef struct {
 } Stat;
 
 typedef struct {
+  Palette palette;
+  PaletteRGBA rgba;
+} BWPalette;
+
+typedef struct {
   PaletteRGBA palettes[8];
   u8 data[64];
   u8 index;
@@ -537,18 +542,18 @@ typedef struct {
 } ColorPalettes;
 
 typedef struct {
-  Lcdc lcdc;                      /* LCD control */
-  Stat stat;                      /* LCD status */
-  u8 scy;                         /* Screen Y */
-  u8 scx;                         /* Screen X */
-  u8 ly;                          /* Line Y */
-  u8 lyc;                         /* Line Y Compare */
-  u8 wy;                          /* Window Y */
-  u8 wx;                          /* Window X */
-  Palette bgp;                    /* BG Palette */
-  Palette obp[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
-  ColorPalettes bgcp;             /* BG Color Palettes */
-  ColorPalettes obcp;             /* OBJ Color Palettes */
+  Lcdc lcdc;                        /* LCD control */
+  Stat stat;                        /* LCD status */
+  u8 scy;                           /* Screen Y */
+  u8 scx;                           /* Screen X */
+  u8 ly;                            /* Line Y */
+  u8 lyc;                           /* Line Y Compare */
+  u8 wy;                            /* Window Y */
+  u8 wx;                            /* Window X */
+  BWPalette bgp;                    /* BG Palette */
+  BWPalette obp[OBJ_PALETTE_COUNT]; /* OBJ Palettes */
+  ColorPalettes bgcp;               /* BG Color Palettes */
+  ColorPalettes obcp;               /* OBJ Color Palettes */
   PPUState state;
   u32 state_ticks;
   u32 line_ticks; /* Counts ticks until line_y changes. */
@@ -1617,20 +1622,20 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_DMA_ADDR:
       return INVALID_READ_BYTE; /* Write only. */
     case IO_BGP_ADDR:
-      return PACK(PPU.bgp.color[3], PALETTE_COLOR3) |
-             PACK(PPU.bgp.color[2], PALETTE_COLOR2) |
-             PACK(PPU.bgp.color[1], PALETTE_COLOR1) |
-             PACK(PPU.bgp.color[0], PALETTE_COLOR0);
+      return PACK(PPU.bgp.palette.color[3], PALETTE_COLOR3) |
+             PACK(PPU.bgp.palette.color[2], PALETTE_COLOR2) |
+             PACK(PPU.bgp.palette.color[1], PALETTE_COLOR1) |
+             PACK(PPU.bgp.palette.color[0], PALETTE_COLOR0);
     case IO_OBP0_ADDR:
-      return PACK(PPU.obp[0].color[3], PALETTE_COLOR3) |
-             PACK(PPU.obp[0].color[2], PALETTE_COLOR2) |
-             PACK(PPU.obp[0].color[1], PALETTE_COLOR1) |
-             PACK(PPU.obp[0].color[0], PALETTE_COLOR0);
+      return PACK(PPU.obp[0].palette.color[3], PALETTE_COLOR3) |
+             PACK(PPU.obp[0].palette.color[2], PALETTE_COLOR2) |
+             PACK(PPU.obp[0].palette.color[1], PALETTE_COLOR1) |
+             PACK(PPU.obp[0].palette.color[0], PALETTE_COLOR0);
     case IO_OBP1_ADDR:
-      return PACK(PPU.obp[1].color[3], PALETTE_COLOR3) |
-             PACK(PPU.obp[1].color[2], PALETTE_COLOR2) |
-             PACK(PPU.obp[1].color[1], PALETTE_COLOR1) |
-             PACK(PPU.obp[1].color[0], PALETTE_COLOR0);
+      return PACK(PPU.obp[1].palette.color[3], PALETTE_COLOR3) |
+             PACK(PPU.obp[1].palette.color[2], PALETTE_COLOR2) |
+             PACK(PPU.obp[1].palette.color[1], PALETTE_COLOR1) |
+             PACK(PPU.obp[1].palette.color[0], PALETTE_COLOR0);
     case IO_WY_ADDR:
       return PPU.wy;
     case IO_WX_ADDR:
@@ -1964,6 +1969,13 @@ static void check_joyp_intr(Emulator* e) {
   }
 }
 
+static void update_bw_palette_rgba(BWPalette* pal) {
+  int i;
+  for (i = 0; i < 4; ++i) {
+    pal->rgba.color[i] = s_color_to_rgba[pal->palette.color[i]];
+  }
+}
+
 static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
   HOOK(write_io_asb, addr, get_io_reg_string(addr), value);
   switch (addr) {
@@ -2115,22 +2127,25 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       DMA.ticks = 0;
       break;
     case IO_BGP_ADDR:
-      PPU.bgp.color[3] = UNPACK(value, PALETTE_COLOR3);
-      PPU.bgp.color[2] = UNPACK(value, PALETTE_COLOR2);
-      PPU.bgp.color[1] = UNPACK(value, PALETTE_COLOR1);
-      PPU.bgp.color[0] = UNPACK(value, PALETTE_COLOR0);
+      PPU.bgp.palette.color[3] = UNPACK(value, PALETTE_COLOR3);
+      PPU.bgp.palette.color[2] = UNPACK(value, PALETTE_COLOR2);
+      PPU.bgp.palette.color[1] = UNPACK(value, PALETTE_COLOR1);
+      PPU.bgp.palette.color[0] = UNPACK(value, PALETTE_COLOR0);
+      update_bw_palette_rgba(&PPU.bgp);
       break;
     case IO_OBP0_ADDR:
-      PPU.obp[0].color[3] = UNPACK(value, PALETTE_COLOR3);
-      PPU.obp[0].color[2] = UNPACK(value, PALETTE_COLOR2);
-      PPU.obp[0].color[1] = UNPACK(value, PALETTE_COLOR1);
-      PPU.obp[0].color[0] = UNPACK(value, PALETTE_COLOR0);
+      PPU.obp[0].palette.color[3] = UNPACK(value, PALETTE_COLOR3);
+      PPU.obp[0].palette.color[2] = UNPACK(value, PALETTE_COLOR2);
+      PPU.obp[0].palette.color[1] = UNPACK(value, PALETTE_COLOR1);
+      PPU.obp[0].palette.color[0] = UNPACK(value, PALETTE_COLOR0);
+      update_bw_palette_rgba(&PPU.obp[0]);
       break;
     case IO_OBP1_ADDR:
-      PPU.obp[1].color[3] = UNPACK(value, PALETTE_COLOR3);
-      PPU.obp[1].color[2] = UNPACK(value, PALETTE_COLOR2);
-      PPU.obp[1].color[1] = UNPACK(value, PALETTE_COLOR1);
-      PPU.obp[1].color[0] = UNPACK(value, PALETTE_COLOR0);
+      PPU.obp[1].palette.color[3] = UNPACK(value, PALETTE_COLOR3);
+      PPU.obp[1].palette.color[2] = UNPACK(value, PALETTE_COLOR2);
+      PPU.obp[1].palette.color[1] = UNPACK(value, PALETTE_COLOR1);
+      PPU.obp[1].palette.color[0] = UNPACK(value, PALETTE_COLOR0);
+      update_bw_palette_rgba(&PPU.obp[1]);
       break;
     case IO_WY_ADDR:
       PPU.wy = value;
@@ -2728,13 +2743,15 @@ static void ppu_mode3_tick(Emulator* e) {
         tile_index = 256 + (s8)tile_index;
       }
       u8 attr = 0;
-      PaletteRGBA* cp = NULL;
+      PaletteRGBA* pal = NULL;
       if (IS_CGB) {
         attr = VRAM.data[0x2000 + map_addr];
-        cp = &PPU.bgcp.palettes[attr & 0x7];
+        pal = &PPU.bgcp.palettes[attr & 0x7];
         if (attr & 0x08) { tile_index += 0x200; }
         if (attr & 0x40) { my = 7 - my; }
         if (attr & 0x80) { bg_priority[i] = TRUE; }
+      } else {
+        pal = &PPU.bgp.rgba;
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + my) * TILE_ROW_BYTES;
       u8 lo = VRAM.data[tile_addr];
@@ -2745,11 +2762,7 @@ static void ppu_mode3_tick(Emulator* e) {
       }
       u8 shift = 7 - mx;
       u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
-      if (IS_CGB) {
-        pixels[i] = cp->color[palette_index];
-      } else {
-        pixels[i] = s_color_to_rgba[PPU.bgp.color[palette_index]];
-      }
+      pixels[i] = pal->color[palette_index];
       bg_is_zero[i] = palette_index == 0;
     }
   }
@@ -2783,10 +2796,12 @@ static void ppu_mode3_tick(Emulator* e) {
           oy -= 8;
         }
       }
-      PaletteRGBA* cp = NULL;
+      PaletteRGBA* pal = NULL;
       if (IS_CGB) {
-        cp = &PPU.obcp.palettes[o->cgb_palette & 0x7];
+        pal = &PPU.obcp.palettes[o->cgb_palette & 0x7];
         if (o->bank) { tile_index += 0x200; }
+      } else {
+        pal = &PPU.obp[o->palette].rgba;
       }
       u16 tile_addr = (tile_index * TILE_HEIGHT + (oy & 7)) * TILE_ROW_BYTES;
       u8 lo = VRAM.data[tile_addr];
@@ -2809,12 +2824,7 @@ static void ppu_mode3_tick(Emulator* e) {
         u8 palette_index = ((hi & 1) << 1) | (lo & 1);
         if (palette_index != 0 && (!bg_priority[i] || bg_is_zero[i]) &&
             (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
-          if (IS_CGB) {
-            pixels[i] = cp->color[palette_index];
-          } else {
-            pixels[i] =
-                s_color_to_rgba[PPU.obp[o->palette].color[palette_index]];
-          }
+          pixels[i] = pal->color[palette_index];
         }
       }
     }
