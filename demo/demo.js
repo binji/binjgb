@@ -184,7 +184,7 @@ Emulator.prototype.keyRewind = function(e, isKeyDown) {
 
       this.setPaused(true);
       this.rewindIntervalId = setInterval(() => {
-        var oldest = _rewind_get_oldest_ticks(this.rewindBuffer);
+        var oldest = _rewind_get_oldest_ticks_f64(this.rewindBuffer);
         var start = this.getTicks();
         var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
         var rewindTo = Math.max(oldest, start - delta);
