@@ -24,6 +24,24 @@ var $ = document.querySelector.bind(document);
 var emulator = null;
 var dbPromise = null;
 
+(function initIndexedDB() {
+  dbPromise = new Promise((resolve, reject) => {
+    var request = window.indexedDB.open('db', 1);
+    request.onerror = (event) => {
+      reject(event);
+    };
+    request.onsuccess = (event) => {
+      resolve(event.target.result);
+    };
+    request.onupgradeneeded = (event) => {
+      var db = event.target.result;
+      var objectStore = db.createObjectStore('games', {keyPath: 'sha1'});
+      objectStore.createIndex('sha1', 'sha1', {unique: true});
+      resolve(db);
+    };
+  });
+})();
+
 var data = {
   fps: 60,
   ticks: 0,
@@ -207,24 +225,6 @@ var vm = new Vue({
     },
   }
 });
-
-(function initIndexedDB() {
-  dbPromise = new Promise((resolve, reject) => {
-    var request = window.indexedDB.open('db', 1);
-    request.onerror = (event) => {
-      reject(event);
-    };
-    request.onsuccess = (event) => {
-      resolve(event.target.result);
-    };
-    request.onupgradeneeded = (event) => {
-      var db = event.target.result;
-      var objectStore = db.createObjectStore('games', {keyPath: 'sha1'});
-      objectStore.createIndex('sha1', 'sha1', {unique: true});
-      resolve(db);
-    };
-  });
-})();
 
 (function bindKeyInput() {
   var keyRewind = function(e, isKeyDown) {
