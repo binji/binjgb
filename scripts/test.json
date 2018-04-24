@@ -1,6 +1,6 @@
 [
   ["blargg", "test/blargg/cgb_sound.gb", 2200, "5a445feb1c46e964afc2567253ada155060db602"],
-  ["blargg", "test/blargg/cpu_instrs.gb", 3200, "89df7e840ee047de5fc6756612bc83198508a25a"],
+  ["blargg", "test/blargg/cpu_instrs.gb", 1780, "58d90d7561c7d2de728b999b8d5dd74bb6e86598"],
   ["blargg", "test/blargg/dmg_sound.gb", 2200, "f68479b3c0de0e8d749a695541422bd29f62e1a3"],
   ["blargg", "test/blargg/instr_timing.gb", 42, "e84c9fce1dfba5ae7786a45db463032205dcc10c"],
   ["blargg", "test/blargg/mem_timing.gb", 170, "560d7c80641e5ed2c0fda7309d15f8b4de47ce8d"],

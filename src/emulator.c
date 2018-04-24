@@ -3630,6 +3630,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
       INTR.stop = FALSE;
+      HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
     } else {
       TICKS += CPU_TICK;
       return 0;

@@ -71,8 +71,8 @@ static int s_breakpoint_max_id;
   X(A, V, write_nrx4_info_abii, "(%#04x, %#02x) trigger=%u length_enabled=%u") \
   X(A, D, write_nrx4_trigger_new_length_abi,                                   \
     "(%#04x, %#02x) trigger, new length = %u")                                 \
-  X(A, D, write_square_wave_period_info_iii, "freq: %u tick: %u period: %u")  \
-  X(A, D, write_wave_period_info_iii, "freq: %u tick: %u period: %u")         \
+  X(A, D, write_square_wave_period_info_iii, "freq: %u tick: %u period: %u")   \
+  X(A, D, write_wave_period_info_iii, "freq: %u tick: %u period: %u")          \
   X(A, D, write_wave_ram_ab, "(%#02x, %#02x)")                                 \
   X(A, D, write_wave_ram_while_playing_ab, "(%#02x, %#02x) while playing")     \
   X(H, D, audio_add_buffer_fzz, "+++ %.1f: buf: %zu -> %zu")                   \
@@ -92,6 +92,7 @@ static int s_breakpoint_max_id;
   X(P, V, trigger_y_compare_ii, ">> trigger Y compare [LY: %u] [cy: %u]")      \
   X(P, D, write_oam_in_use_ab, "(%#04x, %#02x): ignored because in use")       \
   X(P, D, write_vram_in_use_ab, "(%#04x, %#02x) ignored, using vram")          \
+  X(I, D, speed_switch_i, "speed switch to %dx")                               \
   X(I, D, enable_display_v, "Enabling display")                                \
   X(I, V, read_io_asb, "(%#04x [%s]) = %#02x")                                 \
   X(I, V, write_io_asb, "(%#04x [%s], %#02x)")                                 \
