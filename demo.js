@@ -42,12 +42,24 @@ var dbPromise = null;
   });
 })();
 
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    let reader = new FileReader();
+    reader.onerror = (event) => reject(event.error);
+    reader.onloadend = (event) => {
+      resolve(event.target.result);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 var data = {
   fps: 60,
   ticks: 0,
-  name: '',
   loaded: false,
+  loadedFile: null,
   paused: false,
+  extRamUpdated: false,
   canvas: {
     show: false,
     scale: 3,
@@ -70,6 +82,12 @@ var vm = new Vue({
     setInterval(() => {
       this.fps = emulator ? emulator.fps : 60;
     }, 500);
+    setInterval(() => {
+      if (this.extRamUpdated) {
+        this.updateExtRam();
+        this.extRamUpdated = false;
+      }
+    }, 1000);
     this.readFiles();
   },
   mounted: function() {
@@ -104,6 +122,20 @@ var vm = new Vue({
     isFilesListEmpty: function() {
       return this.files.list.length == 0;
     },
+    loadedFileName: function() {
+      return this.loadedFile ? this.loadedFile.name : '';
+    },
+    selectedFile: function() {
+      return this.files.list[this.files.selected];
+    },
+    selectedFileHasImage: function() {
+      let file = this.selectedFile;
+      return file && file.image;
+    },
+    selectedFileImageSrc: function() {
+      if (!this.selectedFileHasImage) return '';
+      return this.selectedFile.image;
+    },
   },
   watch: {
     paused: function(newPaused, oldPaused) {
@@ -119,7 +151,7 @@ var vm = new Vue({
       } else {
         emulator.resume();
       }
-    }
+    },
   },
   methods: {
     updateTicks: function() {
@@ -136,37 +168,37 @@ var vm = new Vue({
     selectFile: function(index) {
       this.files.selected = index;
     },
-    playFile: function(index) {
-      let file = this.files.list[index];
-      let reader = new FileReader();
-      reader.onerror = (event) => console.log("Can't play!");
-      reader.onloadend = (event) => {
+    playFile: function(file) {
+      readFile(file.rom).then((romBuffer) => {
+        if (file.extRam) {
+          return readFile(file.extRam).then((extRamBuffer) => {
+            return {romBuffer, extRamBuffer};
+          });
+        } else {
+          return {romBuffer, extRamBuffer: null};
+        }
+      }).then(({romBuffer, extRamBuffer}) => {
         this.paused = false;
         this.loaded = true;
         this.canvas.show = true;
         this.files.show = false;
-        this.name = file.name;
-        startEmulator(event.target.result);
-      };
-      reader.readAsArrayBuffer(file.rom);
+        this.loadedFile = file;
+        startEmulator(romBuffer, extRamBuffer);
+      });
     },
     uploadClicked: function() {
       $('#upload').click();
     },
     uploadFile: function(event) {
-      (new Promise((resolve, reject) => {
-        let name = event.target.files[0].name;
-        let reader = new FileReader();
-        reader.onerror = (event) => reject(event.target.error);
-        reader.onloadend = (event) =>
-            resolve({name, buffer: event.target.result});
-        reader.readAsArrayBuffer(event.target.files[0]);
-      })).then(({name, buffer}) => {
+      let file = event.target.files[0];
+      let name = file.name;
+      return readFile(file).then((buffer) => {
         const sha1 = SHA1Digest(buffer);
+        let rom = new Blob([buffer]);
+        let data = {sha1, name, rom, modified: new Date()};
         return dbPromise.then((db) => {
           return new Promise((resolve, reject) => {
             let transaction = db.transaction('games', 'readwrite');
-            let data = {sha1, name, rom: new Blob([buffer])};
             transaction.onerror = (event) => {
               if (event.target.error.name === 'ConstraintError') {
                 console.log(`ROM with sha1 '${sha1}' already in database.`);
@@ -181,6 +213,29 @@ var vm = new Vue({
             };
             transaction.objectStore('games').add(data);
           });
+        });
+      });
+    },
+    updateExtRam: function() {
+      if (!emulator) return;
+      let extRamBlob = new Blob([emulator.getExtRam()]);
+      let imageDataURL = $('canvas').toDataURL();
+      return dbPromise.then((db) => {
+        return new Promise((resolve, reject) => {
+          let transaction = db.transaction('games', 'readwrite');
+          transaction.onerror = (event) => reject(event.target.error);
+          let request = transaction.objectStore('games').openCursor(
+              this.loadedFile.sha1);
+          request.onsuccess = (event) => {
+            let cursor = event.target.result;
+            if (cursor) {
+              Object.assign(this.loadedFile, cursor.value);
+              this.loadedFile.extRam = extRamBlob;
+              this.loadedFile.image = imageDataURL;
+              this.loadedFile.modified = new Date();
+              cursor.update(this.loadedFile);
+            }
+          };
         });
       });
     },
@@ -217,6 +272,16 @@ var vm = new Vue({
       } else {
         return `${size}b`;
       }
+    },
+    prettyDate: function(date) {
+      let options = {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric'
+      };
+      return date.toLocaleDateString(undefined, options);
     },
   }
 });
@@ -261,16 +326,20 @@ var vm = new Vue({
   window.addEventListener('keyup', makeKeyFunc(false));
 })();
 
-function startEmulator(romArrayBuffer) {
+function startEmulator(romBuffer, extRamBuffer) {
   if (emulator) {
     emulator.cleanup();
   }
 
-  emulator = new Emulator(romArrayBuffer);
+  emulator = new Emulator(romBuffer, extRamBuffer);
   emulator.run();
 }
 
-function Emulator(romArrayBuffer) {
+function copyInto(buffer, ptr) {
+  HEAPU8.set(new Uint8Array(buffer), ptr, buffer.byteLength);
+}
+
+function Emulator(romBuffer, extRamBuffer) {
   let canvasEl = $('canvas');
   this.cleanupFuncs = [];
   this.renderer = new WebGLRenderer(canvasEl);
@@ -281,12 +350,11 @@ function Emulator(romArrayBuffer) {
   this.joypadBuffer = _joypad_new();
   this.defer(() => _joypad_delete(this.joypadBuffer));
 
-  var romData = _malloc(romArrayBuffer.byteLength);
+  var romData = _malloc(romBuffer.byteLength);
   this.defer(() => _free(romData));
-  HEAPU8.set(
-      new Uint8Array(romArrayBuffer), romData, romArrayBuffer.byteLength);
+  copyInto(romBuffer, romData);
   this.e = _emulator_new_simple(
-      romData, romArrayBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES,
+      romData, romBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES,
       this.joypadBuffer);
   if (this.e == 0) {
     throw Error('Invalid ROM.');
@@ -313,7 +381,31 @@ function Emulator(romArrayBuffer) {
   this.startAudioSec = 0;
   this.leftoverTicks = 0;
   this.fps = 60;
+
+  if (extRamBuffer) {
+    this.readExtRam(extRamBuffer);
+  }
 }
+
+Emulator.prototype.readExtRam = function(extRamBuffer) {
+  let file_data = _ext_ram_file_data_new(this.e);
+  if (_get_file_data_size(file_data) == extRamBuffer.byteLength) {
+    copyInto(extRamBuffer, _get_file_data_ptr(file_data));
+    _emulator_read_ext_ram(this.e, file_data);
+  }
+  _file_data_delete(file_data);
+};
+
+Emulator.prototype.getExtRam = function() {
+  let file_data = _ext_ram_file_data_new(this.e);
+  _emulator_write_ext_ram(this.e, file_data);
+  let buffer = new Uint8Array(
+      Module.buffer, _get_file_data_ptr(file_data),
+      _get_file_data_size(file_data));
+  _file_data_delete(file_data);
+  return buffer;
+};
+
 
 Emulator.prototype.defer = function(f) {
   this.cleanupFuncs.push(f);
@@ -430,6 +522,9 @@ Emulator.prototype.runUntil = function(ticks) {
       break;
     }
   }
+  if (_emulator_was_ext_ram_updated(this.e)) {
+    vm.extRamUpdated = true;
+  }
 };
 
 Emulator.prototype.renderVideo = function(startMs) {
@@ -504,7 +599,7 @@ Canvas2DRenderer.prototype.uploadTexture = function(buffer) {
 };
 
 function WebGLRenderer(el) {
-  var gl = this.gl = el.getContext('webgl');
+  var gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
 
   var w = SCREEN_WIDTH / 256;
   var h = SCREEN_HEIGHT / 256;

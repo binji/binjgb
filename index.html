@@ -87,6 +87,9 @@
       border-spacing: 12px;
     }
     .files-footer {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-end;
       padding-top: 8px;
     }
     #files-list {
@@ -104,13 +107,17 @@
       background-color: rgba(128, 128, 192, 0.8);
     }
     .file-name {
-      table-layout: auto;
       width: 100%;
       padding: 4px;
     }
-    .file-size {
-      table-layout: auto;
+    .file-size, .file-date {
       padding: 4px;
+    }
+    .file-image {
+      border: 1px solid gray;
+      width: 160px;
+      height: 144px;
+      margin-left: auto;
     }
     .top-line {
       border-top: 1px solid gray;
@@ -162,15 +169,17 @@
           <thead>
             <td class="file-name">Name</td>
             <td class="file-size">Size</td>
+            <td class="file-date">Modified</td>
           </thead>
           <tbody id="files-list">
             <tr class="file"
                 v-for="(file, index) in files.list"
                 v-bind:class="{selected: index==files.selected}"
                 @click="selectFile(index)"
-                @dblclick="playFile(index)">
+                @dblclick="playFile(selectedFile)">
               <td class="file-name">{{file.name}}</td>
               <td class="file-size">{{prettySize(file.rom.size)}}</td>
+              <td class="file-date">{{prettyDate(file.modified)}}</td>
             </tr>
           </tbody>
         </table>
@@ -183,9 +192,12 @@
         <input type="file" id="upload" hidden @change="uploadFile">
         <button
             v-bind:disabled="isFilesListEmpty"
-            @click="playFile(files.selected)">
+            @click="playFile(selectedFile)">
           play
         </button>
+        <img class="file-image"
+            v-show="selectedFileHasImage"
+            :src="selectedFileImageSrc"></img>
       </div>
     </div>
     <div class="bar-wrap top-line">
@@ -204,7 +216,7 @@
               v-show="loaded"
               v-bind:disabled="files.show"
               @click="togglePause">{{pauseLabel}}</button>
-          <span>{{name}}</span>
+          <span>{{loadedFileName}}</span>
         </div>
         <div class="right">
           <span>{{fps.toFixed(1)}}</span> FPS
