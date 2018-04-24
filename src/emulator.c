@@ -3628,7 +3628,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
     // TODO(binji): proper timing of speed switching.
     if (CPU_SPEED.switching) {
       CPU_SPEED.switching = FALSE;
-      CPU_SPEED.speed = SPEED_DOUBLE;
+      CPU_SPEED.speed ^= 1;
       INTR.stop = FALSE;
     } else {
       TICKS += CPU_TICK;
