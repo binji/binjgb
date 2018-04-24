@@ -58,6 +58,8 @@ Result file_write(const char* filename, const FileData* file_data) {
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }
 
-void file_data_delete(const FileData* file_data) {
+void file_data_delete(FileData* file_data) {
   xfree(file_data->data);
+  file_data->size = 0;
+  file_data->data = NULL;
 }

@@ -185,7 +185,10 @@ u32 audio_buffer_get_frames(AudioBuffer*);
 void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
                             u32* ms);
 
+Bool emulator_was_ext_ram_updated(struct Emulator*);
+
 void emulator_init_state_file_data(FileData*);
+void emulator_init_ext_ram_file_data(struct Emulator*, FileData*);
 Result emulator_read_state(struct Emulator*, const FileData*);
 Result emulator_write_state(struct Emulator*, FileData*);
 Result emulator_read_ext_ram(struct Emulator*, const FileData*);

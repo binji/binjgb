@@ -626,6 +626,7 @@ typedef struct {
   u8 hram[HIGH_RAM_SIZE];
   Ticks ticks;
   Bool is_cgb;
+  Bool ext_ram_updated;
   EmulatorEvent last_event;
 } EmulatorState;
 
@@ -1149,6 +1150,7 @@ static void gb_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
   if (MMAP_STATE.ext_ram_enabled) {
     assert(addr <= ADDR_MASK_8K);
     EXT_RAM.data[MMAP_STATE.ext_ram_base | addr] = value;
+    e->state.ext_ram_updated = TRUE;
   } else {
     HOOK(write_ram_disabled_ab, addr, value);
   }
@@ -4079,8 +4081,19 @@ static Result set_rom_file_data(Emulator* e, const FileData* file_data) {
   ON_ERROR_RETURN;
 }
 
+Bool emulator_was_ext_ram_updated(Emulator* e) {
+  Bool result = e->state.ext_ram_updated;
+  e->state.ext_ram_updated = FALSE;
+  return result;
+}
+
 void emulator_init_state_file_data(FileData* file_data) {
   file_data->size = sizeof(EmulatorState);
+  file_data->data = xmalloc(file_data->size);
+}
+
+void emulator_init_ext_ram_file_data(Emulator* e, FileData* file_data) {
+  file_data->size = EXT_RAM.size;
   file_data->data = xmalloc(file_data->size);
 }
 

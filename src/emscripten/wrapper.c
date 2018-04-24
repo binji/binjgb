@@ -9,6 +9,7 @@
 
 #include "emulator.h"
 #include "joypad.h"
+#include "memory.h"
 #include "rewind.h"
 
 typedef struct {
@@ -152,4 +153,23 @@ size_t get_audio_buffer_capacity(struct Emulator* e) {
 size_t get_audio_buffer_size(struct Emulator* e) {
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
   return audio_buffer->position - audio_buffer->data;
+}
+
+FileData* ext_ram_file_data_new(struct Emulator* e) {
+  FileData* file_data = xmalloc(sizeof(FileData));
+  emulator_init_ext_ram_file_data(e, file_data);
+  return file_data;
+}
+
+void* get_file_data_ptr(FileData* file_data) {
+  return file_data->data;
+}
+
+size_t get_file_data_size(FileData* file_data) {
+  return file_data->size;
+}
+
+void file_data_delete(FileData* file_data) {
+  xfree(file_data->data);
+  xfree(file_data);
 }
