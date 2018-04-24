@@ -21,28 +21,250 @@ const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 
 var $ = document.querySelector.bind(document);
-var canvasEl = $('canvas');
-var pauseEl = $('#pause');
-var rewindEl = $('#rewind');
-var rewindBarEl = $('#rewindBar');
-var rewindTimeEl = $('#rewindTime');
 var emulator = null;
+var dbPromise = null;
 
-function setScale(scale) {
-  canvasEl.style.width = canvasEl.width * scale + 'px';
-  canvasEl.style.height = canvasEl.height * scale + 'px';
-}
+var data = {
+  fps: 60,
+  ticks: 0,
+  name: '',
+  loaded: false,
+  paused: false,
+  canvas: {
+    show: false,
+    scale: 3,
+  },
+  rewind: {
+    minTicks: 0,
+    maxTicks: 0,
+  },
+  files: {
+    show: true,
+    selected: 0,
+    list: []
+  }
+};
 
-$('#_1x').addEventListener('click', (event) => setScale(1));
-$('#_2x').addEventListener('click', (event) => setScale(2));
-$('#_3x').addEventListener('click', (event) => setScale(3));
-$('#_4x').addEventListener('click', (event) => setScale(4));
+var vm = new Vue({
+  el: '.main',
+  data: data,
+  created: function() {
+    setInterval(() => {
+      this.fps = emulator ? emulator.fps : 60;
+    }, 500);
+    this.readFiles();
+  },
+  mounted: function() {
+    $('.main').classList.add('ready');
+  },
+  computed: {
+    canvasWidthPx: function() {
+      return (160 * this.canvas.scale) + 'px';
+    },
+    canvasHeightPx: function() {
+      return (144 * this.canvas.scale) + 'px';
+    },
+    rewindTime: function() {
+      function zeroPadLeft(num, width) {
+        num = '' + (num | 0);
+        while (num.length < width) {
+          num = '0' + num;
+        }
+        return num;
+      }
 
-$('#file').addEventListener('change', (event) => {
-  var reader = new FileReader();
-  reader.onloadend = () => startEmulator(reader.result);
-  reader.readAsArrayBuffer(event.target.files[0]);
+      var ticks = this.ticks;
+      var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
+      var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
+      var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
+      var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
+      return `${hr}:${min}:${sec}.${ms}`;
+    },
+    pauseLabel: function() {
+      return this.paused ? 'resume' : 'pause';
+    },
+    isFilesListEmpty: function() {
+      return this.files.list.length == 0;
+    },
+  },
+  watch: {
+    paused: function(newPaused, oldPaused) {
+      if (!emulator) return;
+      if (newPaused == oldPaused) return;
+      if (newPaused) {
+        emulator.pause();
+        this.updateTicks();
+        this.rewind.minTicks =
+            _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+        this.rewind.maxTicks =
+            _rewind_get_newest_ticks_f64(emulator.rewindBuffer);
+      } else {
+        emulator.resume();
+      }
+    }
+  },
+  methods: {
+    updateTicks: function() {
+      this.ticks = _emulator_get_ticks_f64(emulator.e);
+    },
+    togglePause: function() {
+      this.paused = !this.paused;
+    },
+    rewindTo: function(event) {
+      if (!emulator) return;
+      emulator.rewindToTicks(+event.target.value);
+      this.updateTicks();
+    },
+    selectFile: function(index) {
+      this.files.selected = index;
+    },
+    playFile: function(index) {
+      let file = this.files.list[index];
+      let reader = new FileReader();
+      reader.onerror = (event) => console.log("Can't play!");
+      reader.onloadend = (event) => {
+        this.paused = false;
+        this.loaded = true;
+        this.canvas.show = true;
+        this.files.show = false;
+        this.name = file.name;
+        startEmulator(event.target.result);
+      };
+      reader.readAsArrayBuffer(file.rom);
+    },
+    uploadClicked: function() {
+      $('#upload').click();
+    },
+    uploadFile: function(event) {
+      (new Promise((resolve, reject) => {
+        let name = event.target.files[0].name;
+        let reader = new FileReader();
+        reader.onerror = (event) => reject(event.target.error);
+        reader.onloadend = (event) =>
+            resolve({name, buffer: event.target.result});
+        reader.readAsArrayBuffer(event.target.files[0]);
+      })).then(({name, buffer}) => {
+        return crypto.subtle.digest('SHA-1', buffer).then((digest) => {
+          return {name, digest, buffer};
+        });
+      }).then(({name, digest, buffer}) => {
+        const array = Array.from(new Uint8Array(digest));
+        const sha1 = array.map(b => ('00' + b.toString(16)).slice(-2)).join('');
+        return dbPromise.then((db) => {
+          return new Promise((resolve, reject) => {
+            let transaction = db.transaction('games', 'readwrite');
+            let data = {sha1, name, rom: new Blob([buffer])};
+            transaction.onerror = (event) => {
+              if (event.target.error.name === 'ConstraintError') {
+                console.log(`ROM with sha1 '${sha1}' already in database.`);
+                resolve(buffer);
+              } else {
+                reject(event.target.error);
+              }
+            };
+            transaction.oncomplete = (event) => {
+              this.files.list.push(data);
+              resolve(buffer);
+            };
+            transaction.objectStore('games').add(data);
+          });
+        });
+      });
+    },
+    toggleOpenDialog: function() {
+      this.files.show = !this.files.show;
+      if (this.files.show) {
+        this.paused = true;
+      }
+    },
+    readFiles: function() {
+      this.files.list.length = 0;
+
+      dbPromise.then((db) => {
+        let transaction = db.transaction('games');
+        return new Promise((resolve, reject) => {
+          transaction.onerror = resolve(db);
+          transaction.onsuccess = resolve(db);
+          let request = transaction.objectStore('games').openCursor();
+          request.onsuccess = (event) => {
+            let cursor = event.target.result;
+            if (cursor) {
+              this.files.list.push(cursor.value);
+              cursor.continue();
+            }
+          };
+        });
+      });
+    },
+    prettySize: function(size) {
+      if (size >= 1024 * 1024) {
+        return `${(size / (1024 * 1024)).toFixed(1)}Mib`;
+      } else if (size >= 1024) {
+        return `${(size / 1024).toFixed(1)}Kib`;
+      } else {
+        return `${size}b`;
+      }
+    },
+  }
 });
+
+(function initIndexedDB() {
+  dbPromise = new Promise((resolve, reject) => {
+    var request = window.indexedDB.open('db', 1);
+    request.onerror = (event) => {
+      reject(event);
+    };
+    request.onsuccess = (event) => {
+      resolve(event.target.result);
+    };
+    request.onupgradeneeded = (event) => {
+      var db = event.target.result;
+      var objectStore = db.createObjectStore('games', {keyPath: 'sha1'});
+      objectStore.createIndex('sha1', 'sha1', {unique: true});
+      resolve(db);
+    };
+  });
+})();
+
+(function bindKeyInput() {
+  var keyRewind = function(e, isKeyDown) {
+    if (emulator.isRewinding() !== isKeyDown) {
+      if (isKeyDown) {
+        vm.paused = true;
+        emulator.setAutoRewind(true);
+      } else {
+        emulator.setAutoRewind(false);
+        vm.paused = false;
+      }
+    }
+  };
+
+  var keyFuncs = {
+    'ArrowDown': _set_joyp_down,
+    'ArrowLeft': _set_joyp_left,
+    'ArrowRight': _set_joyp_right,
+    'ArrowUp': _set_joyp_up,
+    'KeyZ': _set_joyp_B,
+    'KeyX': _set_joyp_A,
+    'Enter': _set_joyp_start,
+    'Tab': _set_joyp_select,
+    'Backspace': keyRewind,
+    'Space': (e, isKeyDown) => { if (isKeyDown) vm.togglePause(); },
+  };
+
+  var makeKeyFunc = (isKeyDown) => {
+    return (event) => {
+      if (!emulator) return;
+      if (event.code in keyFuncs) {
+        keyFuncs[event.code](emulator.e, isKeyDown);
+        event.preventDefault();
+      }
+    };
+  };
+
+  window.addEventListener('keydown', makeKeyFunc(true));
+  window.addEventListener('keyup', makeKeyFunc(false));
+})();
 
 function startEmulator(romArrayBuffer) {
   if (emulator) {
@@ -50,15 +272,11 @@ function startEmulator(romArrayBuffer) {
   }
 
   emulator = new Emulator(romArrayBuffer);
-  emulator.bindPauseButton(pauseEl);
-  emulator.bindFpsCounter($('#fps'), 500);
-  emulator.bindKeyInput(window);
-  emulator.bindRewindSlider($('#rewind'));
-  emulator.showRewindBar(false);
   emulator.run();
 }
 
 function Emulator(romArrayBuffer) {
+  let canvasEl = $('canvas');
   this.cleanupFuncs = [];
   this.renderer = new WebGLRenderer(canvasEl);
   // this.renderer = new Canvas2DRenderer(canvasEl);
@@ -112,144 +330,44 @@ Emulator.prototype.cleanup = function() {
   }
 };
 
-Emulator.prototype.addEventListener = function(el, name, func) {
-  el.addEventListener(name, func);
-  this.defer(() => el.removeEventListener(name, func));
-};
-
-Emulator.prototype.showRewindBar = function(show) {
-  if (show) {
-    rewindBarEl.removeAttribute('hidden');
-    rewindEl.setAttribute(
-        'min', _rewind_get_oldest_ticks_f64(this.rewindBuffer));
-    rewindEl.setAttribute(
-        'max', _rewind_get_newest_ticks_f64(this.rewindBuffer));
-    rewindEl.setAttribute('step', 1);
-    rewindEl.value = this.getTicks();
-    this.updateRewindTime();
-  } else {
-    rewindBarEl.setAttribute('hidden', '');
-  }
-};
-
 Emulator.prototype.isPaused = function() {
   return this.rafCancelToken === null;
 };
 
-Emulator.prototype.setPaused = function(isPaused) {
-  var wasPaused = this.isPaused();
-  if (wasPaused === isPaused) {
-    return;
-  }
-
-  if (isPaused) {
-    pauseEl.textContent = "resume";
+Emulator.prototype.pause = function() {
+  if (!this.isPaused()) {
     this.cancelAnimationFrame();
     this.audio.suspend();
     this.beginRewind();
-  } else {
+  }
+};
+
+Emulator.prototype.resume = function() {
+  if (this.isPaused()) {
     this.endRewind();
-    pauseEl.textContent = "pause";
     this.requestAnimationFrame();
     this.audio.resume();
   }
 };
 
-Emulator.prototype.bindPauseButton = function(el) {
-  pauseEl.textContent = 'pause';
-  this.addEventListener(el, 'click', (event) => {
-    this.setPaused(!this.isPaused());
-    this.showRewindBar(this.isPaused());
-  });
-};
+Emulator.prototype.setAutoRewind = function(enabled) {
+  if (enabled) {
+    const rewindFactor = 1.5;
+    const updateMs = 16;
 
-Emulator.prototype.bindFpsCounter = function(el, updateMs) {
-  var func = () => el.textContent = this.fps.toFixed(1);
-  var intervalId = setInterval(func, updateMs);
-  this.defer(() => clearInterval(intervalId));
-};
-
-Emulator.prototype.keyTogglePaused = function(e, isKeyDown) {
-  if (isKeyDown) {
-    this.setPaused(!this.isPaused());
-    this.showRewindBar(this.isPaused());
+    this.rewindIntervalId = setInterval(() => {
+      var oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+      var start = emulator.getTicks();
+      var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
+      var rewindTo = Math.max(oldest, start - delta);
+      this.rewindToTicks(rewindTo);
+      vm.ticks = emulator.getTicks();
+    }, updateMs);
+    this.defer(() => clearInterval(this.rewindIntervalId));
+  } else {
+    clearInterval(this.rewindIntervalId);
+    this.rewindIntervalId = 0;
   }
-};
-
-Emulator.prototype.keyRewind = function(e, isKeyDown) {
-  if (this.isRewinding() !== isKeyDown) {
-    if (isKeyDown) {
-      const rewindFactor = 1.5;
-      const updateMs = 16;
-
-      this.setPaused(true);
-      this.rewindIntervalId = setInterval(() => {
-        var oldest = _rewind_get_oldest_ticks_f64(this.rewindBuffer);
-        var start = this.getTicks();
-        var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
-        var rewindTo = Math.max(oldest, start - delta);
-        this.rewindToTicks(rewindTo);
-      }, updateMs);
-    } else {
-      clearInterval(this.rewindIntervalId);
-      this.rewindIntervalId = 0;
-      this.setPaused(false);
-    }
-  }
-};
-
-Emulator.prototype.bindKeyInput = function(el) {
-  var keyFuncs = {
-    'ArrowDown': _set_joyp_down,
-    'ArrowLeft': _set_joyp_left,
-    'ArrowRight': _set_joyp_right,
-    'ArrowUp': _set_joyp_up,
-    'KeyZ': _set_joyp_B,
-    'KeyX': _set_joyp_A,
-    'Enter': _set_joyp_start,
-    'Tab': _set_joyp_select,
-    'Backspace': this.keyRewind.bind(this),
-    'Space': this.keyTogglePaused.bind(this),
-  };
-
-  var makeKeyFunc = (isKeyDown) => {
-    return (event) => {
-      if (event.code in keyFuncs) {
-        keyFuncs[event.code](this.e, isKeyDown);
-        event.preventDefault();
-      }
-    };
-  };
-
-  this.addEventListener(el, 'keydown', makeKeyFunc(true));
-  this.addEventListener(el, 'keyup', makeKeyFunc(false));
-};
-
-Emulator.prototype.bindRewindSlider = function(el) {
-  this.addEventListener(el, 'input', (event) => {
-    this.rewindToTicks(+event.target.value);
-    this.updateRewindTime();
-  });
-};
-
-function zeroPadLeft(num, width) {
-  num = '' + (num | 0);
-  while (num.length < width) {
-    num = '0' + num;
-  }
-  return num;
-}
-
-function ticksToTime(ticks) {
-  var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
-  var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
-  var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
-  var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
-  return `${hr}:${min}:${sec}.${ms}`;
-}
-
-Emulator.prototype.updateRewindTime = function() {
-  rewindTimeEl.textContent = ticksToTime(rewindEl.value);
 };
 
 Emulator.prototype.requestAnimationFrame = function() {
@@ -319,10 +437,6 @@ Emulator.prototype.runUntil = function(ticks) {
   }
 };
 
-function lerp(from, to, alpha) {
-  return (alpha * from) + (1 - alpha) * to;
-}
-
 Emulator.prototype.renderVideo = function(startMs) {
   this.requestAnimationFrame();
 
@@ -338,6 +452,10 @@ Emulator.prototype.renderVideo = function(startMs) {
 
     this.leftoverTicks = (this.getTicks() - runUntilTicks) | 0;
     this.lastSec = startSec;
+  }
+
+  function lerp(from, to, alpha) {
+    return (alpha * from) + (1 - alpha) * to;
   }
 
   this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);
