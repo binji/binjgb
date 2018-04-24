@@ -162,12 +162,7 @@ var vm = new Vue({
             resolve({name, buffer: event.target.result});
         reader.readAsArrayBuffer(event.target.files[0]);
       })).then(({name, buffer}) => {
-        return crypto.subtle.digest('SHA-1', buffer).then((digest) => {
-          return {name, digest, buffer};
-        });
-      }).then(({name, digest, buffer}) => {
-        const array = Array.from(new Uint8Array(digest));
-        const sha1 = array.map(b => ('00' + b.toString(16)).slice(-2)).join('');
+        const sha1 = SHA1Digest(buffer);
         return dbPromise.then((db) => {
           return new Promise((resolve, reject) => {
             let transaction = db.transaction('games', 'readwrite');
