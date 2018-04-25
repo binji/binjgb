@@ -556,11 +556,12 @@ typedef struct {
   ColorPalettes obcp;               /* OBJ Color Palettes */
   PPUState state;
   u32 state_ticks;
-  u32 line_ticks; /* Counts ticks until line_y changes. */
-  u32 frame;      /* The currently rendering frame. */
-  u8 last_ly;     /* LY from the previous tick. */
-  u8 render_x;    /* Currently rendering X coordinate. */
-  u8 line_y;      /* The currently rendering line. Can be different than LY. */
+  u32 line_ticks;        /* Counts ticks until line_y changes. */
+  u32 frame;             /* The currently rendering frame. */
+  u8 last_ly;            /* LY from the previous tick. */
+  u32 line_start_offset; /* Offset in frame_buffer of line start. */
+  u32 pixel_offset;      /* Offset in frame_buffer of current pixel. */
+  u8 line_y;   /* The currently rendering line. Can be different than LY. */
   u8 win_y;    /* The window Y is only incremented when rendered. */
   u8 frame_wy; /* wy is cached per frame. */
   Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
@@ -2697,75 +2698,91 @@ static u32 mode3_tick_count(Emulator* e) {
 }
 
 static u8 reverse_bits_u8(u8 x) {
-  return ((x >> 7) & 0x01) | ((x >> 5) & 0x02) | ((x >> 3) & 0x04) |
-         ((x >> 1) & 0x08) | ((x << 1) & 0x10) | ((x << 3) & 0x20) |
-         ((x << 5) & 0x40) | ((x << 7) & 0x80);
+  x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
+  x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
+  x = ((x << 1) & 0xaa) | ((x >> 1) & 0x55);
+  return x;
+}
+
+static u16 map_select_to_address(TileMapSelect map_select) {
+  return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
 }
 
 static void ppu_mode3_tick(Emulator* e) {
-  int i;
-  u8 x = PPU.render_x;
-  u8 y = PPU.line_y;
+  const u8 x = PPU.pixel_offset - PPU.line_start_offset;
+  const u8 y = PPU.line_y;
+  /* Each tick writes 4 pixels. */
   if (x + 4 > SCREEN_WIDTH) {
     return;
   }
-  /* Each tick writes 4 pixels. */
-  RGBA pixels[4];
-  ZERO_MEMORY(pixels);
-  Bool bg_is_zero[4], bg_priority[4];
-  memset(bg_is_zero, TRUE, sizeof(bg_is_zero));
-  ZERO_MEMORY(bg_priority);
+  Bool bg_is_zero[4] = {TRUE, TRUE, TRUE, TRUE},
+       bg_priority[4] = {FALSE, FALSE, FALSE, FALSE};
 
-  TileDataSelect data_select = LCDC.bg_tile_data_select;
-  for (i = 0; i < 4; ++i) {
-    u8 xi = x + i;
-    PPU.rendering_window = PPU.rendering_window ||
-                           (LCDC.window_display && !e->config.disable_window &&
-                            xi + WINDOW_X_OFFSET >= PPU.wx &&
-                            PPU.wx <= WINDOW_MAX_X && y >= PPU.frame_wy);
-    Bool display_bg = (IS_CGB || LCDC.bg_display) && !e->config.disable_bg;
-    if (PPU.rendering_window || display_bg) {
-      TileMapSelect map_select;
-      u8 mx, my;
-      if (PPU.rendering_window) {
-        map_select = LCDC.window_tile_map_select;
-        mx = xi + WINDOW_X_OFFSET - PPU.wx;
-        my = PPU.win_y;
+  const Bool display_bg = (IS_CGB || LCDC.bg_display) && !e->config.disable_bg;
+  Bool rendering_window = PPU.rendering_window;
+  int window_counter = rendering_window ? 0 : 255;
+  if (!rendering_window && LCDC.window_display && !e->config.disable_window &&
+      PPU.wx <= WINDOW_MAX_X && y >= PPU.frame_wy) {
+    window_counter = MAX(0, PPU.wx - (x + WINDOW_X_OFFSET));
+  }
+
+  const TileDataSelect data_select = LCDC.bg_tile_data_select;
+  u16 map_start = map_select_to_address(LCDC.bg_tile_map_select);
+  u8 mx = PPU.scx + x;
+  u8 my = PPU.scy + y;
+  RGBA* pixel = &e->frame_buffer[PPU.pixel_offset];
+
+  /* Cache map_addr info. */
+  u16 map_addr = 0;
+  u8 attr = 0;
+  PaletteRGBA* pal = NULL;
+  u8 lo = 0, hi = 0;
+
+  int i;
+  for (i = 0; i < 4; ++i, ++mx) {
+    if (window_counter-- == 0) {
+      PPU.rendering_window = rendering_window = TRUE;
+      map_start = map_select_to_address(LCDC.window_tile_map_select);
+      map_addr = 0;
+      mx = x + i + WINDOW_X_OFFSET - PPU.wx;
+      my = PPU.win_y;
+    }
+    if (rendering_window || display_bg) {
+      u16 new_map_addr = map_start + (((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3));
+      if (map_addr == new_map_addr) {
+        lo <<= 1;
+        hi <<= 1;
       } else {
-        map_select = LCDC.bg_tile_map_select;
-        mx = PPU.scx + xi;
-        my = PPU.scy + y;
+        map_addr = new_map_addr;
+        u16 tile_index = VRAM.data[map_addr];
+        u8 my7 = my & 7;
+        if (data_select == TILE_DATA_8800_97FF) {
+          tile_index = 256 + (s8)tile_index;
+        }
+        if (IS_CGB) {
+          attr = VRAM.data[0x2000 + map_addr];
+          pal = &PPU.bgcp.palettes[attr & 0x7];
+          if (attr & 0x08) { tile_index += 0x200; }
+          if (attr & 0x40) { my7 = 7 - my7; }
+        } else {
+          attr = 0;
+          pal = &PPU.bgp.rgba;
+        }
+        u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
+        lo = VRAM.data[tile_addr];
+        hi = VRAM.data[tile_addr + 1];
+        if (attr & 0x20) {
+          lo = reverse_bits_u8(lo);
+          hi = reverse_bits_u8(hi);
+        }
+        u8 shift = mx & 7;
+        lo <<= shift;
+        hi <<= shift;
       }
-      u16 map_start = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1C00;
-      u16 map_addr = map_start + (((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3));
-      u16 tile_index = VRAM.data[map_addr];
-      mx &= 7;
-      my &= 7;
-      if (data_select == TILE_DATA_8800_97FF) {
-        tile_index = 256 + (s8)tile_index;
-      }
-      u8 attr = 0;
-      PaletteRGBA* pal = NULL;
-      if (IS_CGB) {
-        attr = VRAM.data[0x2000 + map_addr];
-        pal = &PPU.bgcp.palettes[attr & 0x7];
-        if (attr & 0x08) { tile_index += 0x200; }
-        if (attr & 0x40) { my = 7 - my; }
-        if (attr & 0x80) { bg_priority[i] = TRUE; }
-      } else {
-        pal = &PPU.bgp.rgba;
-      }
-      u16 tile_addr = (tile_index * TILE_HEIGHT + my) * TILE_ROW_BYTES;
-      u8 lo = VRAM.data[tile_addr];
-      u8 hi = VRAM.data[tile_addr + 1];
-      if (IS_CGB && (attr & 0x20)) {
-        lo = reverse_bits_u8(lo);
-        hi = reverse_bits_u8(hi);
-      }
-      u8 shift = 7 - mx;
-      u8 palette_index = (((hi >> shift) & 1) << 1) | ((lo >> shift) & 1);
-      pixels[i] = pal->color[palette_index];
+      u8 palette_index = ((hi >> 6) & 2) | ((lo >> 7) & 1);
+      pixel[i] = pal->color[palette_index];
       bg_is_zero[i] = palette_index == 0;
+      if (attr & 0x80) { bg_priority[i] = TRUE; }
     }
   }
 
@@ -2826,18 +2843,12 @@ static void ppu_mode3_tick(Emulator* e) {
         u8 palette_index = ((hi & 1) << 1) | (lo & 1);
         if (palette_index != 0 && (!bg_priority[i] || bg_is_zero[i]) &&
             (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
-          pixels[i] = pal->color[palette_index];
+          pixel[i] = pal->color[palette_index];
         }
       }
     }
   }
-
-  RGBA* rgba_pixels = &e->frame_buffer[y * SCREEN_WIDTH + x];
-  for (i = 0; i < 4; ++i) {
-    rgba_pixels[i] = pixels[i];
-  }
-
-  PPU.render_x += 4;
+  PPU.pixel_offset += 4;
 }
 
 static void ppu_tick(Emulator* e) {
@@ -2954,7 +2965,7 @@ static void ppu_tick(Emulator* e) {
         }
         PPU.state_ticks &= ~3;
         STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
-        PPU.render_x = 0;
+        PPU.line_start_offset = PPU.pixel_offset = PPU.line_y * SCREEN_WIDTH;
         PPU.rendering_window = FALSE;
         check_stat(e);
         break;
