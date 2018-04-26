@@ -679,7 +679,8 @@ typedef struct Emulator {
 
 
 #define DIV_CEIL(numer, denom) (((numer) + (denom) - 1) / (denom))
-#define VALUE_WRAPPED(X, MAX) ((X) >= (MAX) ? ((X) -= (MAX), TRUE) : FALSE)
+#define VALUE_WRAPPED(X, MAX) \
+  (UNLIKELY((X) >= (MAX) ? ((X) -= (MAX), TRUE) : FALSE))
 
 #define SAVE_STATE_VERSION (2)
 #define SAVE_STATE_HEADER (u32)(0x6b57a7e0 + SAVE_STATE_VERSION)
@@ -1832,7 +1833,7 @@ static u8 read_u8_raw(Emulator* e, Address addr) {
 
 static u8 read_u8(Emulator* e, Address addr) {
   MemoryTypeAddressPair pair = map_address(addr);
-  if (!is_dma_access_ok(e, pair)) {
+  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
@@ -1843,20 +1844,20 @@ static u8 read_u8(Emulator* e, Address addr) {
 static int read_op(Emulator* e) {
   Address addr = e->state.reg.PC;
   MemoryTypeAddressPair pair = map_address(addr);
-  if (!is_dma_access_ok(e, pair)) {
+  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
 
   u8 value = read_u8_pair(e, pair, FALSE);
-  if (HOOK_FALSE(read_op_api, addr, pair, value)) {
+  if (UNLIKELY(HOOK_FALSE(read_op_api, addr, pair, value))) {
     return BREAKPOINT;
   }
   return value;
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
-  if (is_using_vram(e, TRUE)) {
+  if (UNLIKELY(is_using_vram(e, TRUE))) {
     HOOK(write_vram_in_use_ab, addr, value);
     return;
   }
@@ -1884,7 +1885,7 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
-  if (is_using_oam(e, TRUE)) {
+  if (UNLIKELY(is_using_oam(e, TRUE))) {
     HOOK(write_oam_in_use_ab, addr, value);
     return;
   }
@@ -1893,7 +1894,7 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void increment_tima(Emulator* e) {
-  if (++TIMER.tima == 0) {
+  if (UNLIKELY(++TIMER.tima == 0)) {
     HOOK(trigger_timer_i, TICKS + CPU_TICK);
     TIMER.tima_state = TIMA_STATE_OVERFLOW;
     INTR.new_if |= IF_TIMER;
@@ -1903,7 +1904,7 @@ static void increment_tima(Emulator* e) {
 static void write_div_counter(Emulator* e, u16 div_counter) {
   if (TIMER.on) {
     u16 falling_edge = ((TIMER.div_counter ^ div_counter) & ~div_counter);
-    if ((falling_edge & s_tima_mask[TIMER.clock_select]) != 0) {
+    if (UNLIKELY((falling_edge & s_tima_mask[TIMER.clock_select]) != 0)) {
       increment_tima(e);
     }
   }
@@ -2002,7 +2003,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     case IO_TIMA_ADDR:
       if (TIMER.on) {
-        if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+        if (UNLIKELY(TIMER.tima_state == TIMA_STATE_OVERFLOW)) {
           /* Cancel the overflow and interrupt if written on the same tick. */
           TIMER.tima_state = TIMA_STATE_NORMAL;
           INTR.new_if &= ~IF_TIMER;
@@ -2017,7 +2018,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     case IO_TMA_ADDR:
       TIMER.tma = value;
-      if (TIMER.on && TIMER.tima_state == TIMA_STATE_RESET) {
+      if (UNLIKELY(TIMER.on && TIMER.tima_state == TIMA_STATE_RESET)) {
         TIMER.tima = value;
       }
       break;
@@ -2283,7 +2284,8 @@ static void write_nrx2_reg(Emulator* e, Channel* channel, Address addr,
     HOOK(write_nrx2_disable_dac_ab, addr, value);
   }
   if (channel->status) {
-    if (channel->envelope.period == 0 && channel->envelope.automatic) {
+    if (UNLIKELY(channel->envelope.period == 0 &&
+                 channel->envelope.automatic)) {
       u8 new_volume = (channel->envelope.volume + 1) & ENVELOPE_MAX_VOLUME;
       HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
            new_volume);
@@ -2313,8 +2315,8 @@ static Bool write_nrx4_reg(Emulator* e, Channel* channel, Address addr,
    * length counter frame. This only occurs on transition from disabled to
    * enabled. */
   Bool next_frame_is_length = (APU.frame & 1) == 1;
-  if (!was_length_enabled && channel->length_enabled && !next_frame_is_length &&
-      channel->length > 0) {
+  if (UNLIKELY(!was_length_enabled && channel->length_enabled &&
+               !next_frame_is_length && channel->length > 0)) {
     channel->length--;
     HOOK(write_nrx4_extra_length_clock_abi, addr, value, channel->length);
     if (!trigger && channel->length == 0) {
@@ -2346,7 +2348,7 @@ static void trigger_nrx4_envelope(Emulator* e, Envelope* envelope,
   envelope->timer = envelope->period ? envelope->period : ENVELOPE_MAX_PERIOD;
   envelope->automatic = TRUE;
   /* If the next APU frame will update the envelope, increment the timer. */
-  if (APU.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME) {
+  if (UNLIKELY(APU.frame + 1 == FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME)) {
     envelope->timer++;
   }
   HOOK(trigger_nrx4_info_asii, addr, get_apu_reg_string(addr), envelope->volume,
@@ -2368,7 +2370,8 @@ static void trigger_nr14_reg(Emulator* e, Channel* channel) {
   SWEEP.frequency = channel->frequency;
   SWEEP.timer = SWEEP.period ? SWEEP.period : SWEEP_MAX_PERIOD;
   SWEEP.calculated_subtract = FALSE;
-  if (SWEEP.shift && calculate_sweep_frequency(e) > SOUND_MAX_FREQUENCY) {
+  if (UNLIKELY(SWEEP.shift &&
+               calculate_sweep_frequency(e) > SOUND_MAX_FREQUENCY)) {
     channel->status = FALSE;
     HOOK0(trigger_nr14_sweep_overflow_v);
   } else {
@@ -2585,7 +2588,7 @@ static void write_wave_ram(Emulator* e, MaskedAddress addr, u8 value) {
     /* If the wave channel is playing, the byte is written to the sample
      * position. On DMG, this is only allowed if the write occurs exactly when
      * it is being accessed by the Wave channel. */
-    if (IS_CGB || TICKS == WAVE.sample_time) {
+    if (UNLIKELY(IS_CGB || TICKS == WAVE.sample_time)) {
       WAVE.ram[WAVE.position >> 1] = value;
       HOOK(write_wave_ram_while_playing_ab, addr, value);
     }
@@ -2641,7 +2644,7 @@ static void write_u8_raw(Emulator* e, Address addr, u8 value) {
 
 static void write_u8(Emulator* e, Address addr, u8 value) {
   MemoryTypeAddressPair pair = map_address(addr);
-  if (!is_dma_access_ok(e, pair)) {
+  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
     HOOK(write_during_dma_ab, addr, value);
     return;
   }
@@ -2753,7 +2756,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
          bg_priority[4] = {FALSE, FALSE, FALSE, FALSE};
 
     for (i = 0; i < 4; ++i, ++mx) {
-      if (window_counter-- == 0) {
+      if (UNLIKELY(window_counter-- == 0)) {
         PPU.rendering_window = rendering_window = display_bg = TRUE;
         mx = x + i + WINDOW_X_OFFSET - PPU.wx;
         my = PPU.win_y;
@@ -2878,7 +2881,7 @@ static void ppu_tick(Emulator* e) {
 
   PPU.state_ticks -= CPU_TICK;
   PPU.line_ticks -= CPU_TICK;
-  if (PPU.state_ticks == 0) {
+  if (UNLIKELY(PPU.state_ticks == 0)) {
     switch (PPU.state) {
       case PPU_STATE_HBLANK:
       case PPU_STATE_VBLANK_PLUS_4:
@@ -2895,7 +2898,7 @@ static void ppu_tick(Emulator* e) {
             STAT.trigger_mode = PPU_MODE_VBLANK;
             PPU.frame++;
             INTR.new_if |= IF_VBLANK;
-            if (PPU.display_delay_frames == 0) {
+            if (LIKELY(PPU.display_delay_frames == 0)) {
               PPU.new_frame_edge = TRUE;
             } else {
               PPU.display_delay_frames--;
@@ -2906,8 +2909,8 @@ static void ppu_tick(Emulator* e) {
             if (PPU.rendering_window) {
               PPU.win_y++;
             }
-            if (HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
-                (HDMA.blocks & 0x80) == 0) {
+            if (UNLIKELY(HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+                         (HDMA.blocks & 0x80) == 0)) {
               HDMA.state = DMA_ACTIVE;
             }
           }
@@ -3026,7 +3029,7 @@ static void update_sweep(Emulator* e) {
         }
 
         /* Perform another overflow check. */
-        if (calculate_sweep_frequency(e) > SOUND_MAX_FREQUENCY) {
+        if (UNLIKELY(calculate_sweep_frequency(e) > SOUND_MAX_FREQUENCY)) {
           HOOK0(sweep_overflow_2nd_v);
           CHANNEL1.status = FALSE;
         }
@@ -3238,7 +3241,7 @@ static void apu_synchronize(Emulator* e) {
 }
 
 static void dma_tick(Emulator* e) {
-  if (DMA.state == DMA_INACTIVE) {
+  if (LIKELY(DMA.state == DMA_INACTIVE)) {
     return;
   }
   if (DMA.ticks < DMA_DELAY_TICKS) {
@@ -3265,7 +3268,7 @@ static void dma_tick(Emulator* e) {
 static void hdma_copy_byte(Emulator* e) {
   MemoryTypeAddressPair source_pair = map_hdma_source_address(HDMA.source++);
   u8 value;
-  if (source_pair.type == MEMORY_MAP_VRAM) {
+  if (UNLIKELY(source_pair.type == MEMORY_MAP_VRAM)) {
     /* TODO(binji): According to TCAGBD this should read "two unknown bytes",
      * then 0xff for the rest. */
     value = INVALID_READ_BYTE;
@@ -3289,7 +3292,7 @@ static void hdma_copy_byte(Emulator* e) {
 }
 
 static void hdma_tick(Emulator* e) {
-  if (HDMA.state == DMA_ACTIVE) {
+  if (UNLIKELY(HDMA.state == DMA_ACTIVE)) {
     hdma_copy_byte(e);
     hdma_copy_byte(e);
   }
@@ -3297,10 +3300,10 @@ static void hdma_tick(Emulator* e) {
 
 static void timer_tick(Emulator* e) {
   if (TIMER.on) {
-    if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+    if (UNLIKELY(TIMER.tima_state == TIMA_STATE_OVERFLOW)) {
       TIMER.tima_state = TIMA_STATE_RESET;
       TIMER.tima = TIMER.tma;
-    } else if (TIMER.tima_state == TIMA_STATE_RESET) {
+    } else if (UNLIKELY(TIMER.tima_state == TIMA_STATE_RESET)) {
       TIMER.tima_state = TIMA_STATE_NORMAL;
     }
   }
@@ -3308,7 +3311,7 @@ static void timer_tick(Emulator* e) {
 }
 
 static void serial_tick(Emulator* e) {
-  if (!SERIAL.transferring) {
+  if (LIKELY(!SERIAL.transferring)) {
     return;
   }
   if (SERIAL.clock == SERIAL_CLOCK_INTERNAL) {
@@ -3645,7 +3648,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
   Bool should_dispatch =
       (INTR.ime || INTR.halt) && ((INTR.new_if & INTR.ie & IF_ALL) != 0);
 
-  if (INTR.stop && !should_dispatch) {
+  if (UNLIKELY(INTR.stop && !should_dispatch)) {
     // TODO(binji): proper timing of speed switching.
     if (CPU_SPEED.switching) {
       CPU_SPEED.switching = FALSE;
@@ -3658,12 +3661,12 @@ static EmulatorEvent execute_instruction(Emulator* e) {
     }
   }
 
-  if (INTR.enable) {
+  if (UNLIKELY(INTR.enable)) {
     INTR.enable = FALSE;
     INTR.ime = TRUE;
   }
 
-  if (INTR.halt_bug) {
+  if (UNLIKELY(INTR.halt_bug)) {
     /* When interrupts are disabled during a HALT, the following byte will be
      * duplicated when decoding. */
     opcode = read_op(e);
@@ -3675,7 +3678,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
   }
 
   if (should_dispatch) {
-    if (INTR.halt_di) {
+    if (UNLIKELY(INTR.halt_di)) {
       HOOK0(interrupt_during_halt_di_v);
       INTR.halt = INTR.halt_di = FALSE;
     } else {
