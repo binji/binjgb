@@ -566,7 +566,6 @@ typedef struct {
   u8 frame_wy; /* wy is cached per frame. */
   Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
   u8 line_obj_count;     /* Number of sprites to draw on this line. */
-  u8 oam_index;          /* Current sprite index in mode 2. */
   Bool rendering_window; /* TRUE when this line is rendering the window. */
   Bool new_frame_edge;
   u8 display_delay_frames; /* Wait this many frames before displaying. */
@@ -2638,24 +2637,23 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
   write_u8_pair(e, pair, value);
 }
 
-static void ppu_mode2_tick(Emulator* e) {
-  if (!LCDC.obj_display || e->config.disable_obj ||
-      PPU.line_obj_count >= OBJ_PER_LINE_COUNT) {
+static void do_ppu_mode2(Emulator* e) {
+  if (!LCDC.obj_display || e->config.disable_obj) {
     return;
   }
 
-  /* 80 ticks / 40 sprites == 2 ticks/sprite == 2 sprites per tick. */
+  int line_obj_count = 0;
   int i;
   u8 obj_height = s_obj_size_to_height[LCDC.obj_size];
   u8 y = PPU.line_y;
-  for (i = 0; i < 2 && PPU.line_obj_count < OBJ_PER_LINE_COUNT; ++i) {
-    /* Put the visible sprites into line_obj, but insert them so sprites with
+  for (i = 0; i < OBJ_COUNT; ++i) {
+    /* Put the visible sprites into line_obj. Insert them so sprites with
      * smaller X-coordinates are earlier, but only on DMG. On CGB, they are
      * always ordered by obj index. */
-    Obj* o = &OAM[PPU.oam_index];
+    Obj* o = &OAM[i];
     u8 rel_y = y - o->y;
     if (rel_y < obj_height) {
-      int j = PPU.line_obj_count;
+      int j = line_obj_count;
       if (!IS_CGB) {
         while (j > 0 && o->x < PPU.line_obj[j - 1].x) {
           PPU.line_obj[j] = PPU.line_obj[j - 1];
@@ -2663,10 +2661,12 @@ static void ppu_mode2_tick(Emulator* e) {
         }
       }
       PPU.line_obj[j] = *o;
-      PPU.line_obj_count++;
+      if (++line_obj_count == OBJ_PER_LINE_COUNT) {
+        break;
+      }
     }
-    PPU.oam_index++;
   }
+  PPU.line_obj_count = line_obj_count;
 }
 
 static u32 mode3_tick_count(Emulator* e) {
@@ -2861,10 +2861,8 @@ static void ppu_tick(Emulator* e) {
   STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
   PPU.last_ly = PPU.ly;
 
-  switch (STAT.mode) {
-    case PPU_MODE_MODE2: ppu_mode2_tick(e); break;
-    case PPU_MODE_MODE3: ppu_mode3_tick(e); break;
-    default: break;
+  if (STAT.mode == PPU_MODE_MODE3) {
+    ppu_mode3_tick(e);
   }
 
   PPU.state_ticks -= CPU_TICK;
@@ -2917,8 +2915,7 @@ static void ppu_tick(Emulator* e) {
         PPU.state = PPU_STATE_MODE2;
         PPU.state_ticks = PPU_MODE2_TICKS;
         STAT.mode = PPU_MODE_MODE2;
-        PPU.oam_index = 0;
-        PPU.line_obj_count = 0;
+        do_ppu_mode2(e);
         break;
 
       case PPU_STATE_VBLANK:
