@@ -2724,7 +2724,8 @@ static void ppu_mode3_synchronize(Emulator* e) {
   const u8 y = PPU.line_y;
   if (STAT.mode != PPU_MODE_MODE3 || x >= SCREEN_WIDTH) return;
 
-  const Bool display_bg = (IS_CGB || LCDC.bg_display) && !e->config.disable_bg;
+  Bool display_bg = (IS_CGB || LCDC.bg_display) && !e->config.disable_bg;
+  const Bool display_obj = LCDC.obj_display && !e->config.disable_obj;
   Bool rendering_window = PPU.rendering_window;
   int window_counter = rendering_window ? 0 : 255;
   if (!rendering_window && LCDC.window_display && !e->config.disable_window &&
@@ -2733,9 +2734,10 @@ static void ppu_mode3_synchronize(Emulator* e) {
   }
 
   const TileDataSelect data_select = LCDC.bg_tile_data_select;
-  u16 map_start = map_select_to_address(LCDC.bg_tile_map_select);
   u8 mx = PPU.scx + x;
   u8 my = PPU.scy + y;
+  u16 map_base = map_select_to_address(LCDC.bg_tile_map_select) |
+                 ((my >> 3) * TILE_MAP_WIDTH);
   RGBA* pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
 
   /* Cache map_addr info. */
@@ -2752,15 +2754,15 @@ static void ppu_mode3_synchronize(Emulator* e) {
 
     for (i = 0; i < 4; ++i, ++mx) {
       if (window_counter-- == 0) {
-        PPU.rendering_window = rendering_window = TRUE;
-        map_start = map_select_to_address(LCDC.window_tile_map_select);
-        map_addr = 0;
+        PPU.rendering_window = rendering_window = display_bg = TRUE;
         mx = x + i + WINDOW_X_OFFSET - PPU.wx;
         my = PPU.win_y;
+        map_base = map_select_to_address(LCDC.window_tile_map_select) |
+                   ((my >> 3) * TILE_MAP_WIDTH);
+        map_addr = 0;
       }
-      if (rendering_window || display_bg) {
-        u16 new_map_addr =
-            map_start + (((my >> 3) * TILE_MAP_WIDTH) | (mx >> 3));
+      if (display_bg) {
+        u16 new_map_addr = map_base | (mx >> 3);
         if (map_addr == new_map_addr) {
           lo <<= 1;
           hi <<= 1;
@@ -2798,7 +2800,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
       }
     }
 
-    if (LCDC.obj_display && !e->config.disable_obj) {
+    if (display_obj) {
       u8 obj_height = s_obj_size_to_height[LCDC.obj_size];
       int n;
       for (n = PPU.line_obj_count - 1; n >= 0; --n) {
