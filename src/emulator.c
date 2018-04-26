@@ -326,6 +326,13 @@ typedef enum {
   SPEED_DOUBLE = 1,
 } Speed;
 
+typedef enum {
+  SPEED_STATE_DOUBLE = 0,
+  SPEED_STATE_NORMAL = 1,
+  SPEED_STATE_DOUBLE_HACK = 2,
+  SPEED_STATE_NORMAL_HACK = 3,
+} SpeedState;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -579,8 +586,8 @@ typedef struct {
 
 typedef struct {
   Speed speed;
+  SpeedState state;
   Bool switching;
-  Bool tick_hack;
 } CpuSpeed;
 
 typedef struct {
@@ -3333,7 +3340,11 @@ static void tick(Emulator* e) {
   dma_tick(e);
   serial_tick(e);
   timer_tick(e);
-  if (CPU_SPEED.speed != SPEED_DOUBLE || (CPU_SPEED.tick_hack ^= 1)) {
+  /* In double-speed, state alternates between 0 and 2. For single-speed, state
+   * alternates between 1 and 3 (i.e. always true). This saves checking whether
+   * we're in double speed first, which is important since this function is so
+   * hot. */
+  if ((CPU_SPEED.state ^= 2)) {
     hdma_tick(e);
     ppu_tick(e);
     TICKS += CPU_TICK;
@@ -3653,6 +3664,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
     if (CPU_SPEED.switching) {
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
+      CPU_SPEED.state ^= 1;
       INTR.stop = FALSE;
       HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
     } else {
@@ -4013,6 +4025,7 @@ Result init_emulator(Emulator* e) {
   INTR.ime = FALSE;
   TIMER.div_counter = 0xAC00;
   WRAM.offset = 0x1000;
+  CPU_SPEED.state = SPEED_STATE_NORMAL;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
