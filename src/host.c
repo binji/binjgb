@@ -64,6 +64,7 @@ typedef struct Host {
   HostHookContext hook_ctx;
   SDL_Window* window;
   SDL_GLContext gl_context;
+  SDL_GameController* controller;
   Audio audio;
   u64 start_counter;
   u64 performance_frequency;
@@ -162,6 +163,18 @@ Bool host_poll_events(Host* host) {
         }
         break;
       }
+      case SDL_CONTROLLERDEVICEADDED:
+        if (!host->controller) {
+          host->controller = SDL_GameControllerOpen(event.cdevice.which);
+        }
+        break;
+      case SDL_CONTROLLERDEVICEREMOVED: {
+        if (host->controller) {
+          SDL_GameControllerClose(host->controller);
+          host->controller = NULL;
+        }
+        break;
+      }
       case SDL_QUIT:
         running = FALSE;
         break;
@@ -234,6 +247,28 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joyp->A = state[SDL_SCANCODE_X];
   joyp->start = state[SDL_SCANCODE_RETURN];
   joyp->select = state[SDL_SCANCODE_TAB];
+
+  /* Prefer controller input, if any */
+  if (host->controller) {
+#define AXIS(gb, dpad, axis, op, value)                                        \
+  joyp->gb = joyp->gb ||                                                       \
+             SDL_GameControllerGetButton(host->controller,                     \
+                                         SDL_CONTROLLER_BUTTON_DPAD_##dpad) || \
+             (SDL_GameControllerGetAxis(host->controller,                      \
+                                        SDL_CONTROLLER_AXIS_##axis) op value)
+#define BUTTON(gb, sdl)                               \
+  joyp->gb = joyp->gb || SDL_GameControllerGetButton( \
+                             host->controller, SDL_CONTROLLER_BUTTON_##sdl)
+    AXIS(up, UP, LEFTY, <=, -0x4000);
+    AXIS(down, DOWN, LEFTY, >=, 0x3fff);
+    AXIS(left, LEFT, LEFTX, <=, -0x4000);
+    AXIS(right, RIGHT, LEFTX, >=, 0x3fff);
+    BUTTON(B, X); /* On my gamepad, X is nicer for this than B. */
+    BUTTON(A, A);
+    BUTTON(start, START);
+    BUTTON(select, BACK);
+#undef GAMEPAD
+  }
 
   Ticks ticks = emulator_get_ticks(host_get_emulator(host));
   joypad_append_if_new(host->joypad_buffer, joyp, ticks);
@@ -358,8 +393,9 @@ Bool host_is_rewinding(Host* host) {
 }
 
 Result host_init(Host* host, struct Emulator* e) {
-  CHECK_MSG(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == 0,
-            "SDL_init failed.\n");
+  CHECK_MSG(
+      SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) == 0,
+      "SDL_init failed.\n");
   host_init_time(host);
   CHECK(SUCCESS(host_init_video(host)));
   CHECK(SUCCESS(host_init_audio(host)));
