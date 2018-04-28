@@ -563,8 +563,8 @@ typedef struct {
   ColorPalettes obcp;               /* OBJ Color Palettes */
   PPUState state;
   Ticks mode3_render_ticks; /* Ticks at last mode3 synchronization. */
+  Ticks line_start_ticks; /* Ticks at the start of this line_y. */
   u32 state_ticks;
-  u32 line_ticks; /* Counts ticks until line_y changes. */
   u32 frame;      /* The currently rendering frame. */
   u8 last_ly;     /* LY from the previous tick. */
   u8 render_x;    /* Currently rendering X coordinate. */
@@ -2073,7 +2073,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           HOOK0(enable_display_v);
           PPU.state = PPU_STATE_LCD_ON_MODE2;
           PPU.state_ticks = PPU_MODE2_TICKS;
-          PPU.line_ticks = PPU_LINE_TICKS - CPU_TICK;
+          PPU.line_start_ticks = TICKS - CPU_TICK - CPU_TICK;
           PPU.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           STAT.trigger_mode = PPU_MODE_MODE2;
         } else {
@@ -2886,14 +2886,13 @@ static void ppu_tick(Emulator* e) {
   PPU.last_ly = PPU.ly;
 
   PPU.state_ticks -= CPU_TICK;
-  PPU.line_ticks -= CPU_TICK;
   if (UNLIKELY(PPU.state_ticks == 0)) {
     switch (PPU.state) {
       case PPU_STATE_HBLANK:
       case PPU_STATE_VBLANK_PLUS_4:
         PPU.line_y++;
         PPU.ly++;
-        PPU.line_ticks = PPU_LINE_TICKS;
+        PPU.line_start_ticks = TICKS;
         check_ly_eq_lyc(e, FALSE);
         PPU.state_ticks = CPU_TICK;
 
@@ -2961,7 +2960,7 @@ static void ppu_tick(Emulator* e) {
       case PPU_STATE_VBLANK_LINE_Y_0:
         PPU.state = PPU_STATE_HBLANK_PLUS_4;
         PPU.state_ticks = CPU_TICK;
-        PPU.line_ticks = PPU_LINE_TICKS;
+        PPU.line_start_ticks = TICKS;
         PPU.line_y = 0;
         PPU.frame_wy = PPU.wy;
         PPU.win_y = 0;
@@ -3002,7 +3001,7 @@ static void ppu_tick(Emulator* e) {
       case PPU_STATE_MODE3_COMMON:
         ppu_mode3_synchronize(e);
         PPU.state = PPU_STATE_HBLANK;
-        PPU.state_ticks = PPU.line_ticks;
+        PPU.state_ticks = PPU_LINE_TICKS + PPU.line_start_ticks - TICKS;
         STAT.mode = PPU_MODE_HBLANK;
         check_stat(e);
         break;
