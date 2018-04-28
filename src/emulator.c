@@ -3296,13 +3296,6 @@ static void hdma_copy_byte(Emulator* e) {
   }
 }
 
-static void hdma_tick(Emulator* e) {
-  if (UNLIKELY(HDMA.state == DMA_ACTIVE)) {
-    hdma_copy_byte(e);
-    hdma_copy_byte(e);
-  }
-}
-
 static void timer_tick(Emulator* e) {
   if (TIMER.on) {
     if (UNLIKELY(TIMER.tima_state == TIMA_STATE_OVERFLOW)) {
@@ -3343,7 +3336,6 @@ static void tick(Emulator* e) {
    * we're in double speed first, which is important since this function is so
    * hot. */
   if ((CPU_SPEED.state ^= 2)) {
-    hdma_tick(e);
     ppu_tick(e);
     TICKS += CPU_TICK;
   }
@@ -3920,6 +3912,8 @@ static void emulator_step_internal(Emulator* e) {
     execute_instruction(e);
   } else {
     tick(e);
+    hdma_copy_byte(e);
+    hdma_copy_byte(e);
   }
 }
 
