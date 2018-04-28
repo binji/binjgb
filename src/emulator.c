@@ -3687,7 +3687,7 @@ static void execute_instruction(Emulator* e) {
     opcode = read_op(e);
   }
 
-  if (should_dispatch) {
+  if (UNLIKELY(should_dispatch)) {
     if (UNLIKELY(INTR.halt_di)) {
       HOOK0(interrupt_during_halt_di_v);
       INTR.halt = INTR.halt_di = FALSE;
@@ -3697,7 +3697,7 @@ static void execute_instruction(Emulator* e) {
     }
   }
 
-  if (INTR.halt) {
+  if (UNLIKELY(INTR.halt)) {
     return;
   }
 
