@@ -24,6 +24,8 @@ static FILE* s_controller_input_file;
 static int s_frames = DEFAULT_FRAMES;
 static const char* s_output_ppm;
 static Bool s_animate;
+static Bool s_print_ops;
+static int s_print_ops_limit = 512;
 static const char* s_rom_filename;
 
 Result write_frame_ppm(struct Emulator* e, const char* filename) {
@@ -50,13 +52,15 @@ Result write_frame_ppm(struct Emulator* e, const char* filename) {
 void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
-      "  -h,--help          help\n"
-      "  -t,--trace         trace each instruction\n"
-      "  -l,--log S=N       set log level for system S to N\n"
-      "  -i,--input FILE    read controller input from FILE\n"
-      "  -f,--frames N      run for N frames (default: %u)\n"
-      "  -o,--output FILE   output PPM file to FILE\n"
-      "  -a,--animate       output an image every frame\n",
+      "  -h,--help            help\n"
+      "  -t,--trace           trace each instruction\n"
+      "  -l,--log S=N         set log level for system S to N\n"
+      "  -i,--input FILE      read controller input from FILE\n"
+      "  -f,--frames N        run for N frames (default: %u)\n"
+      "  -o,--output FILE     output PPM file to FILE\n"
+      "  -a,--animate         output an image every frame\n"
+      "     --print-ops       print execution count of each opcode\n"
+      "     --print-ops-limit max opcodes to print\n",
       argv[0],
       DEFAULT_FRAMES);
 
@@ -83,6 +87,8 @@ void parse_options(int argc, char**argv) {
     {'f', "frames", 1},
     {'o', "output", 1},
     {'a', "animate", 0},
+    {0, "print-ops-limit", 1},
+    {0, "print-ops", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -153,7 +159,14 @@ void parse_options(int argc, char**argv) {
             break;
 
           default:
-            assert(0);
+            if (strcmp(result.option->long_name, "print-ops") == 0) {
+              s_print_ops = TRUE;
+            } else if (strcmp(result.option->long_name, "print-ops-limit") ==
+                       0) {
+              s_print_ops_limit = atoi(result.value);
+            } else {
+              abort();
+            }
             break;
         }
         break;
@@ -180,6 +193,65 @@ error:
   usage(argc, argv);
   option_parser_delete(parser);
   exit(1);
+}
+
+typedef struct {
+  u16 opcode;
+  u32 count;
+} OpcodeCount;
+
+int compare_opcode_count(const void* a, const void* b) {
+  OpcodeCount* pa = (OpcodeCount*)a;
+  OpcodeCount* pb = (OpcodeCount*)b;
+  return (int)pb->count - (int)pa->count;
+}
+
+void print_ops(void) {
+  u32* opcode_count = emulator_get_opcode_count();
+  u32* cb_opcode_count = emulator_get_cb_opcode_count();
+
+  OpcodeCount pairs[512] = {0};
+
+  for (int i = 0; i < 256;) {
+    pairs[i].opcode = i;
+    pairs[i].count = opcode_count[i];
+    ++i;
+    pairs[i].opcode = 0xcb00 | i;
+    pairs[i].count = cb_opcode_count[i];
+    ++i;
+  }
+
+  qsort(pairs, ARRAY_SIZE(pairs), sizeof(pairs[0]), compare_opcode_count);
+
+  printf("  op:      count -   mnemonic\n");
+  printf("--------------------------------\n");
+  char mnemonic[100];
+  u64 total = 0;
+  int distinct = 0;
+  Bool skipped = FALSE;
+  for (int i = 0; i < 512; ++i) {
+    if (pairs[i].count > 0) {
+      u16 opcode = pairs[i].opcode;
+      if (i < s_print_ops_limit) {
+        if (opcode < 0x100) {
+          printf("  %02x", opcode);
+        } else {
+          printf("%04x", opcode);
+        }
+        emulator_get_opcode_mnemonic(opcode, mnemonic, sizeof(mnemonic));
+        printf(": %10d - %s\n", pairs[i].count, mnemonic);
+      } else {
+        skipped = TRUE;
+      }
+      ++distinct;
+      total += pairs[i].count;
+    }
+  }
+  if (skipped) {
+    printf("  ...\n");
+  }
+  printf("distinct: %d\n", distinct);
+  printf("total: %lu\n", total);
 }
 
 int main(int argc, char** argv) {
@@ -279,6 +351,10 @@ int main(int argc, char** argv) {
 
   if (s_output_ppm && !s_animate) {
     CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
+  }
+
+  if (s_print_ops) {
+    print_ops();
   }
 
   result = 0;

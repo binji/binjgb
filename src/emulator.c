@@ -3723,6 +3723,7 @@ static void execute_instruction(Emulator* e) {
   case code + 7: name##_R(N, A); break;
 #define LD_R_OPS(code, R) REG_OPS_N(code, LD_R, R)
 
+  HOOK(exec_op_i, opcode);
   switch (opcode) {
     case 0x00: break;
     case 0x01: LD_RR_NN(BC); break;
@@ -3822,8 +3823,10 @@ static void execute_instruction(Emulator* e) {
     case 0xc8: RET_F(FZ); break;
     case 0xc9: RET; break;
     case 0xca: JP_F_NN(FZ); break;
-    case 0xcb:
-      switch (read_u8_tick(e, REG.PC + 1)) {
+    case 0xcb: {
+      u8 cb = read_u8_tick(e, REG.PC + 1);
+      HOOK(exec_cb_op_i, cb);
+      switch (cb) {
         REG_OPS(0x00, RLC)
         REG_OPS(0x08, RRC)
         REG_OPS(0x10, RL)
@@ -3858,6 +3861,7 @@ static void execute_instruction(Emulator* e) {
         REG_OPS_N(0xf8, SET, 7)
       }
       break;
+    }
     case 0xcc: CALL_F_NN(FZ); break;
     case 0xcd: CALL_NN; break;
     case 0xce: ADC_N; break;

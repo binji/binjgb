@@ -117,6 +117,10 @@ static Bool HOOK_read_op_api(struct Emulator* e, const char* func_name,
                              Address pc, MemoryTypeAddressPair, u8 value);
 static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
                              u32 rom_addr, u8 value);
+static void HOOK_exec_op_i(struct Emulator* e, const char* func_name,
+                           u8 opcode);
+static void HOOK_exec_cb_op_i(struct Emulator* e, const char* func_name,
+                              u8 opcode);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
@@ -220,6 +224,61 @@ static void sprint_hex(char* buffer, u8 val) {
 }
 
 int opcode_bytes(u8 opcode) { return s_opcode_bytes[opcode]; }
+
+void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size) {
+  const char* orig_fmt;
+  u8 num_bytes = 1;
+  if (opcode >= 0x100) {
+    assert((opcode & 0xff00) == 0xcb00);
+    orig_fmt = s_cb_opcode_mnemonic[opcode & 0xff];
+  } else {
+    num_bytes = s_opcode_bytes[opcode];
+    orig_fmt = s_opcode_mnemonic[opcode];
+  }
+  char fmt[32];
+  char* dst = fmt;
+  const char* src;
+  for (src = orig_fmt; *src;) {
+    if (*src == '%') {
+      *dst++ = *src++;
+
+      /* Replace the format specifier with a string so we can print XXXX
+       * instead of numbers. This is super hacky, but eh. */
+
+#define START if (0) ;
+#define END else abort();
+#define REPLACE(old, new, len)                       \
+  else if (strncmp(src, old, len) == 0) {            \
+    *dst = 0; /* NULL-terminate so strncat works. */ \
+    strncat(dst, new, len);                          \
+    dst += len;                                      \
+    src += len;                                      \
+  }
+
+      START
+      REPLACE("hu", "4s", 2)
+      REPLACE("hhu", "-2s", 3)
+      REPLACE("04x", "-4s", 3)
+      REPLACE("+hhd", "2.2s", 4)
+      REPLACE("04hx", "4.4s", 4)
+      REPLACE("02hhx", "-2.2s", 5)
+      END
+
+#undef START
+#undef END
+#undef REPLACE
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst++ = 0;
+  switch (num_bytes) {
+    case 0:
+    case 1: snprintf(buffer, size, fmt); break;
+    case 2: snprintf(buffer, size, fmt, "XX"); break;
+    case 3: snprintf(buffer, size, fmt, "XXXX"); break;
+  }
+}
 
 int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
   char temp[64];
@@ -506,6 +565,25 @@ Bool HOOK_read_op_api(Emulator* e, const char* func_name, Address pc,
   }
   mark_rom_usage_for_pc(e, pair);
   return FALSE;
+}
+
+static u32 s_opcode_count[256];
+static u32 s_cb_opcode_count[256];
+
+void HOOK_exec_op_i(Emulator* e, const char* func_name, u8 opcode) {
+  s_opcode_count[opcode]++;
+}
+
+void HOOK_exec_cb_op_i(Emulator* e, const char* func_name, u8 opcode) {
+  s_cb_opcode_count[opcode]++;
+}
+
+u32* emulator_get_opcode_count(void) {
+  return s_opcode_count;
+}
+
+u32* emulator_get_cb_opcode_count(void) {
+  return s_cb_opcode_count;
 }
 
 void emulator_set_log_level(LogSystem system, LogLevel level) {

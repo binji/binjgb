@@ -115,6 +115,10 @@ int emulator_get_rom_size(struct Emulator*);
 u8* emulator_get_rom_usage(struct Emulator*);
 void emulator_clear_rom_usage(struct Emulator* e);
 
+u32* emulator_get_opcode_count(void);
+u32* emulator_get_cb_opcode_count(void);
+
+void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
 Registers emulator_get_registers(struct Emulator*);
 
