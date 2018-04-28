@@ -574,7 +574,6 @@ typedef struct {
   Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
   u8 line_obj_count;     /* Number of sprites to draw on this line. */
   Bool rendering_window; /* TRUE when this line is rendering the window. */
-  Bool new_frame_edge;
   u8 display_delay_frames; /* Wait this many frames before displaying. */
 } Ppu;
 
@@ -634,7 +633,7 @@ typedef struct {
   Ticks ticks;
   Bool is_cgb;
   Bool ext_ram_updated;
-  EmulatorEvent last_event;
+  EmulatorEvent event;
 } EmulatorState;
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
@@ -2084,7 +2083,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
             e->frame_buffer[i] = RGBA_WHITE;
           }
-          PPU.new_frame_edge = TRUE;
+          e->state.event |= EMULATOR_EVENT_NEW_FRAME;
         }
       }
       break;
@@ -2906,7 +2905,7 @@ static void ppu_tick(Emulator* e) {
             PPU.frame++;
             INTR.new_if |= IF_VBLANK;
             if (LIKELY(PPU.display_delay_frames == 0)) {
-              PPU.new_frame_edge = TRUE;
+              e->state.event |= EMULATOR_EVENT_NEW_FRAME;
             } else {
               PPU.display_delay_frames--;
             }
@@ -3649,7 +3648,7 @@ static void dispatch_interrupt(Emulator* e) {
   tick(e);
 }
 
-static EmulatorEvent execute_instruction(Emulator* e) {
+static void execute_instruction(Emulator* e) {
   int opcode;
   s8 s;
   u8 u, c;
@@ -3669,7 +3668,7 @@ static EmulatorEvent execute_instruction(Emulator* e) {
       HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
     } else {
       TICKS += CPU_TICK;
-      return 0;
+      return;
     }
   }
 
@@ -3695,12 +3694,12 @@ static EmulatorEvent execute_instruction(Emulator* e) {
       INTR.halt = INTR.halt_di = FALSE;
     } else {
       dispatch_interrupt(e);
-      return 0;
+      return;
     }
   }
 
   if (INTR.halt) {
-    return 0;
+    return;
   }
 
   new_pc = REG.PC + s_opcode_bytes[opcode];
@@ -3902,57 +3901,49 @@ static EmulatorEvent execute_instruction(Emulator* e) {
     case 0xfe: CP_N; break;
     case 0xff: CALL(0x38); break;
     case BREAKPOINT:
-      return EMULATOR_EVENT_BREAKPOINT;
+      e->state.event |= EMULATOR_EVENT_BREAKPOINT;
+      return;
     default:
       REG.PC = new_pc;
-      return EMULATOR_EVENT_INVALID_OPCODE;
+      e->state.event |= EMULATOR_EVENT_INVALID_OPCODE;
+      return;
   }
   REG.PC = new_pc;
-  return 0;
 }
 
-static EmulatorEvent emulator_step_internal(Emulator* e) {
+static void emulator_step_internal(Emulator* e) {
   HOOK0(emulator_step);
   if (HDMA.state == DMA_INACTIVE) {
-    return execute_instruction(e);
+    execute_instruction(e);
   } else {
     tick(e);
   }
-  return 0;
 }
 
 EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
   AudioBuffer* ab = &e->audio_buffer;
-  if (e->state.last_event & EMULATOR_EVENT_NEW_FRAME) {
-    PPU.new_frame_edge = FALSE;
-  }
-  if (e->state.last_event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
+  if (e->state.event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     ab->position = ab->data;
   }
   check_joyp_intr(e);
+  e->state.event = 0;
 
   u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
   Ticks max_audio_ticks =
       APU.ticks +
       (u32)DIV_CEIL(frames_left * CPU_TICKS_PER_SECOND, ab->frequency);
-  EmulatorEvent event = 0;
-  while (event == 0) {
-    EmulatorEvent step_event = emulator_step_internal(e);
-    if (step_event) {
-      event |= step_event;
-    }
-    if (PPU.new_frame_edge) {
-      event |= EMULATOR_EVENT_NEW_FRAME;
-    }
-    if (TICKS >= max_audio_ticks ) {
-      event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
-    }
-    if (TICKS >= until_ticks) {
-      event |= EMULATOR_EVENT_UNTIL_TICKS;
-    }
+  Ticks check_ticks = MIN(until_ticks, max_audio_ticks);
+  while (e->state.event == 0 && TICKS < check_ticks) {
+    emulator_step_internal(e);
+  }
+  if (TICKS >= max_audio_ticks) {
+    e->state.event |= EMULATOR_EVENT_AUDIO_BUFFER_FULL;
+  }
+  if (TICKS >= until_ticks) {
+    e->state.event |= EMULATOR_EVENT_UNTIL_TICKS;
   }
   apu_synchronize(e);
-  return e->state.last_event = event;
+  return e->state.event;
 }
 
 EmulatorEvent emulator_step(Emulator* e) {

@@ -264,6 +264,7 @@ int main(int argc, char** argv) {
     }
     if (event & EMULATOR_EVENT_UNTIL_TICKS) {
       finish_at_next_frame = TRUE;
+      until_ticks += PPU_FRAME_TICKS;
     }
     if (event & EMULATOR_EVENT_INVALID_OPCODE) {
       printf("!! hit invalid opcode, pc=%04x\n", emulator_get_registers(e).PC);
