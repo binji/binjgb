@@ -114,7 +114,7 @@ static int s_breakpoint_max_id;
 
 static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
 static Bool HOOK_read_op_api(struct Emulator* e, const char* func_name,
-                             Address pc, MemoryTypeAddressPair, u8 value);
+                             Address pc, u8 value);
 static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
                              u32 rom_addr, u8 value);
 static void HOOK_exec_op_i(struct Emulator* e, const char* func_name,
@@ -315,10 +315,9 @@ int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
   }
 
   char bank[3] = "??";
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (pair.type == MEMORY_MAP_ROM0) {
+  if (addr < 0x4000) {
     sprint_hex(bank, e->state.memory_map_state.rom_base[0] >> ROM_BANK_SHIFT);
-  } else if (pair.type == MEMORY_MAP_ROM1) {
+  } else if (addr < 0x8000) {
     sprint_hex(bank, e->state.memory_map_state.rom_base[1] >> ROM_BANK_SHIFT);
   }
 
@@ -348,9 +347,7 @@ Breakpoint emulator_get_breakpoint(int id) {
 }
 
 static Bool address_matches_bank(Emulator* e, Address addr, int bank) {
-  MemoryTypeAddressPair pair = map_address(addr);
-  return (pair.type != MEMORY_MAP_ROM0 && pair.type != MEMORY_MAP_ROM1) ||
-         emulator_get_rom_bank(e, pair.type) == bank;
+  return addr >= 0x8000 || emulator_get_rom_bank(e, addr) == bank;
 }
 
 Breakpoint emulator_get_breakpoint_by_address(Emulator* e, Address addr) {
@@ -409,17 +406,13 @@ int emulator_add_breakpoint(Emulator* e, Address addr, Bool enabled) {
   return id;
 }
 
-int emulator_get_rom_bank_from_address(Emulator* e, Address addr) {
-  return emulator_get_rom_bank(e, map_address(addr).type);
-}
-
 void emulator_set_breakpoint_address(Emulator* e, int id, Address addr) {
   if (!is_breakpoint_valid(id)) {
     return;
   }
   Breakpoint* bp = &s_breakpoints[id];
   bp->addr = addr;
-  bp->bank = emulator_get_rom_bank_from_address(e, addr);
+  bp->bank = emulator_get_rom_bank(e, addr);
   calculate_breakpoint_mask();
 }
 
@@ -446,7 +439,8 @@ void emulator_remove_breakpoint(int id) {
   --s_breakpoint_count;
 }
 
-int emulator_get_rom_bank(struct Emulator* e, int region) {
+int emulator_get_rom_bank(struct Emulator* e, Address addr) {
+  int region = addr >> ROM_BANK_SHIFT;
   if (region < 2) {
     return MMAP_STATE.rom_base[region] >> ROM_BANK_SHIFT;
   } else {
@@ -484,16 +478,14 @@ void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
 }
 
 static void mark_rom_usage_for_pc(struct Emulator* e,
-                                  MemoryTypeAddressPair pair) {
+                                  Address addr) {
   u32 rom_addr = 0;
-  switch (pair.type) {
-    case MEMORY_MAP_ROM0:
-    case MEMORY_MAP_ROM1:
-      rom_addr = e->state.memory_map_state.rom_base[pair.type] | pair.addr;
-      break;
-
-    default:
-      return;
+  if (addr < 0x4000) {
+    rom_addr = e->state.memory_map_state.rom_base[0] | (addr & 0x3fff);
+  } else if (addr < 0x8000) {
+    rom_addr = e->state.memory_map_state.rom_base[1] | (addr & 0x3fff);
+  } else {
+    return;
   }
   u8 opcode = e->cart_info->data[rom_addr];
   u8 count = s_opcode_bytes[opcode];
@@ -559,11 +551,11 @@ static inline Bool hit_breakpoint(Emulator* e) {
 }
 
 Bool HOOK_read_op_api(Emulator* e, const char* func_name, Address pc,
-                      MemoryTypeAddressPair pair, u8 value) {
+                      u8 value) {
   if (hit_breakpoint(e)) {
     return TRUE;
   }
-  mark_rom_usage_for_pc(e, pair);
+  mark_rom_usage_for_pc(e, pc);
   return FALSE;
 }
 

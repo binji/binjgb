@@ -116,7 +116,7 @@ void Debugger::MapWindow::Tick() {
     ImGui::Separator();
 
     int map_index = hovering_map_index;
-    Address map_address =
+    Address map_addr =
         (map_select == TILE_MAP_9800_9BFF ? 0x9800 : 0x9c00) + map_index;
     int tile_index = tile_map[hovering_map_index];
     if (data_select == TILE_DATA_8800_97FF) {
@@ -124,7 +124,7 @@ void Debugger::MapWindow::Tick() {
     }
 
     ImGui::LabelText("Pos", "%d, %d", map_index & 31, map_index >> 5);
-    ImGui::LabelText("Map Address", "%04x", map_address);
+    ImGui::LabelText("Map Address", "%04x", map_addr);
     ImGui::LabelText("Tile Index", "%02x", d->GetByteTileIndex(tile_index));
     ImGui::LabelText("Tile Address", "%d:%04x", d->GetTileBank(tile_index),
                      d->GetTileAddr(tile_index));

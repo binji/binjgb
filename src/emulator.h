@@ -32,26 +32,6 @@ extern "C" {
 
 struct Emulator;
 
-typedef enum {
-  MEMORY_MAP_ROM0,
-  MEMORY_MAP_ROM1,
-  MEMORY_MAP_VRAM,
-  MEMORY_MAP_EXT_RAM,
-  MEMORY_MAP_WORK_RAM0,
-  MEMORY_MAP_WORK_RAM1,
-  MEMORY_MAP_OAM,
-  MEMORY_MAP_UNUSED,
-  MEMORY_MAP_IO,
-  MEMORY_MAP_APU,
-  MEMORY_MAP_WAVE_RAM,
-  MEMORY_MAP_HIGH_RAM,
-} MemoryMapType;
-
-typedef struct {
-  MemoryMapType type;
-  MaskedAddress addr;
-} MemoryTypeAddressPair;
-
 enum {
   APU_CHANNEL1,
   APU_CHANNEL2,

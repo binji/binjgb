@@ -118,11 +118,12 @@ void Debugger::DisassemblyWindow::Tick() {
     instr_count = 0;
 
     for (int rom_region = 0; rom_region < 2; ++rom_region) {
-      int bank = emulator_get_rom_bank(d->e, rom_region);
+      Address region_addr = rom_region << 14;
+      int bank = emulator_get_rom_bank(d->e, region_addr);
       u8* rom_usage = emulator_get_rom_usage(d->e) + (bank << 14);
 
       for (Address rel_addr = 0; rel_addr < 0x4000;) {
-        Address addr = rom_region * 0x4000 + rel_addr;
+        Address addr = region_addr + rel_addr;
         u8 usage = rom_usage[rel_addr];
         bool is_data = usage == ROM_USAGE_DATA;
         int len;

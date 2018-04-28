@@ -236,6 +236,21 @@ typedef struct {
 } CartTypeInfo;
 
 typedef enum {
+  MEMORY_MAP_ROM0,
+  MEMORY_MAP_ROM1,
+  MEMORY_MAP_VRAM,
+  MEMORY_MAP_EXT_RAM,
+  MEMORY_MAP_WORK_RAM0,
+  MEMORY_MAP_WORK_RAM1,
+  MEMORY_MAP_OAM,
+  MEMORY_MAP_UNUSED,
+  MEMORY_MAP_IO,
+  MEMORY_MAP_APU,
+  MEMORY_MAP_WAVE_RAM,
+  MEMORY_MAP_HIGH_RAM,
+} MemoryMapType;
+
+typedef enum {
   BANK_MODE_ROM = 0,
   BANK_MODE_RAM = 1,
 } BankMode;
@@ -389,6 +404,11 @@ typedef struct {
     Mbc5 mbc5;
   };
 } MemoryMapState;
+
+typedef struct {
+  MemoryMapType type;
+  MaskedAddress addr;
+} MemoryTypeAddressPair;
 
 typedef struct {
   JoypadButtons buttons;
@@ -579,7 +599,7 @@ typedef struct {
 
 typedef struct {
   DmaState state;
-  MemoryTypeAddressPair source;
+  Address source;
   Ticks ticks;
 } Dma;
 
@@ -1785,9 +1805,9 @@ static u8 read_wave_ram(Emulator* e, MaskedAddress addr) {
   }
 }
 
-static Bool is_dma_access_ok(Emulator* e, MemoryTypeAddressPair pair) {
+static Bool is_dma_access_ok(Emulator* e, Address addr) {
   /* TODO: need to figure out bus conflicts during DMA for non-OAM accesses. */
-  return DMA.state != DMA_ACTIVE || pair.type != MEMORY_MAP_OAM;
+  return DMA.state != DMA_ACTIVE || (addr & 0xff00) != 0xfe00;
 }
 
 static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair, Bool raw) {
@@ -1833,30 +1853,21 @@ static u8 read_u8_pair(Emulator* e, MemoryTypeAddressPair pair, Bool raw) {
 }
 
 static u8 read_u8_raw(Emulator* e, Address addr) {
-  MemoryTypeAddressPair pair = map_address(addr);
-  return read_u8_pair(e, pair, TRUE);
+  return read_u8_pair(e, map_address(addr), TRUE);
 }
 
 static u8 read_u8(Emulator* e, Address addr) {
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
+  if (UNLIKELY(!is_dma_access_ok(e, addr))) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
-
-  return read_u8_pair(e, pair, FALSE);
+  return read_u8_pair(e, map_address(addr), FALSE);
 }
 
 static int read_op(Emulator* e) {
   Address addr = e->state.reg.PC;
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
-    HOOK(read_during_dma_a, addr);
-    return INVALID_READ_BYTE;
-  }
-
-  u8 value = read_u8_pair(e, pair, FALSE);
-  if (UNLIKELY(HOOK_FALSE(read_op_api, addr, pair, value))) {
+  u8 value = read_u8(e, addr);
+  if (UNLIKELY(HOOK_FALSE(read_op_api, addr, value))) {
     return BREAKPOINT;
   }
   return value;
@@ -2136,7 +2147,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
       DMA.state = (DMA.state != DMA_INACTIVE ? DMA.state : DMA_TRIGGERED);
-      DMA.source = map_address(value << 8);
+      DMA.source = value << 8;
       DMA.ticks = 0;
       break;
     case IO_BGP_ADDR:
@@ -2649,12 +2660,11 @@ static void write_u8_raw(Emulator* e, Address addr, u8 value) {
 }
 
 static void write_u8(Emulator* e, Address addr, u8 value) {
-  MemoryTypeAddressPair pair = map_address(addr);
-  if (UNLIKELY(!is_dma_access_ok(e, pair))) {
+  if (UNLIKELY(!is_dma_access_ok(e, addr))) {
     HOOK(write_during_dma_ab, addr, value);
     return;
   }
-  write_u8_pair(e, pair, value);
+  write_u8_pair(e, map_address(addr), value);
 }
 
 static void do_ppu_mode2(Emulator* e) {
@@ -3260,9 +3270,7 @@ static void dma_tick(Emulator* e) {
 
   u8 addr_offset = (DMA.ticks - DMA_DELAY_TICKS) >> 2;
   assert(addr_offset < OAM_TRANSFER_SIZE);
-  MemoryTypeAddressPair pair = DMA.source;
-  pair.addr += addr_offset;
-  u8 value = read_u8_pair(e, pair, FALSE);
+  u8 value = read_u8_pair(e, map_address(DMA.source + addr_offset), FALSE);
   write_oam_no_mode_check(e, addr_offset, value);
   DMA.ticks += CPU_TICK;
   if (VALUE_WRAPPED(DMA.ticks, DMA_TICKS)) {
@@ -3280,9 +3288,7 @@ static void hdma_copy_byte(Emulator* e) {
   } else {
     value = read_u8_pair(e, source_pair, FALSE);
   }
-  MemoryTypeAddressPair dest_pair = {MEMORY_MAP_VRAM,
-                                     HDMA.dest++ & ADDR_MASK_8K};
-  write_u8_pair(e, dest_pair, value);
+  write_vram(e, HDMA.dest++ & ADDR_MASK_8K, value);
   HDMA.block_bytes++;
   if (VALUE_WRAPPED(HDMA.block_bytes, 16)) {
     --HDMA.blocks;
