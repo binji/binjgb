@@ -48,6 +48,7 @@ A simple GB/GBC emulator.
 ![OBJ](/images/obj-window.png)
 ![Map](/images/map-window.png)
 ![Tile Data](/images/tiledata-window.png)
+![Breakpoints](/images/breakpoint.png)
 
 ## Building
 
