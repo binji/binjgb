@@ -112,6 +112,8 @@ void emulator_print_log_systems();
 Bool emulator_is_cgb(struct Emulator*);
 
 int emulator_get_rom_size(struct Emulator*);
+Bool emulator_get_rom_usage_enabled(struct Emulator*);
+void emulator_set_rom_usage_enabled(struct Emulator*, Bool enable);
 u8* emulator_get_rom_usage(struct Emulator*);
 void emulator_clear_rom_usage(struct Emulator* e);
 

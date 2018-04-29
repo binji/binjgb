@@ -112,14 +112,12 @@ static int s_breakpoint_max_id;
   X(M, D, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
-static Bool HOOK_emulator_step(struct Emulator* e, const char* func_name);
-static void HOOK_read_op_ai(struct Emulator* e, const char* func_name,
-                             Address pc, u8 value);
-static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
+static Bool HOOK_emulator_step(struct Emulator*, const char* func_name);
+static void HOOK_read_rom_ib(struct Emulator*, const char* func_name,
                              u32 rom_addr, u8 value);
-static void HOOK_exec_op_i(struct Emulator* e, const char* func_name,
-                           u8 opcode);
-static void HOOK_exec_cb_op_i(struct Emulator* e, const char* func_name,
+static void HOOK_exec_op_ai(struct Emulator*, const char* func_name, Address,
+                            u8 opcode);
+static void HOOK_exec_cb_op_i(struct Emulator*, const char* func_name,
                               u8 opcode);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
@@ -457,7 +455,16 @@ void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
 }
 
 // Store as 1-1 mapping of bytes, low 3 bits used only.
+static Bool s_rom_usage_enabled = TRUE;
 static u8 s_rom_usage[MAXIMUM_ROM_SIZE];
+
+Bool emulator_get_rom_usage_enabled(struct Emulator* e) {
+  return s_rom_usage_enabled;
+}
+
+void emulator_set_rom_usage_enabled(struct Emulator* e, Bool enable) {
+  s_rom_usage_enabled = enable;
+}
 
 static inline void mark_rom_usage(u32 rom_addr, RomUsage usage) {
   assert(rom_addr < ARRAY_SIZE(s_rom_usage));
@@ -465,20 +472,27 @@ static inline void mark_rom_usage(u32 rom_addr, RomUsage usage) {
 }
 
 u8* emulator_get_rom_usage(struct Emulator* e) {
+  assert(s_rom_usage_enabled);
   return s_rom_usage;
 }
 
 void emulator_clear_rom_usage(struct Emulator* e) {
+  assert(s_rom_usage_enabled);
   memset(s_rom_usage, 0, sizeof(s_rom_usage));
 }
 
 void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
                       u8 value) {
+  if (!s_rom_usage_enabled) {
+    return;
+  }
   mark_rom_usage(rom_addr, ROM_USAGE_DATA);
 }
 
-static void mark_rom_usage_for_pc(struct Emulator* e,
-                                  Address addr) {
+static void mark_rom_usage_for_pc(struct Emulator* e, Address addr) {
+  if (!s_rom_usage_enabled) {
+    return;
+  }
   u32 rom_addr = 0;
   if (addr < 0x4000) {
     rom_addr = e->state.memory_map_state.rom_base[0] | (addr & 0x3fff);
@@ -555,14 +569,12 @@ Bool HOOK_emulator_step(Emulator* e, const char* func_name) {
   return FALSE;
 }
 
-void HOOK_read_op_ai(Emulator* e, const char* func_name, Address pc, u8 value) {
-  mark_rom_usage_for_pc(e, pc);
-}
-
 static u32 s_opcode_count[256];
 static u32 s_cb_opcode_count[256];
 
-void HOOK_exec_op_i(Emulator* e, const char* func_name, u8 opcode) {
+void HOOK_exec_op_ai(Emulator* e, const char* func_name, Address pc,
+                     u8 opcode) {
+  mark_rom_usage_for_pc(e, pc);
   s_opcode_count[opcode]++;
 }
 

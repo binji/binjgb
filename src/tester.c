@@ -273,6 +273,9 @@ int main(int argc, char** argv) {
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 
+  /* Disable rom usage collecting since it's slow and not useful here. */
+  emulator_set_rom_usage_enabled(e, FALSE);
+
   u32 total_ticks = (u32)(s_frames * PPU_FRAME_TICKS);
   u32 until_ticks = emulator_get_ticks(e) + total_ticks;
   printf("frames = %u total_ticks = %u\n", s_frames, total_ticks);

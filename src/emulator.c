@@ -1863,13 +1863,6 @@ static u8 read_u8(Emulator* e, Address addr) {
   return read_u8_pair(e, map_address(addr), FALSE);
 }
 
-static u8 read_op(Emulator* e) {
-  Address addr = e->state.reg.PC;
-  u8 value = read_u8(e, addr);
-  HOOK(read_op_ai, addr, value);
-  return value;
-}
-
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
   if (UNLIKELY(is_using_vram(e, TRUE))) {
     HOOK(write_vram_in_use_ab, addr, value);
@@ -3671,12 +3664,12 @@ static void execute_instruction(Emulator* e) {
   if (UNLIKELY(INTR.halt_bug)) {
     /* When interrupts are disabled during a HALT, the following byte will be
      * duplicated when decoding. */
-    opcode = read_op(e);
+    opcode = read_u8(e, REG.PC);
     REG.PC--;
     INTR.halt_bug = FALSE;
   } else {
     tick(e);
-    opcode = read_op(e);
+    opcode = read_u8(e, REG.PC);
   }
 
   if (UNLIKELY(should_dispatch)) {
@@ -3692,8 +3685,6 @@ static void execute_instruction(Emulator* e) {
   if (UNLIKELY(INTR.halt)) {
     return;
   }
-
-  new_pc = REG.PC + s_opcode_bytes[opcode];
 
 #define REG_OPS(code, name)            \
   case code + 0: name##_R(B); break;   \
@@ -3715,7 +3706,9 @@ static void execute_instruction(Emulator* e) {
   case code + 7: name##_R(N, A); break;
 #define LD_R_OPS(code, R) REG_OPS_N(code, LD_R, R)
 
-  HOOK(exec_op_i, opcode);
+  HOOK(exec_op_ai, REG.PC, opcode);
+  new_pc = REG.PC + s_opcode_bytes[opcode];
+
   switch (opcode) {
     case 0x00: break;
     case 0x01: LD_RR_NN(BC); break;
