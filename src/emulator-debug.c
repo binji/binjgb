@@ -274,7 +274,7 @@ void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size) {
   *dst++ = 0;
   switch (num_bytes) {
     case 0:
-    case 1: snprintf(buffer, size, fmt); break;
+    case 1: strncpy(buffer, fmt, size); break;
     case 2: snprintf(buffer, size, fmt, "XX"); break;
     case 3: snprintf(buffer, size, fmt, "XXXX"); break;
   }

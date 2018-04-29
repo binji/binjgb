@@ -210,9 +210,11 @@ void print_ops(void) {
   u32* opcode_count = emulator_get_opcode_count();
   u32* cb_opcode_count = emulator_get_cb_opcode_count();
 
-  OpcodeCount pairs[512] = {0};
+  OpcodeCount pairs[512];
+  ZERO_MEMORY(pairs);
 
-  for (int i = 0; i < 256;) {
+  int i;
+  for (i = 0; i < 256;) {
     pairs[i].opcode = i;
     pairs[i].count = opcode_count[i];
     ++i;
@@ -229,7 +231,7 @@ void print_ops(void) {
   u64 total = 0;
   int distinct = 0;
   Bool skipped = FALSE;
-  for (int i = 0; i < 512; ++i) {
+  for (i = 0; i < 512; ++i) {
     if (pairs[i].count > 0) {
       u16 opcode = pairs[i].opcode;
       if (i < s_print_ops_limit) {
