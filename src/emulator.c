@@ -719,8 +719,8 @@ typedef struct Emulator {
 #define HOOK(name, ...)
 #endif
 
-#ifndef HOOK_FALSE
-#define HOOK_FALSE(name, ...) FALSE
+#ifndef HOOK0_FALSE
+#define HOOK0_FALSE(name) FALSE
 #endif
 
 /* Configurable constants */
@@ -829,7 +829,6 @@ typedef struct Emulator {
 #define FRAME_SEQUENCER_UPDATE_ENVELOPE_FRAME 7
 
 #define INVALID_READ_BYTE 0xff
-#define BREAKPOINT 0x100
 
 #define GET_LO(HI, LO) (LO)
 #define GET_BITMASK(HI, LO) ((1 << ((HI) - (LO) + 1)) - 1)
@@ -1864,12 +1863,10 @@ static u8 read_u8(Emulator* e, Address addr) {
   return read_u8_pair(e, map_address(addr), FALSE);
 }
 
-static int read_op(Emulator* e) {
+static u8 read_op(Emulator* e) {
   Address addr = e->state.reg.PC;
   u8 value = read_u8(e, addr);
-  if (UNLIKELY(HOOK_FALSE(read_op_api, addr, value))) {
-    return BREAKPOINT;
-  }
+  HOOK(read_op_ai, addr, value);
   return value;
 }
 
@@ -3399,9 +3396,6 @@ static u8 s_opcode_bytes[] = {
     /* d0 */ 1, 1, 3, 1, 3, 1, 2, 1, 1, 1, 3, 1, 3, 1, 2, 1,
     /* e0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
     /* f0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
-    /* Dummy value at 0x100 for debug break, return 0 bytes so the instruction
-     * is not skipped when continuing. */
-    0,
 };
 
 #define TICK tick(e)
@@ -3646,7 +3640,7 @@ static void dispatch_interrupt(Emulator* e) {
 }
 
 static void execute_instruction(Emulator* e) {
-  int opcode;
+  u8 opcode;
   s8 s;
   u8 u, c;
   u16 u16;
@@ -3901,20 +3895,18 @@ static void execute_instruction(Emulator* e) {
     case 0xfb: EI; break;
     case 0xfe: CP_N; break;
     case 0xff: CALL(0x38); break;
-    case BREAKPOINT:
-      e->state.event |= EMULATOR_EVENT_BREAKPOINT;
-      return;
     default:
-      REG.PC = new_pc;
       e->state.event |= EMULATOR_EVENT_INVALID_OPCODE;
-      return;
+      break;
   }
   REG.PC = new_pc;
 }
 
 static void emulator_step_internal(Emulator* e) {
-  HOOK0(emulator_step);
   if (HDMA.state == DMA_INACTIVE) {
+    if (HOOK0_FALSE(emulator_step)) {
+      return;
+    }
     execute_instruction(e);
   } else {
     tick(e);

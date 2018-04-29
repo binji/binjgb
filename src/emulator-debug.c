@@ -22,7 +22,7 @@ static int s_breakpoint_max_id;
 
 #define HOOK0(name) HOOK_##name(e, __func__)
 #define HOOK(name, ...) HOOK_##name(e, __func__, __VA_ARGS__)
-#define HOOK_FALSE(name, ...) HOOK_##name(e, __func__, __VA_ARGS__)
+#define HOOK0_FALSE(name) HOOK_##name(e, __func__)
 
 #define DECLARE_LOG_HOOK(system, level, name, format) \
   static void HOOK_##name(struct Emulator* e, const char* func_name, ...);
@@ -112,8 +112,8 @@ static int s_breakpoint_max_id;
   X(M, D, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
-static void HOOK_emulator_step(struct Emulator* e, const char* func_name);
-static Bool HOOK_read_op_api(struct Emulator* e, const char* func_name,
+static Bool HOOK_emulator_step(struct Emulator* e, const char* func_name);
+static void HOOK_read_op_ai(struct Emulator* e, const char* func_name,
                              Address pc, u8 value);
 static void HOOK_read_rom_ib(struct Emulator* e, const char* func_name,
                              u32 rom_addr, u8 value);
@@ -500,24 +500,6 @@ static void mark_rom_usage_for_pc(struct Emulator* e,
   }
 }
 
-void HOOK_emulator_step(Emulator* e, const char* func_name) {
-  if (emulator_get_trace() && !e->state.interrupt.halt) {
-    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
-           REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
-           REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);
-    printf(" (cy: %" PRIu64 ")", e->state.ticks);
-    if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
-      printf(" ppu:%c%u", PPU.lcdc.display ? '+' : '-', PPU.stat.mode);
-    }
-    if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
-      printf(" LY:%u", PPU.ly);
-    }
-    printf(" |");
-    print_instruction(e, REG.PC);
-    printf("\n");
-  }
-}
-
 static Bool address_matches_breakpoint_mask(Address addr) {
   return (addr & s_breakpoint_mask[0]) == 0 &&
          (addr & s_breakpoint_mask[1]) == s_breakpoint_mask[1];
@@ -550,13 +532,31 @@ static inline Bool hit_breakpoint(Emulator* e) {
   return hit;
 }
 
-Bool HOOK_read_op_api(Emulator* e, const char* func_name, Address pc,
-                      u8 value) {
+Bool HOOK_emulator_step(Emulator* e, const char* func_name) {
+  if (emulator_get_trace() && !e->state.interrupt.halt) {
+    printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
+           REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
+           REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);
+    printf(" (cy: %" PRIu64 ")", e->state.ticks);
+    if (s_log_level[LOG_SYSTEM_PPU] >= 1) {
+      printf(" ppu:%c%u", PPU.lcdc.display ? '+' : '-', PPU.stat.mode);
+    }
+    if (s_log_level[LOG_SYSTEM_PPU] >= 2) {
+      printf(" LY:%u", PPU.ly);
+    }
+    printf(" |");
+    print_instruction(e, REG.PC);
+    printf("\n");
+  }
   if (hit_breakpoint(e)) {
+    e->state.event |= EMULATOR_EVENT_BREAKPOINT;
     return TRUE;
   }
-  mark_rom_usage_for_pc(e, pc);
   return FALSE;
+}
+
+void HOOK_read_op_ai(Emulator* e, const char* func_name, Address pc, u8 value) {
+  mark_rom_usage_for_pc(e, pc);
 }
 
 static u32 s_opcode_count[256];
