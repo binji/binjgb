@@ -12,6 +12,7 @@
 
 #include "emulator.h"
 #include "host.h"
+#include "options.h"
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
@@ -53,6 +54,9 @@ typedef struct StatusText {
 static struct Emulator* e;
 static struct Host* host;
 
+static const char* s_rom_filename;
+static const char* s_read_joypad_filename;
+static const char* s_write_joypad_filename;
 static const char* s_save_state_filename;
 static Bool s_running = TRUE;
 static Bool s_step_frame;
@@ -287,15 +291,94 @@ static void key_up(HostHookContext* ctx, HostKeycode code) {
   }
 }
 
+static void usage(int argc, char** argv) {
+  PRINT_ERROR(
+      "usage: %s [options] <in.gb>\n"
+      "  -h,--help               help\n"
+      "  -j,--read-joypad FILE   read joypad input from FILE\n"
+      "  -J,--write-joypad FILE  write joypad input to FILE\n",
+      argv[0]);
+}
+
+void parse_arguments(int argc, char** argv) {
+  static const Option options[] = {
+    {'h', "help", 0},
+    {'j', "read-joypad", 1},
+    {'J', "write-joypad", 1},
+  };
+
+  struct OptionParser* parser = option_parser_new(
+      options, sizeof(options) / sizeof(options[0]), argc, argv);
+
+  int errors = 0;
+  int done = 0;
+  while (!done) {
+    OptionResult result = option_parser_next(parser);
+    switch (result.kind) {
+      case OPTION_RESULT_KIND_UNKNOWN:
+        PRINT_ERROR("ERROR: Unknown option: %s.\n\n", result.arg);
+        goto error;
+
+      case OPTION_RESULT_KIND_EXPECTED_VALUE:
+        PRINT_ERROR("ERROR: Option --%s requires a value.\n\n",
+                    result.option->long_name);
+        goto error;
+
+      case OPTION_RESULT_KIND_BAD_SHORT_OPTION:
+        PRINT_ERROR("ERROR: Short option -%c is too long: %s.\n\n",
+                    result.option->short_name, result.arg);
+        goto error;
+
+      case OPTION_RESULT_KIND_OPTION:
+        switch (result.option->short_name) {
+          case 'h':
+            goto error;
+
+          case 'j':
+            s_read_joypad_filename = result.value;
+            break;
+
+          case 'J':
+            s_write_joypad_filename = result.value;
+            break;
+
+          default:
+            assert(0);
+            break;
+        }
+        break;
+
+      case OPTION_RESULT_KIND_ARG:
+        s_rom_filename = result.value;
+        break;
+
+      case OPTION_RESULT_KIND_DONE:
+        done = 1;
+        break;
+    }
+  }
+
+  if (!s_rom_filename) {
+    PRINT_ERROR("ERROR: expected input .gb\n\n");
+    goto error;
+  }
+
+  option_parser_delete(parser);
+  return;
+
+error:
+  usage(argc, argv);
+  option_parser_delete(parser);
+  exit(1);
+}
+
 int main(int argc, char** argv) {
-  --argc; ++argv;
   int result = 1;
 
-  CHECK_MSG(argc == 1, "no rom file given.\n");
-  const char* rom_filename = argv[0];
+  parse_arguments(argc, argv);
 
   FileData rom;
-  CHECK(SUCCESS(file_read(rom_filename, &rom)));
+  CHECK(SUCCESS(file_read(s_rom_filename, &rom)));
 
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);
@@ -315,11 +398,13 @@ int main(int argc, char** argv) {
   host_init.audio_volume = s_audio_volume;
   host_init.rewind.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
   host_init.rewind.buffer_capacity = REWIND_BUFFER_CAPACITY;
+  host_init.joypad_filename = s_read_joypad_filename;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
-  const char* save_filename = replace_extension(rom_filename, SAVE_EXTENSION);
-  s_save_state_filename = replace_extension(rom_filename, SAVE_STATE_EXTENSION);
+  const char* save_filename = replace_extension(s_rom_filename, SAVE_EXTENSION);
+  s_save_state_filename =
+      replace_extension(s_rom_filename, SAVE_STATE_EXTENSION);
   emulator_read_ext_ram_from_file(e, save_filename);
 
   s_overlay.texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT,
@@ -347,7 +432,12 @@ int main(int argc, char** argv) {
     host_end_video(host);
   }
 
-  emulator_write_ext_ram_to_file(e, save_filename);
+  if (s_write_joypad_filename) {
+    host_write_joypad_to_file(host, s_write_joypad_filename);
+  } else {
+    emulator_write_ext_ram_to_file(e, save_filename);
+  }
+
   result = 0;
 error:
   if (host) {

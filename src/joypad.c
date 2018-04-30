@@ -7,7 +7,13 @@
 #include "joypad.h"
 
 #include <assert.h>
+#include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
+
+#include "emulator.h"
+
+#define DEBUG_JOYPAD_BUTTONS 0
 
 #define JOYPAD_CHUNK_DEFAULT_CAPACITY 4096
 
@@ -23,6 +29,9 @@ JoypadBuffer* joypad_new(void) {
 }
 
 void joypad_delete(JoypadBuffer* buffer) {
+  if (!buffer) {
+    return;
+  }
   JoypadChunk* current = buffer->sentinel.next;
   while (current != &buffer->sentinel) {
     JoypadChunk* next = current->next;
@@ -34,9 +43,8 @@ void joypad_delete(JoypadBuffer* buffer) {
 }
 
 static JoypadChunk* alloc_joypad_chunk(size_t capacity) {
-  JoypadChunk* chunk = xmalloc(sizeof(JoypadChunk));
-  ZERO_MEMORY(*chunk);
-  chunk->data = xmalloc(capacity * sizeof(JoypadState));
+  JoypadChunk* chunk = xcalloc(1, sizeof(JoypadChunk));
+  chunk->data = xcalloc(1, capacity * sizeof(JoypadState));
   chunk->capacity = capacity;
   return chunk;
 }
@@ -67,10 +75,21 @@ static Bool buttons_are_equal(JoypadButtons* lhs, JoypadButtons* rhs) {
          lhs->B == rhs->B && lhs->A == rhs->A;
 }
 
+static void print_joypad_buttons(Ticks ticks, JoypadButtons buttons) {
+  printf("joyp: %" PRIu64 " %c%c%c%c %c%c%c%c\n", ticks,
+         buttons.down ? 'D' : '_', buttons.up ? 'U' : '_',
+         buttons.left ? 'L' : '_', buttons.right ? 'R' : '_',
+         buttons.start ? 'S' : '_', buttons.select ? 's' : '_',
+         buttons.B ? 'B' : '_', buttons.A ? 'A' : '_');
+}
+
 void joypad_append_if_new(JoypadBuffer* buffer, JoypadButtons* buttons,
                           Ticks ticks) {
   if (!buttons_are_equal(buttons, &buffer->last_buttons)) {
     joypad_append(buffer, buttons, ticks);
+#if DEBUG_JOYPAD_BUTTONS
+    print_joypad_buttons(ticks, *buttons);
+#endif
   }
 }
 
@@ -131,17 +150,18 @@ void joypad_truncate_to(JoypadBuffer* buffer, JoypadStateIter iter) {
   }
   iter.chunk->next = sentinel;
   sentinel->prev = iter.chunk;
+  buffer->last_buttons = joypad_unpack_buttons(iter.state->buttons);
 }
 
 JoypadStateIter joypad_get_next_state(JoypadStateIter iter) {
   size_t index = iter.state - iter.chunk->data;
-  if (index < iter.chunk->size) {
+  if (index + 1 < iter.chunk->size) {
     ++iter.state;
     return iter;
   }
 
   iter.chunk = iter.chunk->next;
-  iter.state = iter.chunk ? iter.chunk->data : NULL;
+  iter.state = iter.chunk->size != 0 ? iter.chunk->data : NULL;
   return iter;
 }
 
@@ -176,4 +196,113 @@ JoypadStats joypad_get_stats(JoypadBuffer* buffer) {
     cur = cur->next;
   }
   return stats;
+}
+
+static size_t joypad_file_size(JoypadBuffer* buffer) {
+  size_t size = 0;
+  JoypadChunk* chunk = buffer->sentinel.next;
+  while (chunk != &buffer->sentinel) {
+    size += chunk->size * sizeof(JoypadState);
+    chunk = chunk->next;
+  }
+  return size;
+}
+
+void joypad_init_file_data(JoypadBuffer* buffer, FileData* file_data) {
+  file_data->size = joypad_file_size(buffer);
+  file_data->data = xmalloc(file_data->size);
+}
+
+Result joypad_write(JoypadBuffer* buffer, FileData* file_data) {
+  JoypadChunk* chunk = buffer->sentinel.next;
+  u8* p = file_data->data;
+  while (chunk != &buffer->sentinel) {
+    size_t chunk_size = chunk->size * sizeof(JoypadState);
+    memcpy(p, chunk->data, chunk_size);
+    p += chunk_size;
+    chunk = chunk->next;
+  }
+  return OK;
+}
+
+Result joypad_read(const FileData* file_data, JoypadBuffer** out_buffer) {
+  CHECK_MSG(file_data->size % sizeof(JoypadState) == 0,
+            "Expected joypad file size to be multiple of %zu\n",
+            sizeof(JoypadState));
+  size_t size = file_data->size / sizeof(JoypadState);
+  size_t i;
+  Ticks last_ticks = 0;
+  for (i = 0; i < size; ++i) {
+    JoypadState* state = (JoypadState*)file_data->data + i;
+    Ticks ticks = state->ticks;
+    CHECK_MSG(ticks >= last_ticks,
+              "Expected ticks to be sorted, got %" PRIu64 " then %" PRIu64 "\n",
+              last_ticks, ticks);
+    size_t j;
+    for (j = 0; j < ARRAY_SIZE(state->padding); ++j) {
+      CHECK_MSG(state->padding[j] == 0, "Expected padding to be zero, got %u\n",
+                state->padding[i]);
+    }
+    last_ticks = ticks;
+  }
+
+  JoypadBuffer* buffer = xcalloc(1, sizeof(JoypadBuffer));
+  JoypadChunk* new_chunk = alloc_joypad_chunk(size);
+  memcpy(new_chunk->data, file_data->data, file_data->size);
+  new_chunk->size = size;
+  new_chunk->prev = new_chunk->next = &buffer->sentinel;
+  buffer->sentinel.prev = buffer->sentinel.next = new_chunk;
+  *out_buffer = buffer;
+  return OK;
+  ON_ERROR_RETURN;
+}
+
+static void joypad_playback_callback(struct JoypadButtons* joyp,
+                                     void* user_data) {
+  Bool changed = FALSE;
+  JoypadPlayback* playback = user_data;
+  Ticks ticks = emulator_get_ticks(playback->e);
+  if (ticks < playback->current.state->ticks) {
+    playback->current = joypad_find_state(playback->buffer, ticks);
+    playback->next = joypad_get_next_state(playback->current);
+    changed = TRUE;
+  }
+
+  assert(ticks >= playback->current.state->ticks);
+
+  while (playback->next.state && playback->next.state->ticks <= ticks) {
+    assert(playback->next.state->ticks >= playback->current.state->ticks);
+    playback->current = playback->next;
+    playback->next = joypad_get_next_state(playback->next);
+    changed = TRUE;
+  }
+
+#if DEBUG_JOYPAD_BUTTONS
+  if (changed) {
+    print_joypad_buttons(
+        playback->current.state->ticks,
+        joypad_unpack_buttons(playback->current.state->buttons));
+  }
+#else
+  (void)changed;
+#endif
+
+  *joyp = joypad_unpack_buttons(playback->current.state->buttons);
+}
+
+static void init_joypad_playback_state(JoypadPlayback* playback,
+                                       JoypadBuffer* buffer,
+                                       struct Emulator* e) {
+  playback->e = e;
+  playback->buffer = buffer;
+  playback->current =
+      joypad_find_state(playback->buffer, emulator_get_ticks(e));
+  playback->next = joypad_get_next_state(playback->current);
+}
+
+void emulator_set_joypad_playback_callback(struct Emulator* e,
+                                           JoypadBuffer* buffer,
+                                           JoypadPlayback* playback) {
+  init_joypad_playback_state(playback, buffer, e);
+  emulator_set_joypad_callback(e, joypad_playback_callback, playback);
 }

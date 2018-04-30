@@ -13,6 +13,7 @@
 #endif
 
 #include "emulator-debug.h"
+#include "joypad.h"
 #include "options.h"
 
 #define AUDIO_FREQUENCY 44100
@@ -20,13 +21,14 @@
 #define AUDIO_FRAMES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
 #define DEFAULT_FRAMES 60
 
-static FILE* s_controller_input_file;
+static const char* s_joypad_filename;
 static int s_frames = DEFAULT_FRAMES;
 static const char* s_output_ppm;
 static Bool s_animate;
 static Bool s_print_ops;
 static int s_print_ops_limit = 512;
 static const char* s_rom_filename;
+
 
 Result write_frame_ppm(struct Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
@@ -55,7 +57,7 @@ void usage(int argc, char** argv) {
       "  -h,--help            help\n"
       "  -t,--trace           trace each instruction\n"
       "  -l,--log S=N         set log level for system S to N\n"
-      "  -i,--input FILE      read controller input from FILE\n"
+      "  -j,--joypad FILE     read joypad input from FILE\n"
       "  -f,--frames N        run for N frames (default: %u)\n"
       "  -o,--output FILE     output PPM file to FILE\n"
       "  -a,--animate         output an image every frame\n"
@@ -83,7 +85,7 @@ void parse_options(int argc, char**argv) {
     {'h', "help", 0},
     {'t', "trace", 0},
     {'l', "log", 1},
-    {'i', "input", 1},
+    {'j', "joypad", 1},
     {'f', "frames", 1},
     {'o', "output", 1},
     {'a', "animate", 0},
@@ -141,9 +143,8 @@ void parse_options(int argc, char**argv) {
             }
             break;
 
-          case 'i':
-            CHECK_MSG((s_controller_input_file = fopen(result.value, "r")) != 0,
-                      "ERROR: Unable to open \"%s\".\n\n", result.value);
+          case 'j':
+            s_joypad_filename = result.value;
             break;
 
           case 'f':
@@ -273,6 +274,16 @@ int main(int argc, char** argv) {
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 
+  JoypadPlayback joypad_playback;
+  JoypadBuffer* joypad_buffer = NULL;
+  if (s_joypad_filename) {
+    FileData file_data;
+    CHECK(SUCCESS(file_read(s_joypad_filename, &file_data)));
+    CHECK(SUCCESS(joypad_read(&file_data, &joypad_buffer)));
+    file_data_delete(&file_data);
+    emulator_set_joypad_playback_callback(e, joypad_buffer, &joypad_playback);
+  }
+
   /* Disable rom usage collecting since it's slow and not useful here. */
   emulator_set_rom_usage_enabled(e, FALSE);
 
@@ -293,46 +304,6 @@ int main(int argc, char** argv) {
         const char* result = replace_extension(s_output_ppm, buffer);
         CHECK(SUCCESS(write_frame_ppm(e, result)));
         xfree((char*)result);
-      }
-
-      /* TODO(binji): use timer rather than NEW_FRAME for timing button
-       * presses? */
-      if (s_controller_input_file) {
-        if (emulator_get_ppu_frame(e) >= next_input_frame) {
-          JoypadButtons buttons;
-          buttons.A = !!(next_input_frame_buttons & 0x01);
-          buttons.B = !!(next_input_frame_buttons & 0x02);
-          buttons.select = !!(next_input_frame_buttons & 0x4);
-          buttons.start = !!(next_input_frame_buttons & 0x8);
-          buttons.right = !!(next_input_frame_buttons & 0x10);
-          buttons.left = !!(next_input_frame_buttons & 0x20);
-          buttons.up = !!(next_input_frame_buttons & 0x40);
-          buttons.down = !!(next_input_frame_buttons & 0x80);
-          emulator_set_joypad_buttons(e, &buttons);
-
-          /* Read the next input from the file. */
-          char input_buffer[256];
-          while (fgets(input_buffer, sizeof(input_buffer),
-                       s_controller_input_file)) {
-            char* p = input_buffer;
-            while (*p == ' ' || *p == '\t') {
-              p++;
-            }
-            if (*p == '#') {
-              continue;
-            }
-            u32 rel_frame = 0;
-            if(sscanf(p, "%u %u", &rel_frame,
-                      &next_input_frame_buttons) != 2) {
-              fclose(s_controller_input_file);
-              s_controller_input_file = NULL;
-              next_input_frame = UINT32_MAX;
-            } else {
-              next_input_frame += rel_frame;
-            }
-            break;
-          }
-        }
       }
 
       if (finish_at_next_frame) {
@@ -364,6 +335,9 @@ int main(int argc, char** argv) {
 
   result = 0;
 error:
+  if (joypad_buffer) {
+    joypad_delete(joypad_buffer);
+  }
   if (e) {
     emulator_delete(e);
   }

@@ -125,6 +125,7 @@ typedef struct HostInit {
   int audio_frames;
   f32 audio_volume;
   RewindInit rewind;
+  const char* joypad_filename;
 } HostInit;
 
 typedef struct HostConfig {
@@ -171,6 +172,8 @@ Ticks host_get_rewind_oldest_ticks(struct Host*);
 Ticks host_get_rewind_newest_ticks(struct Host*);
 JoypadStats host_get_joypad_stats(struct Host*);
 RewindStats host_get_rewind_stats(struct Host*);
+
+Result host_write_joypad_to_file(struct Host*, const char* filename);
 
 void host_begin_rewind(struct Host*);
 Result host_rewind_to_ticks(struct Host*, Ticks ticks);

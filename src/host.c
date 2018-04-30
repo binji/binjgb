@@ -53,8 +53,7 @@ typedef struct {
 
 typedef struct {
   RewindResult rewind_result;
-  JoypadStateIter current;
-  JoypadStateIter next;
+  JoypadPlayback joypad_playback;
   Bool rewinding;
 } RewindState;
 
@@ -73,6 +72,7 @@ typedef struct Host {
   JoypadBuffer* joypad_buffer;
   RewindBuffer* rewind_buffer;
   RewindState rewind_state;
+  JoypadPlayback joypad_playback;
   Ticks last_ticks;
 } Host;
 
@@ -274,9 +274,20 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joypad_append_if_new(host->joypad_buffer, joyp, ticks);
 }
 
-static void host_init_joypad(Host* host, struct Emulator* e) {
-  emulator_set_joypad_callback(e, joypad_callback, host);
-  host->joypad_buffer = joypad_new();
+static Result host_init_joypad(Host* host, struct Emulator* e) {
+  if (host->init.joypad_filename) {
+    FileData file_data;
+    CHECK(SUCCESS(file_read(host->init.joypad_filename, &file_data)));
+    CHECK(SUCCESS(joypad_read(&file_data, &host->joypad_buffer)));
+    file_data_delete(&file_data);
+    emulator_set_joypad_playback_callback(
+        host_get_emulator(host), host->joypad_buffer, &host->joypad_playback);
+  } else {
+    emulator_set_joypad_callback(e, joypad_callback, host);
+    host->joypad_buffer = joypad_new();
+  }
+  return OK;
+  ON_ERROR_RETURN;
 }
 
 static void append_rewind_state(Host* host) {
@@ -301,6 +312,18 @@ JoypadStats host_get_joypad_stats(struct Host* host) {
 
 RewindStats host_get_rewind_stats(struct Host* host) {
   return rewind_get_stats(host->rewind_buffer);
+}
+
+Result host_write_joypad_to_file(struct Host* host, const char* filename) {
+  Result result = ERROR;
+  FileData file_data;
+  joypad_init_file_data(host->joypad_buffer, &file_data);
+  joypad_write(host->joypad_buffer, &file_data);
+  CHECK(SUCCESS(file_write(filename, &file_data)));
+  result = OK;
+error:
+  file_data_delete(&file_data);
+  return result;
 }
 
 static void host_handle_event(Host* host, EmulatorEvent event) {
@@ -329,19 +352,6 @@ static EmulatorEvent host_run_until_ticks(struct Host* host, Ticks ticks) {
   return event;
 }
 
-static void host_rewind_joypad_callback(struct JoypadButtons* joyp,
-                                        void* user_data) {
-  Host* host = user_data;
-  RewindState* state = &host->rewind_state;
-  Ticks ticks = emulator_get_ticks(host_get_emulator(host));
-  while (state->next.state && state->next.state->ticks <= ticks) {
-    state->current = state->next;
-    state->next = joypad_get_next_state(state->next);
-  }
-
-  *joyp = joypad_unpack_buttons(state->current.state->buttons);
-}
-
 void host_begin_rewind(Host* host) {
   assert(!host->rewind_state.rewinding);
   host->rewind_state.rewinding = TRUE;
@@ -357,14 +367,11 @@ Result host_rewind_to_ticks(Host* host, Ticks ticks) {
   CHECK(SUCCESS(emulator_read_state(e, &result->file_data)));
   assert(emulator_get_ticks(e) == result->info->ticks);
 
-  host->rewind_state.current =
-      joypad_find_state(host->joypad_buffer, emulator_get_ticks(e));
-  host->rewind_state.next = joypad_get_next_state(host->rewind_state.current);
-
   if (emulator_get_ticks(e) < ticks) {
     /* Save old joypad callback. */
     JoypadCallbackInfo old_jci = emulator_get_joypad_callback(e);
-    emulator_set_joypad_callback(e, host_rewind_joypad_callback, host);
+    emulator_set_joypad_playback_callback(e, host->joypad_buffer,
+                                          &host->rewind_state.joypad_playback);
     host_run_until_ticks(host, ticks);
     /* Restore old joypad callback. */
     emulator_set_joypad_callback(e, old_jci.callback, old_jci.user_data);
@@ -375,13 +382,20 @@ Result host_rewind_to_ticks(Host* host, Ticks ticks) {
 }
 
 void host_end_rewind(Host* host) {
+  Ticks ticks = emulator_get_ticks(host_get_emulator(host));
   assert(host->rewind_state.rewinding);
 
   if (host->rewind_state.rewind_result.info) {
     struct Emulator* e = host_get_emulator(host);
     rewind_truncate_to(host->rewind_buffer, e,
                        &host->rewind_state.rewind_result);
-    joypad_truncate_to(host->joypad_buffer, host->rewind_state.current);
+    if (!host->init.joypad_filename) {
+      joypad_truncate_to(host->joypad_buffer,
+                         host->rewind_state.joypad_playback.current);
+      /* Append the current joypad state. */
+      JoypadButtons buttons;
+      joypad_callback(&buttons, host);
+    }
     host->last_ticks = emulator_get_ticks(e);
   }
 

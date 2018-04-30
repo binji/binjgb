@@ -41,6 +41,7 @@ if (NOT EMSCRIPTEN)
     add_executable(binjgb
       src/memory.c
       src/common.c
+      src/options.c
       src/emulator.c
       src/host.c
       src/host-gl.c
@@ -110,6 +111,7 @@ if (NOT EMSCRIPTEN)
     src/common.c
     src/options.c
     src/emulator-debug.c
+    src/joypad.c
     src/tester.c
   )
   install(TARGETS binjgb-tester DESTINATION bin)
