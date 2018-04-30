@@ -429,11 +429,14 @@ typedef struct {
 } Interrupt;
 
 typedef struct {
-  u8 tima;                 /* Incremented at rate defined by clock_select */
-  u8 tma;                  /* When TIMA overflows, it is set to this value */
-  TimerClock clock_select; /* Select the rate of TIMA */
-  u16 div_counter;         /* Internal clock counter, upper 8 bits are DIV. */
-  TimaState tima_state;    /* Used to implement TIMA overflow delay. */
+  Ticks ticks;                 /* Current synchronization ticks. */
+  Ticks next_timer_intr_ticks; /* Tick when the next timer intr will occur. */
+  SpeedState speed_state_;     /* Speed state at the previous sync. */
+  TimerClock clock_select;     /* Select the rate of TIMA */
+  TimaState tima_state;        /* Used to implement TIMA overflow delay. */
+  u16 div_counter; /* Internal clock counter, upper 8 bits are DIV. */
+  u8 tima;         /* Incremented at rate defined by clock_select */
+  u8 tma;          /* When TIMA overflows, it is set to this value */
   Bool on;
 } Timer;
 
@@ -993,6 +996,7 @@ static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
 static Result init_memory_map(Emulator*);
 static void apu_synchronize(Emulator*);
 static void ppu_mode3_synchronize(Emulator*);
+static void timer_synchronize(Emulator*);
 
 static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
   MemoryTypeAddressPair result;
@@ -1613,15 +1617,19 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return SC_UNUSED | PACK(SERIAL.transferring, SC_TRANSFER_START) |
              PACK(SERIAL.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
+      timer_synchronize(e);
       return TIMER.div_counter >> 8;
     case IO_TIMA_ADDR:
+      timer_synchronize(e);
       return TIMER.tima;
     case IO_TMA_ADDR:
+      timer_synchronize(e);
       return TIMER.tma;
     case IO_TAC_ADDR:
       return TAC_UNUSED | PACK(TIMER.on, TAC_TIMER_ON) |
              PACK(TIMER.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
+      timer_synchronize(e);
       return IF_UNUSED | INTR.if_;
     case IO_LCDC_ADDR:
       return PACK(LCDC.display, LCDC_DISPLAY) |
@@ -1900,22 +1908,104 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
   write_oam_no_mode_check(e, addr, value);
 }
 
-static void increment_tima(Emulator* e) {
-  if (UNLIKELY(++TIMER.tima == 0)) {
-    HOOK(trigger_timer_i, TICKS + CPU_TICK);
-    TIMER.tima_state = TIMA_STATE_OVERFLOW;
-    INTR.new_if |= IF_TIMER;
-  }
+static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
+                                u16 div_counter) {
+  u16 falling_edge = ((old_div_counter ^ div_counter) & ~div_counter);
+  return falling_edge & s_tima_mask[TIMER.clock_select];
 }
 
-static void write_div_counter(Emulator* e, u16 div_counter) {
-  if (TIMER.on) {
-    u16 falling_edge = ((TIMER.div_counter ^ div_counter) & ~div_counter);
-    if (UNLIKELY((falling_edge & s_tima_mask[TIMER.clock_select]) != 0)) {
+static void increment_tima(Emulator*);
+
+static void timer_synchronize(Emulator* e) {
+  Ticks delta_ticks = TICKS - TIMER.ticks;
+  int tick_mul = CPU_SPEED.speed + 1;
+  delta_ticks *= tick_mul;
+
+  /* Ugly hack to properly handle timer effects due to the CPU_SPEED hack. */
+  if (tick_mul == 2 && TIMER.speed_state_ != CPU_SPEED.state) {
+    if (TIMER.speed_state_) {
+      delta_ticks += CPU_TICK;
+    } else if (!TIMER.speed_state_) {
+      delta_ticks -= CPU_TICK;
+    }
+  }
+
+  if (delta_ticks == 0) {
+    return;
+  }
+
+  TIMER.ticks = TICKS;
+  TIMER.speed_state_ = CPU_SPEED.state;
+
+  if (!TIMER.on) {
+    TIMER.div_counter += delta_ticks;
+    return;
+  }
+
+  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+    if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+      INTR.if_ |= (INTR.new_if & IF_TIMER);
+      TIMER.tima = TIMER.tma;
+      TIMER.tima_state = TIMA_STATE_RESET;
+    } else if (TIMER.tima_state == TIMA_STATE_RESET) {
+      TIMER.tima_state = TIMA_STATE_NORMAL;
+    }
+    u16 old_div_counter = TIMER.div_counter;
+    TIMER.div_counter += CPU_TICK;
+    if (is_div_falling_edge(e, old_div_counter, TIMER.div_counter)) {
       increment_tima(e);
     }
   }
-  TIMER.div_counter = div_counter;
+}
+
+static void calculate_next_timer_intr(Emulator* e) {
+  if (!TIMER.on) {
+    TIMER.next_timer_intr_ticks = ~0;
+    return;
+  }
+
+  Ticks ticks = TIMER.ticks;
+  u16 div_counter = TIMER.div_counter;
+  u8 tima = TIMER.tima;
+  if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+    tima = TIMER.tma;
+    div_counter += CPU_TICK;
+    ticks += CPU_TICK;
+  }
+
+  while (1) {
+    u16 old_div_counter = div_counter;
+    div_counter += CPU_TICK;
+    if (is_div_falling_edge(e, old_div_counter, div_counter) && ++tima == 0) {
+      break;
+    }
+    ticks += CPU_TICK;
+  }
+  TIMER.next_timer_intr_ticks = ticks;
+}
+
+static void do_timer_interrupt(Emulator* e) {
+  HOOK(trigger_timer_i, TICKS + CPU_TICK);
+  TIMER.tima_state = TIMA_STATE_OVERFLOW;
+  TIMER.div_counter += TICKS + CPU_TICK - TIMER.ticks;
+  TIMER.ticks = TICKS + CPU_TICK;
+  TIMER.tima = 0;
+  TIMER.speed_state_ = CPU_SPEED.state;
+  INTR.new_if |= IF_TIMER;
+  calculate_next_timer_intr(e);
+}
+
+static void increment_tima(Emulator* e) {
+  if (++TIMER.tima == 0) {
+    do_timer_interrupt(e);
+  }
+}
+
+static void clear_div(Emulator* e) {
+  if (TIMER.on && is_div_falling_edge(e, TIMER.div_counter, 0)) {
+    increment_tima(e);
+  }
+  TIMER.div_counter = 0;
 }
 
 /* Trigger is only TRUE on the tick where it transitioned to the new state;
@@ -2006,9 +2096,12 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       }
       break;
     case IO_DIV_ADDR:
-      write_div_counter(e, 0);
+      timer_synchronize(e);
+      clear_div(e);
+      calculate_next_timer_intr(e);
       break;
     case IO_TIMA_ADDR:
+      timer_synchronize(e);
       if (TIMER.on) {
         if (UNLIKELY(TIMER.tima_state == TIMA_STATE_OVERFLOW)) {
           /* Cancel the overflow and interrupt if written on the same tick. */
@@ -2019,17 +2112,21 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           /* Only update tima if it wasn't reset this tick. */
           TIMER.tima = value;
         }
+        calculate_next_timer_intr(e);
       } else {
         TIMER.tima = value;
       }
       break;
     case IO_TMA_ADDR:
+      timer_synchronize(e);
       TIMER.tma = value;
       if (UNLIKELY(TIMER.on && TIMER.tima_state == TIMA_STATE_RESET)) {
         TIMER.tima = value;
       }
+      calculate_next_timer_intr(e);
       break;
     case IO_TAC_ADDR: {
+      timer_synchronize(e);
       Bool old_timer_on = TIMER.on;
       u16 old_tima_mask = s_tima_mask[TIMER.clock_select];
       TIMER.clock_select = UNPACK(value, TAC_CLOCK_SELECT);
@@ -2050,9 +2147,11 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           increment_tima(e);
         }
       }
+      calculate_next_timer_intr(e);
       break;
     }
     case IO_IF_ADDR:
+      timer_synchronize(e);
       INTR.new_if = INTR.if_ = value;
       break;
     case IO_LCDC_ADDR: {
@@ -3292,18 +3391,6 @@ static void hdma_copy_byte(Emulator* e) {
   }
 }
 
-static void timer_tick(Emulator* e) {
-  if (TIMER.on) {
-    if (UNLIKELY(TIMER.tima_state == TIMA_STATE_OVERFLOW)) {
-      TIMER.tima_state = TIMA_STATE_RESET;
-      TIMER.tima = TIMER.tma;
-    } else if (UNLIKELY(TIMER.tima_state == TIMA_STATE_RESET)) {
-      TIMER.tima_state = TIMA_STATE_NORMAL;
-    }
-  }
-  write_div_counter(e, TIMER.div_counter + CPU_TICK);
-}
-
 static void serial_tick(Emulator* e) {
   if (LIKELY(!SERIAL.transferring)) {
     return;
@@ -3326,7 +3413,6 @@ static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
   dma_tick(e);
   serial_tick(e);
-  timer_tick(e);
   /* In double-speed, state alternates between 0 and 2. For single-speed, state
    * alternates between 1 and 3 (i.e. always true). This saves checking whether
    * we're in double speed first, which is important since this function is so
@@ -3639,15 +3725,21 @@ static void execute_instruction(Emulator* e) {
   u16 u16;
   Address new_pc;
 
+  if (TICKS >= TIMER.next_timer_intr_ticks) {
+    timer_synchronize(e);
+  }
+
   Bool should_dispatch =
       (INTR.ime || INTR.halt) && ((INTR.new_if & INTR.ie & IF_ALL) != 0);
 
   if (UNLIKELY(INTR.stop && !should_dispatch)) {
     // TODO(binji): proper timing of speed switching.
     if (CPU_SPEED.switching) {
+      timer_synchronize(e);
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
       CPU_SPEED.state ^= 1;
+      TIMER.speed_state_ = CPU_SPEED.state;
       INTR.stop = FALSE;
       HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
     } else {
@@ -4003,6 +4095,7 @@ Result init_emulator(Emulator* e) {
   REG.PC = 0x0100;
   INTR.ime = FALSE;
   TIMER.div_counter = 0xAC00;
+  TIMER.next_timer_intr_ticks = ~0;
   WRAM.offset = 0x1000;
   CPU_SPEED.state = SPEED_STATE_NORMAL;
   /* Enable apu first, so subsequent writes succeed. */
