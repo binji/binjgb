@@ -20,13 +20,17 @@
 /* This value is arbitrary. Why not 1/10th of a second? */
 #define AUDIO_FRAMES ((AUDIO_FREQUENCY / 10) * SOUND_OUTPUT_COUNT)
 #define DEFAULT_FRAMES 60
+#define MAX_PRINT_OPS_LIMIT 512
+#define MAX_PROFILE_LIMIT 1000
 
 static const char* s_joypad_filename;
 static int s_frames = DEFAULT_FRAMES;
 static const char* s_output_ppm;
 static Bool s_animate;
 static Bool s_print_ops;
-static int s_print_ops_limit = 512;
+static u32 s_print_ops_limit = MAX_PRINT_OPS_LIMIT;
+static Bool s_profile;
+static u32 s_profile_limit = 30;
 static const char* s_rom_filename;
 
 
@@ -62,7 +66,9 @@ void usage(int argc, char** argv) {
       "  -o,--output FILE     output PPM file to FILE\n"
       "  -a,--animate         output an image every frame\n"
       "     --print-ops       print execution count of each opcode\n"
-      "     --print-ops-limit max opcodes to print\n",
+      "     --print-ops-limit max opcodes to print\n"
+      "     --profile         print execution count of each opcode\n"
+      "     --profile-limit   max opcodes to print\n",
       argv[0],
       DEFAULT_FRAMES);
 
@@ -91,6 +97,8 @@ void parse_options(int argc, char**argv) {
     {'a', "animate", 0},
     {0, "print-ops-limit", 1},
     {0, "print-ops", 0},
+    {0, "profile-limit", 1},
+    {0, "profile", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -166,6 +174,17 @@ void parse_options(int argc, char**argv) {
             } else if (strcmp(result.option->long_name, "print-ops-limit") ==
                        0) {
               s_print_ops_limit = atoi(result.value);
+              if (s_print_ops_limit >= MAX_PRINT_OPS_LIMIT) {
+                s_print_ops_limit = MAX_PRINT_OPS_LIMIT;
+              }
+            } else if (strcmp(result.option->long_name, "profile") == 0) {
+              s_profile = TRUE;
+              emulator_set_profiling_enabled(TRUE);
+            } else if (strcmp(result.option->long_name, "profile-limit") == 0) {
+              s_profile_limit = atoi(result.value);
+              if (s_profile_limit >= MAX_PROFILE_LIMIT) {
+                s_profile_limit = MAX_PROFILE_LIMIT;
+              }
             } else {
               abort();
             }
@@ -198,34 +217,38 @@ error:
 }
 
 typedef struct {
-  u16 opcode;
+  u32 value;
   u32 count;
-} OpcodeCount;
+} U32Pair;
 
-int compare_opcode_count(const void* a, const void* b) {
-  OpcodeCount* pa = (OpcodeCount*)a;
-  OpcodeCount* pb = (OpcodeCount*)b;
-  return (int)pb->count - (int)pa->count;
+int compare_pair(const void* a, const void* b) {
+  U32Pair* pa = (U32Pair*)a;
+  U32Pair* pb = (U32Pair*)b;
+  int dcount = (int)pb->count - (int)pa->count;
+  if (dcount != 0) {
+    return dcount;
+  }
+  return (int)pa->value - (int)pb->value;
 }
 
 void print_ops(void) {
   u32* opcode_count = emulator_get_opcode_count();
   u32* cb_opcode_count = emulator_get_cb_opcode_count();
 
-  OpcodeCount pairs[512];
+  U32Pair pairs[512];
   ZERO_MEMORY(pairs);
 
-  int i;
+  u32 i;
   for (i = 0; i < 256;) {
-    pairs[i].opcode = i;
+    pairs[i].value = i;
     pairs[i].count = opcode_count[i];
     ++i;
-    pairs[i].opcode = 0xcb00 | i;
+    pairs[i].value = 0xcb00 | i;
     pairs[i].count = cb_opcode_count[i];
     ++i;
   }
 
-  qsort(pairs, ARRAY_SIZE(pairs), sizeof(pairs[0]), compare_opcode_count);
+  qsort(pairs, ARRAY_SIZE(pairs), sizeof(pairs[0]), compare_pair);
 
   printf("  op:      count -   mnemonic\n");
   printf("--------------------------------\n");
@@ -235,7 +258,7 @@ void print_ops(void) {
   Bool skipped = FALSE;
   for (i = 0; i < 512; ++i) {
     if (pairs[i].count > 0) {
-      u16 opcode = pairs[i].opcode;
+      u16 opcode = pairs[i].value;
       if (i < s_print_ops_limit) {
         if (opcode < 0x100) {
           printf("  %02x", opcode);
@@ -256,6 +279,78 @@ void print_ops(void) {
   }
   printf("distinct: %d\n", distinct);
   printf("total: %lu\n", total);
+}
+
+void swap_pair(U32Pair* a, U32Pair* b) {
+  U32Pair temp = *a;
+  *a = *b;
+  *b = temp;
+}
+
+void insert_heap(U32Pair* min_heap, u32 index, u32 value, u32 count) {
+  min_heap[index].value = value;
+  min_heap[index].count = count;
+  while (index > 0) {
+    u32 parent = (index - 1) / 2;
+    if (min_heap[parent].count <= min_heap[index].count) {
+      break;
+    }
+    swap_pair(&min_heap[parent], &min_heap[index]);
+    index = parent;
+  }
+}
+
+void extract_min_heap(U32Pair* min_heap, u32 last_index) {
+  min_heap[0] = min_heap[last_index];
+  u32 index = 0;
+  while (index * 2 + 1 < last_index) {
+    u32 left_index = index * 2 + 1, right_index = index * 2 + 2;
+    u32 min_index = index;
+    if (left_index < last_index &&
+        min_heap[min_index].count > min_heap[left_index].count) {
+      min_index = left_index;
+    }
+    if (right_index < last_index &&
+        min_heap[min_index].count > min_heap[right_index].count) {
+      min_index = right_index;
+    }
+    if (min_index == index) {
+      break;
+    }
+    swap_pair(&min_heap[min_index], &min_heap[index]);
+    index = min_index;
+  }
+}
+
+void print_profile(struct Emulator* e) {
+  u32 rom_size = emulator_get_rom_size(e);
+  u32* counters = emulator_get_profiling_counters();
+  const u32 heap_limit = s_profile_limit;
+  U32Pair* min_heap = xcalloc(heap_limit + 1, sizeof(U32Pair));
+
+  u32 i;
+  for (i = 0; i < heap_limit; ++i) {
+    insert_heap(min_heap, i, i, counters[i]);
+  }
+
+  for (i = heap_limit; i < rom_size; ++i) {
+    extract_min_heap(min_heap, heap_limit);
+    insert_heap(min_heap, heap_limit, i, counters[i]);
+  }
+
+  qsort(min_heap, heap_limit + 1, sizeof(U32Pair), compare_pair);
+  U32Pair* pairs = min_heap;
+
+  printf("     count -   instr\n");
+  printf("-------------------------------------------------\n");
+  char disasm[100];
+  for (i = 0; i < s_profile_limit; ++i) {
+    if (pairs[i].count > 0) {
+      emulator_disassemble_rom(e, pairs[i].value, disasm, sizeof(disasm));
+      printf("%10d - %s\n", pairs[i].count, disasm);
+    }
+  }
+  xfree(pairs);
 }
 
 int main(int argc, char** argv) {
@@ -332,6 +427,10 @@ int main(int argc, char** argv) {
 
   if (s_print_ops) {
     print_ops();
+  }
+
+  if (s_profile) {
+    print_profile(e);
   }
 
   result = 0;

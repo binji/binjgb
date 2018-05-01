@@ -122,8 +122,14 @@ void emulator_set_opcode_count_enabled(Bool enable);
 u32* emulator_get_opcode_count(void);
 u32* emulator_get_cb_opcode_count(void);
 
+Bool emulator_get_profiling_enabled(void);
+void emulator_set_profiling_enabled(Bool enable);
+u32* emulator_get_profiling_counters(void);
+
 void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size);
 int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
+void emulator_disassemble_rom(struct Emulator*, u32 rom_addr, char* buffer,
+                              size_t size);
 Registers emulator_get_registers(struct Emulator*);
 
 int emulator_get_max_breakpoint_id(void);

@@ -278,39 +278,51 @@ void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size) {
   }
 }
 
-int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
-  char temp[64];
-  char bytes[][3] = {"  ", "  "};
-  const char* mnemonic = "*INVALID*";
-
-  u8 opcode = read_u8_raw(e, addr);
+static int disassemble_instr(u8 data[3], char* buffer, size_t size) {
+  char temp[100];
+  u8 opcode = data[0];
   u8 num_bytes = s_opcode_bytes[opcode];
   switch (num_bytes) {
-    case 0: break;
-    case 1: mnemonic = s_opcode_mnemonic[opcode]; break;
-    case 2: {
-      u8 byte = read_u8_raw(e, addr + 1);
-      sprint_hex(bytes[0], byte);
+    case 1: {
+      const char* mnemonic = s_opcode_mnemonic[opcode];
+      if (!mnemonic) {
+        mnemonic = "*INVALID*";
+      }
+      strncpy(temp, mnemonic, sizeof(temp));
+      break;
+    }
+    case 2:
       if (opcode == 0xcb) {
-        mnemonic = s_cb_opcode_mnemonic[byte];
+        strncpy(temp, s_cb_opcode_mnemonic[data[1]], sizeof(temp));
       } else {
-        snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode], byte);
-        mnemonic = temp;
+        snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode], data[1]);
       }
       break;
-    }
-    case 3: {
-      u8 byte1 = read_u8_raw(e, addr + 1);
-      u8 byte2 = read_u8_raw(e, addr + 2);
-      sprint_hex(bytes[0], byte1);
-      sprint_hex(bytes[1], byte2);
+    case 3:
       snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode],
-               (byte2 << 8) | byte1);
-      mnemonic = temp;
+               (data[2] << 8) | data[1]);
       break;
-    }
     default: assert(!"invalid opcode byte length.\n"); break;
   }
+
+  char hex[][3] = {"  ", "  ", "  "};
+  switch (num_bytes) {
+    case 3: sprint_hex(hex[2], data[2]); /* Fallthrough. */
+    case 2: sprint_hex(hex[1], data[1]); /* Fallthrough. */
+    case 1: sprint_hex(hex[0], data[0]); break;
+  }
+
+  snprintf(buffer, size, "%s %s %s  %-15s", hex[0], hex[1], hex[2], temp);
+  return num_bytes;
+}
+
+int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
+  char instr[100];
+  char hex[][3] = {"  ", "  ", "  "};
+
+  u8 data[3] = {read_u8_raw(e, addr), read_u8_raw(e, addr + 1),
+                read_u8_raw(e, addr + 2)};
+  int num_bytes = disassemble_instr(data, instr, sizeof(instr));
 
   char bank[3] = "??";
   if (addr < 0x4000) {
@@ -319,8 +331,7 @@ int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
     sprint_hex(bank, e->state.memory_map_state.rom_base[1] >> ROM_BANK_SHIFT);
   }
 
-  snprintf(buffer, size, "[%s]%#06x: %02x %s %s  %-15s", bank, addr, opcode,
-           bytes[0], bytes[1], mnemonic);
+  snprintf(buffer, size, "[%s]%#06x: %s", bank, addr, instr);
   return num_bytes ? num_bytes : 1;
 }
 
@@ -328,6 +339,20 @@ static void print_instruction(Emulator* e, Address addr) {
   char temp[64];
   emulator_disassemble(e, addr, temp, sizeof(temp));
   printf("%s", temp);
+}
+
+void emulator_disassemble_rom(struct Emulator* e, u32 rom_addr, char* buffer,
+                              size_t size) {
+  char instr[100];
+  u8* rom = e->cart_info->data;
+  u8 data[3] = {rom[rom_addr], rom[rom_addr + 1], rom[rom_addr + 2]};
+  disassemble_instr(data, instr, sizeof(instr));
+  int bank = rom_addr >> ROM_BANK_SHIFT;
+  Address addr = rom_addr & 0x3fff;
+  if (bank > 0) {
+    addr += 0x4000;
+  }
+  snprintf(buffer, size, "[%02x]%#06x: %s", bank, addr, instr);
 }
 
 Registers emulator_get_registers(struct Emulator* e) { return REG; }
@@ -489,16 +514,20 @@ void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
   mark_rom_usage(rom_addr, ROM_USAGE_DATA);
 }
 
-static void mark_rom_usage_for_pc(struct Emulator* e, Address addr) {
-  if (!s_rom_usage_enabled) {
-    return;
-  }
-  u32 rom_addr = 0;
+#define INVALID_ROM_ADDR (~0u)
+
+static u32 get_rom_addr(struct Emulator* e, Address addr) {
   if (addr < 0x4000) {
-    rom_addr = e->state.memory_map_state.rom_base[0] | (addr & 0x3fff);
+    return e->state.memory_map_state.rom_base[0] | (addr & 0x3fff);
   } else if (addr < 0x8000) {
-    rom_addr = e->state.memory_map_state.rom_base[1] | (addr & 0x3fff);
+    return e->state.memory_map_state.rom_base[1] | (addr & 0x3fff);
   } else {
+    return INVALID_ROM_ADDR;
+  }
+}
+
+static void mark_rom_usage_for_pc(struct Emulator* e, u32 rom_addr) {
+  if (!s_rom_usage_enabled || rom_addr == INVALID_ROM_ADDR) {
     return;
   }
   u8 opcode = e->cart_info->data[rom_addr];
@@ -572,6 +601,8 @@ Bool HOOK_emulator_step(Emulator* e, const char* func_name) {
 static Bool s_opcode_count_enabled = FALSE;
 static u32 s_opcode_count[256];
 static u32 s_cb_opcode_count[256];
+static Bool s_profiling_enabled = FALSE;
+static u32 s_profiling_counters[MAXIMUM_ROM_SIZE];
 
 Bool emulator_get_opcode_count_enabled(void) {
   return s_opcode_count_enabled;
@@ -579,20 +610,6 @@ Bool emulator_get_opcode_count_enabled(void) {
 
 void emulator_set_opcode_count_enabled(Bool enable) {
   s_opcode_count_enabled = enable;
-}
-
-void HOOK_exec_op_ai(Emulator* e, const char* func_name, Address pc,
-                     u8 opcode) {
-  mark_rom_usage_for_pc(e, pc);
-  if (s_opcode_count_enabled) {
-    s_opcode_count[opcode]++;
-  }
-}
-
-void HOOK_exec_cb_op_i(Emulator* e, const char* func_name, u8 opcode) {
-  if (s_opcode_count_enabled) {
-    s_cb_opcode_count[opcode]++;
-  }
 }
 
 u32* emulator_get_opcode_count(void) {
@@ -603,6 +620,36 @@ u32* emulator_get_opcode_count(void) {
 u32* emulator_get_cb_opcode_count(void) {
   assert(s_opcode_count_enabled);
   return s_cb_opcode_count;
+}
+
+Bool emulator_get_profiling_enabled(void) {
+  return s_profiling_enabled;
+}
+
+void emulator_set_profiling_enabled(Bool enable) {
+  s_profiling_enabled = enable;
+}
+
+u32* emulator_get_profiling_counters(void) {
+  return s_profiling_counters;
+}
+
+void HOOK_exec_op_ai(Emulator* e, const char* func_name, Address pc,
+                     u8 opcode) {
+  u32 rom_addr = get_rom_addr(e, pc);
+  mark_rom_usage_for_pc(e, rom_addr);
+  if (s_opcode_count_enabled) {
+    s_opcode_count[opcode]++;
+  }
+  if (s_profiling_enabled && rom_addr != INVALID_ROM_ADDR) {
+    s_profiling_counters[rom_addr]++;
+  }
+}
+
+void HOOK_exec_cb_op_i(Emulator* e, const char* func_name, u8 opcode) {
+  if (s_opcode_count_enabled) {
+    s_cb_opcode_count[opcode]++;
+  }
 }
 
 void emulator_set_log_level(LogSystem system, LogLevel level) {
