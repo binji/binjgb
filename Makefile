@@ -36,4 +36,8 @@ endef
 $(eval $(call EMSCRIPTEN_BUILD,JS,js,))
 $(eval $(call EMSCRIPTEN_BUILD,Wasm,wasm,-DWASM=true))
 
+.PHONY: demo
+demo: wasm
+	cp out/Wasm/binjgb.{wasm,js} demo/
+
 emscripten: js
