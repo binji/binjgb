@@ -458,11 +458,11 @@ void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
 static Bool s_rom_usage_enabled = TRUE;
 static u8 s_rom_usage[MAXIMUM_ROM_SIZE];
 
-Bool emulator_get_rom_usage_enabled(struct Emulator* e) {
+Bool emulator_get_rom_usage_enabled(void) {
   return s_rom_usage_enabled;
 }
 
-void emulator_set_rom_usage_enabled(struct Emulator* e, Bool enable) {
+void emulator_set_rom_usage_enabled(Bool enable) {
   s_rom_usage_enabled = enable;
 }
 
@@ -471,12 +471,12 @@ static inline void mark_rom_usage(u32 rom_addr, RomUsage usage) {
   s_rom_usage[rom_addr] |= usage;
 }
 
-u8* emulator_get_rom_usage(struct Emulator* e) {
+u8* emulator_get_rom_usage(void) {
   assert(s_rom_usage_enabled);
   return s_rom_usage;
 }
 
-void emulator_clear_rom_usage(struct Emulator* e) {
+void emulator_clear_rom_usage(void) {
   assert(s_rom_usage_enabled);
   memset(s_rom_usage, 0, sizeof(s_rom_usage));
 }
@@ -569,24 +569,39 @@ Bool HOOK_emulator_step(Emulator* e, const char* func_name) {
   return FALSE;
 }
 
+static Bool s_opcode_count_enabled = FALSE;
 static u32 s_opcode_count[256];
 static u32 s_cb_opcode_count[256];
+
+Bool emulator_get_opcode_count_enabled(void) {
+  return s_opcode_count_enabled;
+}
+
+void emulator_set_opcode_count_enabled(Bool enable) {
+  s_opcode_count_enabled = enable;
+}
 
 void HOOK_exec_op_ai(Emulator* e, const char* func_name, Address pc,
                      u8 opcode) {
   mark_rom_usage_for_pc(e, pc);
-  s_opcode_count[opcode]++;
+  if (s_opcode_count_enabled) {
+    s_opcode_count[opcode]++;
+  }
 }
 
 void HOOK_exec_cb_op_i(Emulator* e, const char* func_name, u8 opcode) {
-  s_cb_opcode_count[opcode]++;
+  if (s_opcode_count_enabled) {
+    s_cb_opcode_count[opcode]++;
+  }
 }
 
 u32* emulator_get_opcode_count(void) {
+  assert(s_opcode_count_enabled);
   return s_opcode_count;
 }
 
 u32* emulator_get_cb_opcode_count(void) {
+  assert(s_opcode_count_enabled);
   return s_cb_opcode_count;
 }
 

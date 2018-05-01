@@ -162,6 +162,7 @@ void parse_options(int argc, char**argv) {
           default:
             if (strcmp(result.option->long_name, "print-ops") == 0) {
               s_print_ops = TRUE;
+              emulator_set_opcode_count_enabled(TRUE);
             } else if (strcmp(result.option->long_name, "print-ops-limit") ==
                        0) {
               s_print_ops_limit = atoi(result.value);
@@ -285,7 +286,7 @@ int main(int argc, char** argv) {
   }
 
   /* Disable rom usage collecting since it's slow and not useful here. */
-  emulator_set_rom_usage_enabled(e, FALSE);
+  emulator_set_rom_usage_enabled(FALSE);
 
   u32 total_ticks = (u32)(s_frames * PPU_FRAME_TICKS);
   u32 until_ticks = emulator_get_ticks(e) + total_ticks;

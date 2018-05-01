@@ -120,7 +120,7 @@ void Debugger::DisassemblyWindow::Tick() {
     for (int rom_region = 0; rom_region < 2; ++rom_region) {
       Address region_addr = rom_region << 14;
       int bank = emulator_get_rom_bank(d->e, region_addr);
-      u8* rom_usage = emulator_get_rom_usage(d->e) + (bank << 14);
+      u8* rom_usage = emulator_get_rom_usage() + (bank << 14);
 
       for (Address rel_addr = 0; rel_addr < 0x4000;) {
         Address addr = region_addr + rel_addr;

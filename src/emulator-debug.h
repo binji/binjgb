@@ -112,11 +112,13 @@ void emulator_print_log_systems();
 Bool emulator_is_cgb(struct Emulator*);
 
 int emulator_get_rom_size(struct Emulator*);
-Bool emulator_get_rom_usage_enabled(struct Emulator*);
-void emulator_set_rom_usage_enabled(struct Emulator*, Bool enable);
-u8* emulator_get_rom_usage(struct Emulator*);
-void emulator_clear_rom_usage(struct Emulator* e);
+Bool emulator_get_rom_usage_enabled(void);
+void emulator_set_rom_usage_enabled(Bool enable);
+u8* emulator_get_rom_usage(void);
+void emulator_clear_rom_usage(void);
 
+Bool emulator_get_opcode_count_enabled(void);
+void emulator_set_opcode_count_enabled(Bool enable);
 u32* emulator_get_opcode_count(void);
 u32* emulator_get_cb_opcode_count(void);
 

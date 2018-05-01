@@ -28,19 +28,19 @@ void Debugger::ROMWindow::Init() {
 
   rom_texture = host_create_texture(d->host, rom_texture_width,
                                     rom_texture_height, HOST_TEXTURE_FORMAT_U8);
-  emulator_clear_rom_usage(d->e);
+  emulator_clear_rom_usage();
 }
 
 void Debugger::ROMWindow::Tick() {
   if (ImGui::BeginDock("ROM", &is_open)) {
     host_upload_texture(d->host, rom_texture, rom_texture_width,
-                        rom_texture_height, emulator_get_rom_usage(d->e));
+                        rom_texture_height, emulator_get_rom_usage());
 
     PaletteRGBA palette = {
         {0xff202020u, 0xff00ff00u, 0xffff0000u, 0xffff00ffu}};
 
     size_t rom_size = emulator_get_rom_size(d->e);
-    u8* rom_usage = emulator_get_rom_usage(d->e);
+    u8* rom_usage = emulator_get_rom_usage();
 
     if (ImGui::Button("Dump")) {
       FileData file_data;
