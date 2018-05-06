@@ -431,7 +431,7 @@ typedef struct {
 typedef struct {
   Ticks ticks;                 /* Current synchronization ticks. */
   Ticks next_timer_intr_ticks; /* Tick when the next timer intr will occur. */
-  SpeedState speed_state_;     /* Speed state at the previous sync. */
+  SpeedState speed_state;      /* Speed state at the previous sync. */
   TimerClock clock_select;     /* Select the rate of TIMA */
   TimaState tima_state;        /* Used to implement TIMA overflow delay. */
   u16 div_counter; /* Internal clock counter, upper 8 bits are DIV. */
@@ -601,9 +601,11 @@ typedef struct {
 } Ppu;
 
 typedef struct {
-  DmaState state;
-  Address source;
-  Ticks ticks;
+  Ticks ticks;            /* Current synchronization tick. */
+  Ticks tick_count;       /* 0..DMA_TICKS */
+  DmaState state;         /* Used to implement DMA delay. */
+  Address source;         /* Source address; dest is calculated from this. */
+  SpeedState speed_state; /* Speed state at the previous sync. */
 } Dma;
 
 typedef struct {
@@ -995,6 +997,7 @@ static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
 
 static Result init_memory_map(Emulator*);
 static void apu_synchronize(Emulator*);
+static void dma_synchronize(Emulator*);
 static void ppu_mode3_synchronize(Emulator*);
 static void timer_synchronize(Emulator*);
 
@@ -1864,6 +1867,7 @@ static u8 read_u8_raw(Emulator* e, Address addr) {
 }
 
 static u8 read_u8(Emulator* e, Address addr) {
+  dma_synchronize(e);
   if (UNLIKELY(!is_dma_access_ok(e, addr))) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
@@ -1916,26 +1920,27 @@ static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
 
 static void increment_tima(Emulator*);
 
-static void timer_synchronize(Emulator* e) {
-  Ticks delta_ticks = TICKS - TIMER.ticks;
-  int tick_mul = CPU_SPEED.speed + 1;
-  delta_ticks *= tick_mul;
-
-  /* Ugly hack to properly handle timer effects due to the CPU_SPEED hack. */
-  if (tick_mul == 2 && TIMER.speed_state_ != CPU_SPEED.state) {
-    if (TIMER.speed_state_) {
-      delta_ticks += CPU_TICK;
-    } else if (!TIMER.speed_state_) {
-      delta_ticks -= CPU_TICK;
+static Ticks get_delta_ticks(Emulator* e, Ticks last_ticks,
+                             SpeedState speed_state) {
+  Ticks delta_ticks = TICKS - last_ticks;
+  if (CPU_SPEED.speed == SPEED_DOUBLE) {
+    delta_ticks *= 2;
+    /* Ugly hack to properly handle timer effects due to the CPU_SPEED hack. */
+    if (speed_state != CPU_SPEED.state) {
+      delta_ticks += (speed_state ? CPU_TICK : -CPU_TICK);
     }
   }
+  return delta_ticks;
+}
 
+static void timer_synchronize(Emulator* e) {
+  Ticks delta_ticks = get_delta_ticks(e, TIMER.ticks, TIMER.speed_state);
   if (delta_ticks == 0) {
     return;
   }
 
   TIMER.ticks = TICKS;
-  TIMER.speed_state_ = CPU_SPEED.state;
+  TIMER.speed_state = CPU_SPEED.state;
 
   if (!TIMER.on) {
     TIMER.div_counter += delta_ticks;
@@ -1990,7 +1995,7 @@ static void do_timer_interrupt(Emulator* e) {
   TIMER.div_counter += TICKS + CPU_TICK - TIMER.ticks;
   TIMER.ticks = TICKS + CPU_TICK;
   TIMER.tima = 0;
-  TIMER.speed_state_ = CPU_SPEED.state;
+  TIMER.speed_state = CPU_SPEED.state;
   INTR.new_if |= IF_TIMER;
   calculate_next_timer_intr(e);
 }
@@ -2235,9 +2240,12 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
+      dma_synchronize(e);
+      DMA.ticks = TICKS;
+      DMA.tick_count = 0;
       DMA.state = (DMA.state != DMA_INACTIVE ? DMA.state : DMA_TRIGGERED);
       DMA.source = value << 8;
-      DMA.ticks = 0;
+      DMA.speed_state = CPU_SPEED.state;
       break;
     case IO_BGP_ADDR:
       ppu_mode3_synchronize(e);
@@ -2749,6 +2757,7 @@ static void write_u8_raw(Emulator* e, Address addr, u8 value) {
 }
 
 static void write_u8(Emulator* e, Address addr, u8 value) {
+  dma_synchronize(e);
   if (UNLIKELY(!is_dma_access_ok(e, addr))) {
     HOOK(write_during_dma_ab, addr, value);
     return;
@@ -2757,6 +2766,7 @@ static void write_u8(Emulator* e, Address addr, u8 value) {
 }
 
 static void do_ppu_mode2(Emulator* e) {
+  dma_synchronize(e);
   if (!LCDC.obj_display || e->config.disable_obj) {
     return;
   }
@@ -3344,26 +3354,38 @@ static void apu_synchronize(Emulator* e) {
   }
 }
 
-static void dma_tick(Emulator* e) {
+static void dma_synchronize(Emulator* e) {
   if (LIKELY(DMA.state == DMA_INACTIVE)) {
     return;
   }
-  if (DMA.ticks < DMA_DELAY_TICKS) {
-    DMA.ticks += CPU_TICK;
-    if (DMA.ticks >= DMA_DELAY_TICKS) {
-      DMA.ticks = DMA_DELAY_TICKS;
-      DMA.state = DMA_ACTIVE;
-    }
+
+  Ticks delta_ticks = get_delta_ticks(e, DMA.ticks, DMA.speed_state);
+  if (delta_ticks == 0) {
     return;
   }
 
-  u8 addr_offset = (DMA.ticks - DMA_DELAY_TICKS) >> 2;
-  assert(addr_offset < OAM_TRANSFER_SIZE);
-  u8 value = read_u8_pair(e, map_address(DMA.source + addr_offset), FALSE);
-  write_oam_no_mode_check(e, addr_offset, value);
-  DMA.ticks += CPU_TICK;
-  if (VALUE_WRAPPED(DMA.ticks, DMA_TICKS)) {
-    DMA.state = DMA_INACTIVE;
+  DMA.ticks = TICKS;
+  DMA.speed_state = CPU_SPEED.state;
+
+  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+    if (DMA.tick_count < DMA_DELAY_TICKS) {
+      DMA.tick_count += CPU_TICK;
+      if (DMA.tick_count >= DMA_DELAY_TICKS) {
+        DMA.tick_count = DMA_DELAY_TICKS;
+        DMA.state = DMA_ACTIVE;
+      }
+      continue;
+    }
+
+    u8 addr_offset = (DMA.tick_count - DMA_DELAY_TICKS) >> 2;
+    assert(addr_offset < OAM_TRANSFER_SIZE);
+    u8 value = read_u8_pair(e, map_address(DMA.source + addr_offset), FALSE);
+    write_oam_no_mode_check(e, addr_offset, value);
+    DMA.tick_count += CPU_TICK;
+    if (VALUE_WRAPPED(DMA.tick_count, DMA_TICKS)) {
+      DMA.state = DMA_INACTIVE;
+      break;
+    }
   }
 }
 
@@ -3411,7 +3433,6 @@ static void serial_tick(Emulator* e) {
 
 static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
-  dma_tick(e);
   serial_tick(e);
   /* In double-speed, state alternates between 0 and 2. For single-speed, state
    * alternates between 1 and 3 (i.e. always true). This saves checking whether
@@ -3735,11 +3756,13 @@ static void execute_instruction(Emulator* e) {
   if (UNLIKELY(INTR.stop && !should_dispatch)) {
     // TODO(binji): proper timing of speed switching.
     if (CPU_SPEED.switching) {
+      dma_synchronize(e);
       timer_synchronize(e);
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
       CPU_SPEED.state ^= 1;
-      TIMER.speed_state_ = CPU_SPEED.state;
+      TIMER.speed_state = CPU_SPEED.state;
+      DMA.speed_state = CPU_SPEED.state;
       INTR.stop = FALSE;
       HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
     } else {
