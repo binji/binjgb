@@ -429,11 +429,11 @@ typedef struct {
 } Interrupt;
 
 typedef struct {
-  Ticks ticks;                 /* Current synchronization ticks. */
-  Ticks next_timer_intr_ticks; /* Tick when the next timer intr will occur. */
-  SpeedState speed_state;      /* Speed state at the previous sync. */
-  TimerClock clock_select;     /* Select the rate of TIMA */
-  TimaState tima_state;        /* Used to implement TIMA overflow delay. */
+  Ticks ticks;             /* Current synchronization ticks. */
+  Ticks next_intr_ticks;   /* Tick when the next timer intr will occur. */
+  SpeedState speed_state;  /* Speed state at the previous sync. */
+  TimerClock clock_select; /* Select the rate of TIMA */
+  TimaState tima_state;    /* Used to implement TIMA overflow delay. */
   u16 div_counter; /* Internal clock counter, upper 8 bits are DIV. */
   u8 tima;         /* Incremented at rate defined by clock_select */
   u8 tma;          /* When TIMA overflows, it is set to this value */
@@ -441,11 +441,14 @@ typedef struct {
 } Timer;
 
 typedef struct {
-  Bool transferring;
+  Ticks ticks;            /* Current synchronization ticks. */
+  Ticks tick_count;       /* 0..SERIAL_TICKS */
+  Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
+  SpeedState speed_state; /* Speed state at the previous sync. */
   SerialClock clock;
+  Bool transferring;
   u8 sb; /* Serial transfer data. */
   u8 transferred_bits;
-  Ticks ticks;
 } Serial;
 
 typedef struct {
@@ -656,6 +659,7 @@ typedef struct {
   CpuSpeed cpu_speed;
   u8 hram[HIGH_RAM_SIZE];
   Ticks ticks;
+  Ticks next_intr_ticks; /* For Timer or Serial interrupts. */
   Bool is_cgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
@@ -999,7 +1003,9 @@ static Result init_memory_map(Emulator*);
 static void apu_synchronize(Emulator*);
 static void dma_synchronize(Emulator*);
 static void ppu_mode3_synchronize(Emulator*);
+static void serial_synchronize(Emulator*);
 static void timer_synchronize(Emulator*);
+static void calculate_next_serial_intr(Emulator*);
 
 static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
   MemoryTypeAddressPair result;
@@ -1615,8 +1621,10 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return JOYP_UNUSED | PACK(JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
              (read_joyp_p10_p13(e) & JOYP_RESULT_MASK);
     case IO_SB_ADDR:
+      serial_synchronize(e);
       return SERIAL.sb;
     case IO_SC_ADDR:
+      serial_synchronize(e);
       return SC_UNUSED | PACK(SERIAL.transferring, SC_TRANSFER_START) |
              PACK(SERIAL.clock, SC_SHIFT_CLOCK);
     case IO_DIV_ADDR:
@@ -1912,6 +1920,10 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
   write_oam_no_mode_check(e, addr, value);
 }
 
+static void calculate_next_intr(Emulator* e) {
+  e->state.next_intr_ticks = MIN(SERIAL.next_intr_ticks, TIMER.next_intr_ticks);
+}
+
 static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
                                 u16 div_counter) {
   u16 falling_edge = ((old_div_counter ^ div_counter) & ~div_counter);
@@ -1965,7 +1977,8 @@ static void timer_synchronize(Emulator* e) {
 
 static void calculate_next_timer_intr(Emulator* e) {
   if (!TIMER.on) {
-    TIMER.next_timer_intr_ticks = ~0;
+    TIMER.next_intr_ticks = INVALID_TICKS;
+    calculate_next_intr(e);
     return;
   }
 
@@ -1986,7 +1999,8 @@ static void calculate_next_timer_intr(Emulator* e) {
     }
     ticks += CPU_TICK;
   }
-  TIMER.next_timer_intr_ticks = ticks;
+  TIMER.next_intr_ticks = ticks;
+  calculate_next_intr(e);
 }
 
 static void do_timer_interrupt(Emulator* e) {
@@ -2090,15 +2104,18 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       check_joyp_intr(e);
       break;
     case IO_SB_ADDR:
+      serial_synchronize(e);
       SERIAL.sb = value;
       break;
     case IO_SC_ADDR:
+      serial_synchronize(e);
       SERIAL.transferring = UNPACK(value, SC_TRANSFER_START);
       SERIAL.clock = UNPACK(value, SC_SHIFT_CLOCK);
       if (SERIAL.transferring) {
-        SERIAL.ticks = 0;
+        SERIAL.tick_count = 0;
         SERIAL.transferred_bits = 0;
       }
+      calculate_next_serial_intr(e);
       break;
     case IO_DIV_ADDR:
       timer_synchronize(e);
@@ -3413,27 +3430,54 @@ static void hdma_copy_byte(Emulator* e) {
   }
 }
 
-static void serial_tick(Emulator* e) {
-  if (LIKELY(!SERIAL.transferring)) {
+static void calculate_next_serial_intr(Emulator* e) {
+  if (!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL) {
+    SERIAL.next_intr_ticks = INVALID_TICKS;
+    calculate_next_intr(e);
     return;
   }
-  if (SERIAL.clock == SERIAL_CLOCK_INTERNAL) {
-    SERIAL.ticks += CPU_TICK;
-    if (VALUE_WRAPPED(SERIAL.ticks, SERIAL_TICKS)) {
+
+  /* Should only be called when receiving a new byte. */
+  assert(SERIAL.tick_count == 0);
+  assert(SERIAL.transferred_bits == 0);
+  SERIAL.next_intr_ticks = TICKS + SERIAL_TICKS * 8;
+  calculate_next_intr(e);
+}
+
+static void serial_synchronize(Emulator* e) {
+  Ticks delta_ticks = get_delta_ticks(e, SERIAL.ticks, SERIAL.speed_state);
+  if (delta_ticks == 0) {
+    return;
+  }
+
+  SERIAL.ticks = TICKS;
+  SERIAL.speed_state = CPU_SPEED.state;
+
+  if (LIKELY(!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL)) {
+    return;
+  }
+
+  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+    SERIAL.tick_count += CPU_TICK;
+    if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
       /* Since we're never connected to another device, always shift in 0xff. */
       SERIAL.sb = (SERIAL.sb << 1) | 1;
       SERIAL.transferred_bits++;
       if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
         SERIAL.transferring = 0;
         INTR.new_if |= IF_SERIAL;
+        printf("%lu: serial interrupt!\n", TICKS);
+        calculate_next_serial_intr(e);
       }
+    } else if (UNLIKELY(SERIAL.tick_count == 0 &&
+                        SERIAL.transferred_bits == 0)) {
+      INTR.if_ |= (INTR.new_if & IF_SERIAL);
     }
   }
 }
 
 static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
-  serial_tick(e);
   /* In double-speed, state alternates between 0 and 2. For single-speed, state
    * alternates between 1 and 3 (i.e. always true). This saves checking whether
    * we're in double speed first, which is important since this function is so
@@ -3746,8 +3790,13 @@ static void execute_instruction(Emulator* e) {
   u16 u16;
   Address new_pc;
 
-  if (TICKS >= TIMER.next_timer_intr_ticks) {
-    timer_synchronize(e);
+  if (UNLIKELY(TICKS >= e->state.next_intr_ticks)) {
+    if (LIKELY(TICKS >= TIMER.next_intr_ticks)) {
+      timer_synchronize(e);
+    } else {
+      assert(TICKS >= SERIAL.next_intr_ticks);
+      serial_synchronize(e);
+    }
   }
 
   Bool should_dispatch =
@@ -3757,11 +3806,13 @@ static void execute_instruction(Emulator* e) {
     // TODO(binji): proper timing of speed switching.
     if (CPU_SPEED.switching) {
       dma_synchronize(e);
+      serial_synchronize(e);
       timer_synchronize(e);
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
       CPU_SPEED.state ^= 1;
       TIMER.speed_state = CPU_SPEED.state;
+      SERIAL.speed_state = CPU_SPEED.state;
       DMA.speed_state = CPU_SPEED.state;
       INTR.stop = FALSE;
       HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
@@ -4118,7 +4169,8 @@ Result init_emulator(Emulator* e) {
   REG.PC = 0x0100;
   INTR.ime = FALSE;
   TIMER.div_counter = 0xAC00;
-  TIMER.next_timer_intr_ticks = ~0;
+  TIMER.next_intr_ticks = SERIAL.next_intr_ticks = e->state.next_intr_ticks =
+      INVALID_TICKS;
   WRAM.offset = 0x1000;
   CPU_SPEED.state = SPEED_STATE_NORMAL;
   /* Enable apu first, so subsequent writes succeed. */

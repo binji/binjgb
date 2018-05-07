@@ -13,8 +13,6 @@
 
 #define SANITY_CHECK 0
 
-#define INVALID_TICKS (~0ULL)
-
 #define GET_TICKS(x) ((x).ticks)
 #define CMP_GT(x, y) ((x) > (y))
 

@@ -34,6 +34,7 @@ extern "C" {
 #define KILOBYTES(x) ((size_t)(x) * 1024)
 #define MEGABYTES(x) ((size_t)(x) * 1024 * 1024)
 #define GIGABYTES(x) ((size_t)(x) * 1024 * 1024 * 1024)
+#define INVALID_TICKS (~0ULL)
 
 #define SUCCESS(x) ((x) == OK)
 #define PRINT_ERROR(...) fprintf(stderr, __VA_ARGS__)
