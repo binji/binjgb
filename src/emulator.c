@@ -341,13 +341,6 @@ typedef enum {
   SPEED_DOUBLE = 1,
 } Speed;
 
-typedef enum {
-  SPEED_STATE_DOUBLE = 0,
-  SPEED_STATE_NORMAL = 1,
-  SPEED_STATE_DOUBLE_HACK = 2,
-  SPEED_STATE_NORMAL_HACK = 3,
-} SpeedState;
-
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -431,7 +424,6 @@ typedef struct {
 typedef struct {
   Ticks ticks;             /* Current synchronization ticks. */
   Ticks next_intr_ticks;   /* Tick when the next timer intr will occur. */
-  SpeedState speed_state;  /* Speed state at the previous sync. */
   TimerClock clock_select; /* Select the rate of TIMA */
   TimaState tima_state;    /* Used to implement TIMA overflow delay. */
   u16 div_counter; /* Internal clock counter, upper 8 bits are DIV. */
@@ -444,7 +436,6 @@ typedef struct {
   Ticks ticks;            /* Current synchronization ticks. */
   Ticks tick_count;       /* 0..SERIAL_TICKS */
   Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
-  SpeedState speed_state; /* Speed state at the previous sync. */
   SerialClock clock;
   Bool transferring;
   u8 sb; /* Serial transfer data. */
@@ -608,12 +599,10 @@ typedef struct {
   Ticks tick_count;       /* 0..DMA_TICKS */
   DmaState state;         /* Used to implement DMA delay. */
   Address source;         /* Source address; dest is calculated from this. */
-  SpeedState speed_state; /* Speed state at the previous sync. */
 } Dma;
 
 typedef struct {
   Speed speed;
-  SpeedState state;
   Bool switching;
 } CpuSpeed;
 
@@ -659,6 +648,7 @@ typedef struct {
   CpuSpeed cpu_speed;
   u8 hram[HIGH_RAM_SIZE];
   Ticks ticks;
+  Ticks cpu_tick;
   Ticks next_intr_ticks; /* For Timer or Serial interrupts. */
   Bool is_cgb;
   Bool ext_ram_updated;
@@ -795,6 +785,7 @@ typedef struct Emulator {
 
 /* Tick counts */
 #define CPU_TICK 4
+#define CPU_2X_TICK 2
 #define APU_TICKS 2
 #define PPU_ENABLE_DISPLAY_DELAY_FRAMES 4
 #define PPU_MODE2_TICKS 80
@@ -1932,34 +1923,21 @@ static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
 
 static void increment_tima(Emulator*);
 
-static Ticks get_delta_ticks(Emulator* e, Ticks last_ticks,
-                             SpeedState speed_state) {
-  Ticks delta_ticks = TICKS - last_ticks;
-  if (CPU_SPEED.speed == SPEED_DOUBLE) {
-    delta_ticks *= 2;
-    /* Ugly hack to properly handle timer effects due to the CPU_SPEED hack. */
-    if (speed_state != CPU_SPEED.state) {
-      delta_ticks += (speed_state ? CPU_TICK : -CPU_TICK);
-    }
-  }
-  return delta_ticks;
-}
-
 static void timer_synchronize(Emulator* e) {
-  Ticks delta_ticks = get_delta_ticks(e, TIMER.ticks, TIMER.speed_state);
+  Ticks delta_ticks = TICKS - TIMER.ticks;
   if (delta_ticks == 0) {
     return;
   }
 
   TIMER.ticks = TICKS;
-  TIMER.speed_state = CPU_SPEED.state;
 
   if (!TIMER.on) {
     TIMER.div_counter += delta_ticks;
     return;
   }
 
-  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+  Ticks cpu_tick = e->state.cpu_tick;
+  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
     if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
       INTR.if_ |= (INTR.new_if & IF_TIMER);
       TIMER.tima = TIMER.tma;
@@ -1983,12 +1961,13 @@ static void calculate_next_timer_intr(Emulator* e) {
   }
 
   Ticks ticks = TIMER.ticks;
+  Ticks cpu_tick = e->state.cpu_tick;
   u16 div_counter = TIMER.div_counter;
   u8 tima = TIMER.tima;
   if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
     tima = TIMER.tma;
     div_counter += CPU_TICK;
-    ticks += CPU_TICK;
+    ticks += cpu_tick;
   }
 
   while (1) {
@@ -1997,19 +1976,19 @@ static void calculate_next_timer_intr(Emulator* e) {
     if (is_div_falling_edge(e, old_div_counter, div_counter) && ++tima == 0) {
       break;
     }
-    ticks += CPU_TICK;
+    ticks += cpu_tick;
   }
   TIMER.next_intr_ticks = ticks;
   calculate_next_intr(e);
 }
 
 static void do_timer_interrupt(Emulator* e) {
-  HOOK(trigger_timer_i, TICKS + CPU_TICK);
+  Ticks cpu_tick = e->state.cpu_tick;
+  HOOK(trigger_timer_i, TICKS + cpu_tick);
   TIMER.tima_state = TIMA_STATE_OVERFLOW;
   TIMER.div_counter += TICKS + CPU_TICK - TIMER.ticks;
-  TIMER.ticks = TICKS + CPU_TICK;
+  TIMER.ticks = TICKS + cpu_tick;
   TIMER.tima = 0;
-  TIMER.speed_state = CPU_SPEED.state;
   INTR.new_if |= IF_TIMER;
   calculate_next_timer_intr(e);
 }
@@ -2195,7 +2174,8 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           HOOK0(enable_display_v);
           PPU.state = PPU_STATE_LCD_ON_MODE2;
           PPU.state_ticks = PPU_MODE2_TICKS;
-          PPU.line_start_ticks = TICKS - CPU_TICK - CPU_TICK;
+          PPU.line_start_ticks =
+              ALIGN_UP(TICKS - CPU_TICK - CPU_TICK, CPU_TICK);
           PPU.display_delay_frames = PPU_ENABLE_DISPLAY_DELAY_FRAMES;
           STAT.trigger_mode = PPU_MODE_MODE2;
         } else {
@@ -2262,7 +2242,6 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       DMA.tick_count = 0;
       DMA.state = (DMA.state != DMA_INACTIVE ? DMA.state : DMA_TRIGGERED);
       DMA.source = value << 8;
-      DMA.speed_state = CPU_SPEED.state;
       break;
     case IO_BGP_ADDR:
       ppu_mode3_synchronize(e);
@@ -3006,6 +2985,8 @@ static void ppu_tick(Emulator* e) {
     return;
   }
 
+  assert(IS_ALIGNED(TICKS, CPU_TICK));
+
   STAT.mode2.trigger = FALSE;
   STAT.y_compare.trigger = FALSE;
   STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
@@ -3376,15 +3357,15 @@ static void dma_synchronize(Emulator* e) {
     return;
   }
 
-  Ticks delta_ticks = get_delta_ticks(e, DMA.ticks, DMA.speed_state);
+  Ticks delta_ticks = TICKS - DMA.ticks;
   if (delta_ticks == 0) {
     return;
   }
 
   DMA.ticks = TICKS;
-  DMA.speed_state = CPU_SPEED.state;
 
-  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+  Ticks cpu_tick = e->state.cpu_tick;
+  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
     if (DMA.tick_count < DMA_DELAY_TICKS) {
       DMA.tick_count += CPU_TICK;
       if (DMA.tick_count >= DMA_DELAY_TICKS) {
@@ -3440,25 +3421,26 @@ static void calculate_next_serial_intr(Emulator* e) {
   /* Should only be called when receiving a new byte. */
   assert(SERIAL.tick_count == 0);
   assert(SERIAL.transferred_bits == 0);
-  SERIAL.next_intr_ticks = TICKS + SERIAL_TICKS * 8;
+  SERIAL.next_intr_ticks =
+      TICKS + SERIAL_TICKS * (CPU_SPEED.speed == SPEED_NORMAL ? 8 : 4);
   calculate_next_intr(e);
 }
 
 static void serial_synchronize(Emulator* e) {
-  Ticks delta_ticks = get_delta_ticks(e, SERIAL.ticks, SERIAL.speed_state);
+  Ticks delta_ticks = TICKS - SERIAL.ticks;
   if (delta_ticks == 0) {
     return;
   }
 
   SERIAL.ticks = TICKS;
-  SERIAL.speed_state = CPU_SPEED.state;
 
   if (LIKELY(!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL)) {
     return;
   }
 
-  for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
-    SERIAL.tick_count += CPU_TICK;
+  Ticks cpu_tick = e->state.cpu_tick;
+  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
+    SERIAL.tick_count += cpu_tick;
     if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
       /* Since we're never connected to another device, always shift in 0xff. */
       SERIAL.sb = (SERIAL.sb << 1) | 1;
@@ -3466,7 +3448,6 @@ static void serial_synchronize(Emulator* e) {
       if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
         SERIAL.transferring = 0;
         INTR.new_if |= IF_SERIAL;
-        printf("%lu: serial interrupt!\n", TICKS);
         calculate_next_serial_intr(e);
       }
     } else if (UNLIKELY(SERIAL.tick_count == 0 &&
@@ -3478,14 +3459,10 @@ static void serial_synchronize(Emulator* e) {
 
 static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
-  /* In double-speed, state alternates between 0 and 2. For single-speed, state
-   * alternates between 1 and 3 (i.e. always true). This saves checking whether
-   * we're in double speed first, which is important since this function is so
-   * hot. */
-  if ((CPU_SPEED.state ^= 2)) {
+  if ((TICKS & CPU_2X_TICK) == 0) {
     ppu_tick(e);
-    TICKS += CPU_TICK;
   }
+  TICKS += e->state.cpu_tick;
 }
 
 static u8 read_u8_tick(Emulator* e, Address addr) {
@@ -3791,10 +3768,10 @@ static void execute_instruction(Emulator* e) {
   Address new_pc;
 
   if (UNLIKELY(TICKS >= e->state.next_intr_ticks)) {
-    if (LIKELY(TICKS >= TIMER.next_intr_ticks)) {
+    if (TICKS >= TIMER.next_intr_ticks) {
       timer_synchronize(e);
-    } else {
-      assert(TICKS >= SERIAL.next_intr_ticks);
+    }
+    if (TICKS >= SERIAL.next_intr_ticks) {
       serial_synchronize(e);
     }
   }
@@ -3810,12 +3787,15 @@ static void execute_instruction(Emulator* e) {
       timer_synchronize(e);
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
-      CPU_SPEED.state ^= 1;
-      TIMER.speed_state = CPU_SPEED.state;
-      SERIAL.speed_state = CPU_SPEED.state;
-      DMA.speed_state = CPU_SPEED.state;
       INTR.stop = FALSE;
-      HOOK(speed_switch_i, CPU_SPEED.speed == SPEED_NORMAL ? 1 : 2);
+      if (CPU_SPEED.speed == SPEED_NORMAL) {
+        TICKS = ALIGN_UP(TICKS, CPU_TICK);
+        e->state.cpu_tick = CPU_TICK;
+        HOOK(speed_switch_i, 1);
+      } else {
+        e->state.cpu_tick = CPU_2X_TICK;
+        HOOK(speed_switch_i, 2);
+      }
     } else {
       TICKS += CPU_TICK;
       return;
@@ -4172,7 +4152,6 @@ Result init_emulator(Emulator* e) {
   TIMER.next_intr_ticks = SERIAL.next_intr_ticks = e->state.next_intr_ticks =
       INVALID_TICKS;
   WRAM.offset = 0x1000;
-  CPU_SPEED.state = SPEED_STATE_NORMAL;
   /* Enable apu first, so subsequent writes succeed. */
   write_apu(e, APU_NR52_ADDR, 0xf1);
   write_apu(e, APU_NR11_ADDR, 0x80);
@@ -4210,6 +4189,7 @@ Result init_emulator(Emulator* e) {
   }
 
   APU.ticks = TICKS = 0;
+  e->state.cpu_tick = CPU_TICK;
   return OK;
   ON_ERROR_RETURN;
 }
