@@ -422,7 +422,7 @@ typedef struct {
 } Interrupt;
 
 typedef struct {
-  Ticks ticks;             /* Current synchronization ticks. */
+  Ticks sync_ticks;        /* Current synchronization ticks. */
   Ticks next_intr_ticks;   /* Tick when the next timer intr will occur. */
   TimerClock clock_select; /* Select the rate of TIMA */
   TimaState tima_state;    /* Used to implement TIMA overflow delay. */
@@ -433,7 +433,7 @@ typedef struct {
 } Timer;
 
 typedef struct {
-  Ticks ticks;            /* Current synchronization ticks. */
+  Ticks sync_ticks;       /* Current synchronization ticks. */
   Ticks tick_count;       /* 0..SERIAL_TICKS */
   Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
   SerialClock clock;
@@ -520,8 +520,8 @@ typedef struct {
   Wave wave;
   Noise noise;
   Channel channel[APU_CHANNEL_COUNT];
-  u8 frame;    /* 0..FRAME_SEQUENCER_COUNT */
-  Ticks ticks; /* Raw tick counter */
+  u8 frame;         /* 0..FRAME_SEQUENCER_COUNT */
+  Ticks sync_ticks; /* Raw tick counter */
   Bool initialized;
 } Apu;
 
@@ -595,7 +595,7 @@ typedef struct {
 } Ppu;
 
 typedef struct {
-  Ticks ticks;            /* Current synchronization tick. */
+  Ticks sync_ticks;       /* Current synchronization tick. */
   Ticks tick_count;       /* 0..DMA_TICKS */
   DmaState state;         /* Used to implement DMA delay. */
   Address source;         /* Source address; dest is calculated from this. */
@@ -1924,12 +1924,12 @@ static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
 static void increment_tima(Emulator*);
 
 static void timer_synchronize(Emulator* e) {
-  Ticks delta_ticks = TICKS - TIMER.ticks;
+  Ticks delta_ticks = TICKS - TIMER.sync_ticks;
   if (delta_ticks == 0) {
     return;
   }
 
-  TIMER.ticks = TICKS;
+  TIMER.sync_ticks = TICKS;
 
   if (!TIMER.on) {
     TIMER.div_counter += delta_ticks;
@@ -1960,7 +1960,7 @@ static void calculate_next_timer_intr(Emulator* e) {
     return;
   }
 
-  Ticks ticks = TIMER.ticks;
+  Ticks ticks = TIMER.sync_ticks;
   Ticks cpu_tick = e->state.cpu_tick;
   u16 div_counter = TIMER.div_counter;
   u8 tima = TIMER.tima;
@@ -1986,8 +1986,8 @@ static void do_timer_interrupt(Emulator* e) {
   Ticks cpu_tick = e->state.cpu_tick;
   HOOK(trigger_timer_i, TICKS + cpu_tick);
   TIMER.tima_state = TIMA_STATE_OVERFLOW;
-  TIMER.div_counter += TICKS + CPU_TICK - TIMER.ticks;
-  TIMER.ticks = TICKS + cpu_tick;
+  TIMER.div_counter += TICKS + CPU_TICK - TIMER.sync_ticks;
+  TIMER.sync_ticks = TICKS + cpu_tick;
   TIMER.tima = 0;
   INTR.new_if |= IF_TIMER;
   calculate_next_timer_intr(e);
@@ -2238,7 +2238,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
       dma_synchronize(e);
-      DMA.ticks = TICKS;
+      DMA.sync_ticks = TICKS;
       DMA.tick_count = 0;
       DMA.state = (DMA.state != DMA_INACTIVE ? DMA.state : DMA_TRIGGERED);
       DMA.source = value << 8;
@@ -3312,17 +3312,17 @@ static void apu_update_channels(Emulator* e, u32 total_frames) {
     frames = MIN(frames, total_frames);
     update_square_wave(&CHANNEL1, frames);
     update_square_wave(&CHANNEL2, frames);
-    update_wave(e, APU.ticks, frames);
+    update_wave(e, APU.sync_ticks, frames);
     update_noise(e, frames);
     write_audio_frame(e, frames);
-    APU.ticks += frames * APU_TICKS;
+    APU.sync_ticks += frames * APU_TICKS;
     total_frames -= frames;
   }
 }
 
 static void apu_update(Emulator* e, u32 total_ticks) {
   while (total_ticks) {
-    Ticks next_seq_ticks = NEXT_MODULO(APU.ticks, FRAME_SEQUENCER_TICKS);
+    Ticks next_seq_ticks = NEXT_MODULO(APU.sync_ticks, FRAME_SEQUENCER_TICKS);
     if (next_seq_ticks == FRAME_SEQUENCER_TICKS) {
       APU.frame = (APU.frame + 1) % FRAME_SEQUENCER_COUNT;
       switch (APU.frame) {
@@ -3338,16 +3338,16 @@ static void apu_update(Emulator* e, u32 total_ticks) {
 }
 
 static void apu_synchronize(Emulator* e) {
-  if (APU.ticks != TICKS) {
-    u32 ticks = TICKS - APU.ticks;
+  if (APU.sync_ticks != TICKS) {
+    u32 ticks = TICKS - APU.sync_ticks;
     if (APU.enabled) {
       apu_update(e, ticks);
-      assert(APU.ticks == TICKS);
+      assert(APU.sync_ticks == TICKS);
     } else {
       for (; ticks; ticks -= APU_TICKS) {
         write_audio_frame(e, 1);
       }
-      APU.ticks = TICKS;
+      APU.sync_ticks = TICKS;
     }
   }
 }
@@ -3357,12 +3357,12 @@ static void dma_synchronize(Emulator* e) {
     return;
   }
 
-  Ticks delta_ticks = TICKS - DMA.ticks;
+  Ticks delta_ticks = TICKS - DMA.sync_ticks;
   if (delta_ticks == 0) {
     return;
   }
 
-  DMA.ticks = TICKS;
+  DMA.sync_ticks = TICKS;
 
   Ticks cpu_tick = e->state.cpu_tick;
   for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
@@ -3427,12 +3427,12 @@ static void calculate_next_serial_intr(Emulator* e) {
 }
 
 static void serial_synchronize(Emulator* e) {
-  Ticks delta_ticks = TICKS - SERIAL.ticks;
+  Ticks delta_ticks = TICKS - SERIAL.sync_ticks;
   if (delta_ticks == 0) {
     return;
   }
 
-  SERIAL.ticks = TICKS;
+  SERIAL.sync_ticks = TICKS;
 
   if (LIKELY(!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL)) {
     return;
@@ -4064,7 +4064,7 @@ EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
 
   u64 frames_left = ab->frames - audio_buffer_get_frames(ab);
   Ticks max_audio_ticks =
-      APU.ticks +
+      APU.sync_ticks +
       (u32)DIV_CEIL(frames_left * CPU_TICKS_PER_SECOND, ab->frequency);
   Ticks check_ticks = MIN(until_ticks, max_audio_ticks);
   while (e->state.event == 0 && TICKS < check_ticks) {
@@ -4188,7 +4188,7 @@ Result init_emulator(Emulator* e) {
     }
   }
 
-  APU.ticks = TICKS = 0;
+  APU.sync_ticks = TICKS = 0;
   e->state.cpu_tick = CPU_TICK;
   return OK;
   ON_ERROR_RETURN;
