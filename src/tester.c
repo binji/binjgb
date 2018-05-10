@@ -356,6 +356,7 @@ void print_profile(struct Emulator* e) {
 int main(int argc, char** argv) {
   int result = 1;
   struct Emulator* e = NULL;
+  JoypadBuffer* joypad_buffer = NULL;
 
   parse_options(argc, argv);
 
@@ -371,7 +372,6 @@ int main(int argc, char** argv) {
   CHECK(e != NULL);
 
   JoypadPlayback joypad_playback;
-  JoypadBuffer* joypad_buffer = NULL;
   if (s_joypad_filename) {
     FileData file_data;
     CHECK(SUCCESS(file_read(s_joypad_filename, &file_data)));
