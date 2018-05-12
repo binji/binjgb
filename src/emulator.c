@@ -566,6 +566,8 @@ typedef struct {
 } ColorPalettes;
 
 typedef struct {
+  Ticks sync_ticks;                 /* Current synchronization tick. */
+  Ticks next_intr_ticks;            /* Tick when the next intr will occur. */
   Lcdc lcdc;                        /* LCD control */
   Stat stat;                        /* LCD status */
   u8 scy;                           /* Screen Y */
@@ -649,7 +651,7 @@ typedef struct {
   u8 hram[HIGH_RAM_SIZE];
   Ticks ticks;
   Ticks cpu_tick;
-  Ticks next_intr_ticks; /* For Timer or Serial interrupts. */
+  Ticks next_intr_ticks; /* For Timer, Serial, or PPU interrupts. */
   Bool is_cgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
@@ -993,9 +995,11 @@ static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
 static Result init_memory_map(Emulator*);
 static void apu_synchronize(Emulator*);
 static void dma_synchronize(Emulator*);
+static void ppu_synchronize(Emulator*);
 static void ppu_mode3_synchronize(Emulator*);
 static void serial_synchronize(Emulator*);
 static void timer_synchronize(Emulator*);
+static void calculate_next_ppu_intr(Emulator*);
 static void calculate_next_serial_intr(Emulator*);
 
 static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
@@ -1546,6 +1550,7 @@ static Bool is_using_oam(Emulator* e, Bool write) {
 }
 
 static u8 read_vram(Emulator* e, MaskedAddress addr) {
+  ppu_synchronize(e);
   if (is_using_vram(e, FALSE)) {
     HOOK(read_vram_in_use_a, addr);
     return INVALID_READ_BYTE;
@@ -1556,6 +1561,7 @@ static u8 read_vram(Emulator* e, MaskedAddress addr) {
 }
 
 static u8 read_oam(Emulator* e, MaskedAddress addr) {
+  ppu_synchronize(e);
   if (is_using_oam(e, FALSE)) {
     HOOK(read_oam_in_use_a, addr);
     return INVALID_READ_BYTE;
@@ -1631,6 +1637,8 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return TAC_UNUSED | PACK(TIMER.on, TAC_TIMER_ON) |
              PACK(TIMER.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
+      ppu_synchronize(e);
+      serial_synchronize(e);
       timer_synchronize(e);
       return IF_UNUSED | INTR.if_;
     case IO_LCDC_ADDR:
@@ -1644,6 +1652,7 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
              PACK(LCDC.obj_display, LCDC_OBJ_DISPLAY) |
              PACK(LCDC.bg_display, LCDC_BG_DISPLAY);
     case IO_STAT_ADDR:
+      ppu_synchronize(e);
       return STAT_UNUSED | PACK(STAT.y_compare.irq, STAT_YCOMPARE_INTR) |
              PACK(STAT.mode2.irq, STAT_MODE2_INTR) |
              PACK(STAT.vblank.irq, STAT_VBLANK_INTR) |
@@ -1655,6 +1664,7 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_SCX_ADDR:
       return PPU.scx;
     case IO_LY_ADDR:
+      ppu_synchronize(e);
       return PPU.ly;
     case IO_LYC_ADDR:
       return PPU.lyc;
@@ -1875,6 +1885,7 @@ static u8 read_u8(Emulator* e, Address addr) {
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
+  ppu_synchronize(e);
   if (UNLIKELY(is_using_vram(e, TRUE))) {
     HOOK(write_vram_in_use_ab, addr, value);
     return;
@@ -1903,6 +1914,7 @@ static void write_oam_no_mode_check(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
+  ppu_synchronize(e);
   if (UNLIKELY(is_using_oam(e, TRUE))) {
     HOOK(write_oam_in_use_ab, addr, value);
     return;
@@ -1912,7 +1924,8 @@ static void write_oam(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void calculate_next_intr(Emulator* e) {
-  e->state.next_intr_ticks = MIN(SERIAL.next_intr_ticks, TIMER.next_intr_ticks);
+  e->state.next_intr_ticks = MIN(
+      MIN(SERIAL.next_intr_ticks, TIMER.next_intr_ticks), PPU.next_intr_ticks);
 }
 
 static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
@@ -2152,10 +2165,13 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case IO_IF_ADDR:
+      serial_synchronize(e);
+      ppu_synchronize(e);
       timer_synchronize(e);
       INTR.new_if = INTR.if_ = value;
       break;
     case IO_LCDC_ADDR: {
+      ppu_synchronize(e);
       ppu_mode3_synchronize(e);
       Bool was_enabled = LCDC.display;
       LCDC.display = UNPACK(value, LCDC_DISPLAY);
@@ -2187,10 +2203,12 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
           }
           e->state.event |= EMULATOR_EVENT_NEW_FRAME;
         }
+        calculate_next_ppu_intr(e);
       }
       break;
     }
     case IO_STAT_ADDR: {
+      ppu_synchronize(e);
       Bool new_vblank_irq = UNPACK(value, STAT_VBLANK_INTR);
       Bool new_hblank_irq = UNPACK(value, STAT_HBLANK_INTR);
       if (LCDC.display) {
@@ -2216,6 +2234,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       STAT.mode2.irq = UNPACK(value, STAT_MODE2_INTR);
       STAT.vblank.irq = new_vblank_irq;
       STAT.hblank.irq = new_hblank_irq;
+      calculate_next_ppu_intr(e);
       break;
     }
     case IO_SCY_ADDR:
@@ -2223,17 +2242,20 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       PPU.scy = value;
       break;
     case IO_SCX_ADDR:
+      ppu_synchronize(e);
       ppu_mode3_synchronize(e);
       PPU.scx = value;
       break;
     case IO_LY_ADDR:
       break;
     case IO_LYC_ADDR:
+      ppu_synchronize(e);
       PPU.lyc = value;
       if (LCDC.display) {
         check_ly_eq_lyc(e, TRUE);
         check_stat(e);
       }
+      calculate_next_ppu_intr(e);
       break;
     case IO_DMA_ADDR:
       /* DMA can be restarted. */
@@ -2268,6 +2290,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       update_bw_palette_rgba(&PPU.obp[1]);
       break;
     case IO_WY_ADDR:
+      ppu_synchronize(e);
       ppu_mode3_synchronize(e);
       PPU.wy = value;
       break;
@@ -2980,144 +3003,170 @@ static void ppu_mode3_synchronize(Emulator* e) {
   PPU.render_x = x;
 }
 
-static void ppu_tick(Emulator* e) {
-  if (!LCDC.display) {
+static void ppu_synchronize(Emulator* e) {
+  assert(IS_ALIGNED(PPU.sync_ticks, CPU_TICK));
+  Ticks aligned_ticks = ALIGN_DOWN(TICKS, CPU_TICK);
+  Ticks delta_ticks = aligned_ticks - PPU.sync_ticks;
+  if (delta_ticks == 0) {
     return;
   }
 
-  assert(IS_ALIGNED(TICKS, CPU_TICK));
+  if (LCDC.display) {
+    for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+      INTR.if_ |= (INTR.new_if & (IF_VBLANK | IF_STAT));
+      STAT.mode2.trigger = FALSE;
+      STAT.y_compare.trigger = FALSE;
+      STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
+      PPU.last_ly = PPU.ly;
 
-  STAT.mode2.trigger = FALSE;
-  STAT.y_compare.trigger = FALSE;
-  STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
-  PPU.last_ly = PPU.ly;
+      PPU.state_ticks -= CPU_TICK;
+      if (LIKELY(PPU.state_ticks != 0)) {
+        continue;
+      }
 
-  PPU.state_ticks -= CPU_TICK;
-  if (UNLIKELY(PPU.state_ticks == 0)) {
-    switch (PPU.state) {
-      case PPU_STATE_HBLANK:
-      case PPU_STATE_VBLANK_PLUS_4:
-        PPU.line_y++;
-        PPU.ly++;
-        PPU.line_start_ticks = TICKS;
-        check_ly_eq_lyc(e, FALSE);
-        PPU.state_ticks = CPU_TICK;
+      Ticks ticks = aligned_ticks - delta_ticks;
 
-        if (PPU.state == PPU_STATE_HBLANK) {
-          STAT.mode2.trigger = TRUE;
-          if (PPU.ly == SCREEN_HEIGHT) {
-            PPU.state = PPU_STATE_VBLANK;
-            STAT.trigger_mode = PPU_MODE_VBLANK;
-            PPU.frame++;
-            INTR.new_if |= IF_VBLANK;
-            if (LIKELY(PPU.display_delay_frames == 0)) {
-              e->state.event |= EMULATOR_EVENT_NEW_FRAME;
+      switch (PPU.state) {
+        case PPU_STATE_HBLANK:
+        case PPU_STATE_VBLANK_PLUS_4:
+          PPU.line_y++;
+          PPU.ly++;
+          PPU.line_start_ticks = ticks;
+          check_ly_eq_lyc(e, FALSE);
+          PPU.state_ticks = CPU_TICK;
+
+          if (PPU.state == PPU_STATE_HBLANK) {
+            STAT.mode2.trigger = TRUE;
+            if (PPU.ly == SCREEN_HEIGHT) {
+              PPU.state = PPU_STATE_VBLANK;
+              STAT.trigger_mode = PPU_MODE_VBLANK;
+              PPU.frame++;
+              INTR.new_if |= IF_VBLANK;
+              if (LIKELY(PPU.display_delay_frames == 0)) {
+                e->state.event |= EMULATOR_EVENT_NEW_FRAME;
+              } else {
+                PPU.display_delay_frames--;
+              }
             } else {
-              PPU.display_delay_frames--;
+              PPU.state = PPU_STATE_HBLANK_PLUS_4;
+              STAT.trigger_mode = PPU_MODE_MODE2;
+              if (PPU.rendering_window) {
+                PPU.win_y++;
+              }
+              if (UNLIKELY(HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+                           (HDMA.blocks & 0x80) == 0)) {
+                HDMA.state = DMA_ACTIVE;
+              }
             }
           } else {
-            PPU.state = PPU_STATE_HBLANK_PLUS_4;
-            STAT.trigger_mode = PPU_MODE_MODE2;
-            if (PPU.rendering_window) {
-              PPU.win_y++;
-            }
-            if (UNLIKELY(HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
-                         (HDMA.blocks & 0x80) == 0)) {
-              HDMA.state = DMA_ACTIVE;
+            assert(PPU.state == PPU_STATE_VBLANK_PLUS_4);
+            if (PPU.ly == SCREEN_HEIGHT_WITH_VBLANK - 1) {
+              PPU.state = PPU_STATE_VBLANK_LY_0;
+            } else {
+              PPU.state_ticks = PPU_LINE_TICKS;
             }
           }
-        } else {
-          assert(PPU.state == PPU_STATE_VBLANK_PLUS_4);
-          if (PPU.ly == SCREEN_HEIGHT_WITH_VBLANK - 1) {
-            PPU.state = PPU_STATE_VBLANK_LY_0;
+          check_stat(e);
+          break;
+
+        case PPU_STATE_HBLANK_PLUS_4:
+          PPU.state = PPU_STATE_MODE2;
+          PPU.state_ticks = PPU_MODE2_TICKS;
+          STAT.mode = PPU_MODE_MODE2;
+          do_ppu_mode2(e);
+          break;
+
+        case PPU_STATE_VBLANK:
+          PPU.state = PPU_STATE_VBLANK_PLUS_4;
+          PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK;
+          STAT.mode = PPU_MODE_VBLANK;
+          check_stat(e);
+          break;
+
+        case PPU_STATE_VBLANK_LY_0:
+          PPU.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
+          PPU.state_ticks = CPU_TICK;
+          PPU.ly = 0;
+          break;
+
+        case PPU_STATE_VBLANK_LY_0_PLUS_4:
+          PPU.state = PPU_STATE_VBLANK_LINE_Y_0;
+          PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK - CPU_TICK;
+          check_ly_eq_lyc(e, FALSE);
+          check_stat(e);
+          break;
+
+        case PPU_STATE_VBLANK_LINE_Y_0:
+          PPU.state = PPU_STATE_HBLANK_PLUS_4;
+          PPU.state_ticks = CPU_TICK;
+          PPU.line_start_ticks = ticks;
+          PPU.line_y = 0;
+          PPU.frame_wy = PPU.wy;
+          PPU.win_y = 0;
+          STAT.mode2.trigger = TRUE;
+          STAT.mode = PPU_MODE_HBLANK;
+          STAT.trigger_mode = PPU_MODE_MODE2;
+          check_stat(e);
+          break;
+
+        case PPU_STATE_LCD_ON_MODE2:
+        case PPU_STATE_MODE2:
+          PPU.state_ticks = mode3_tick_count(e);
+          if (PPU.state == PPU_STATE_LCD_ON_MODE2 ||
+              (PPU.state_ticks & 3) != 0) {
+            PPU.state = PPU_STATE_MODE3;
           } else {
-            PPU.state_ticks = PPU_LINE_TICKS;
+            PPU.state = PPU_STATE_MODE3_EARLY_TRIGGER;
+            PPU.state_ticks--;
           }
-        }
-        check_stat(e);
-        break;
+          PPU.state_ticks &= ~3;
+          STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
+          PPU.mode3_render_ticks = ticks;
+          PPU.render_x = 0;
+          PPU.rendering_window = FALSE;
+          check_stat(e);
+          break;
 
-      case PPU_STATE_HBLANK_PLUS_4:
-        PPU.state = PPU_STATE_MODE2;
-        PPU.state_ticks = PPU_MODE2_TICKS;
-        STAT.mode = PPU_MODE_MODE2;
-        do_ppu_mode2(e);
-        break;
+        case PPU_STATE_MODE3_EARLY_TRIGGER:
+          PPU.state = PPU_STATE_MODE3_COMMON;
+          PPU.state_ticks = CPU_TICK;
+          STAT.trigger_mode = PPU_MODE_HBLANK;
+          check_stat(e);
+          break;
 
-      case PPU_STATE_VBLANK:
-        PPU.state = PPU_STATE_VBLANK_PLUS_4;
-        PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK;
-        STAT.mode = PPU_MODE_VBLANK;
-        check_stat(e);
-        break;
+        case PPU_STATE_MODE3:
+          STAT.trigger_mode = PPU_MODE_HBLANK;
+          /* fallthrough */
 
-      case PPU_STATE_VBLANK_LY_0:
-        PPU.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
-        PPU.state_ticks = CPU_TICK;
-        PPU.ly = 0;
-        break;
+        case PPU_STATE_MODE3_COMMON:
+          ppu_mode3_synchronize(e);
+          PPU.state = PPU_STATE_HBLANK;
+          PPU.state_ticks = PPU_LINE_TICKS + PPU.line_start_ticks - ticks;
+          STAT.mode = PPU_MODE_HBLANK;
+          check_stat(e);
+          break;
 
-      case PPU_STATE_VBLANK_LY_0_PLUS_4:
-        PPU.state = PPU_STATE_VBLANK_LINE_Y_0;
-        PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK - CPU_TICK;
-        check_ly_eq_lyc(e, FALSE);
-        check_stat(e);
-        break;
+        case PPU_STATE_COUNT:
+          assert(0);
+          break;
+      }
 
-      case PPU_STATE_VBLANK_LINE_Y_0:
-        PPU.state = PPU_STATE_HBLANK_PLUS_4;
-        PPU.state_ticks = CPU_TICK;
-        PPU.line_start_ticks = TICKS;
-        PPU.line_y = 0;
-        PPU.frame_wy = PPU.wy;
-        PPU.win_y = 0;
-        STAT.mode2.trigger = TRUE;
-        STAT.mode = PPU_MODE_HBLANK;
-        STAT.trigger_mode = PPU_MODE_MODE2;
-        check_stat(e);
-        break;
-
-      case PPU_STATE_LCD_ON_MODE2:
-      case PPU_STATE_MODE2:
-        PPU.state_ticks = mode3_tick_count(e);
-        if (PPU.state == PPU_STATE_LCD_ON_MODE2 || (PPU.state_ticks & 3) != 0) {
-          PPU.state = PPU_STATE_MODE3;
-        } else {
-          PPU.state = PPU_STATE_MODE3_EARLY_TRIGGER;
-          PPU.state_ticks--;
-        }
-        PPU.state_ticks &= ~3;
-        STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
-        PPU.mode3_render_ticks = TICKS;
-        PPU.render_x = 0;
-        PPU.rendering_window = FALSE;
-        check_stat(e);
-        break;
-
-      case PPU_STATE_MODE3_EARLY_TRIGGER:
-        PPU.state = PPU_STATE_MODE3_COMMON;
-        PPU.state_ticks = CPU_TICK;
-        STAT.trigger_mode = PPU_MODE_HBLANK;
-        check_stat(e);
-        break;
-
-      case PPU_STATE_MODE3:
-        STAT.trigger_mode = PPU_MODE_HBLANK;
-        /* fallthrough */
-
-      case PPU_STATE_MODE3_COMMON:
-        ppu_mode3_synchronize(e);
-        PPU.state = PPU_STATE_HBLANK;
-        PPU.state_ticks = PPU_LINE_TICKS + PPU.line_start_ticks - TICKS;
-        STAT.mode = PPU_MODE_HBLANK;
-        check_stat(e);
-        break;
-
-      case PPU_STATE_COUNT:
-        assert(0);
-        break;
+      PPU.sync_ticks = ticks;
+      calculate_next_ppu_intr(e);
     }
   }
+  PPU.sync_ticks = aligned_ticks;
+}
+
+static void calculate_next_ppu_intr(Emulator* e) {
+  if (LCDC.display) {
+    /* TODO: Looser bounds on sync points. This syncs at every state
+     * transition, even though we often won't need to sync that often. */
+    PPU.next_intr_ticks = PPU.sync_ticks + PPU.state_ticks;
+  } else {
+    PPU.next_intr_ticks = INVALID_TICKS;
+  }
+  calculate_next_intr(e);
 }
 
 static void update_sweep(Emulator* e) {
@@ -3422,7 +3471,8 @@ static void calculate_next_serial_intr(Emulator* e) {
   assert(SERIAL.tick_count == 0);
   assert(SERIAL.transferred_bits == 0);
   SERIAL.next_intr_ticks =
-      TICKS + SERIAL_TICKS * (CPU_SPEED.speed == SPEED_NORMAL ? 8 : 4);
+      SERIAL.sync_ticks +
+      SERIAL_TICKS * (CPU_SPEED.speed == SPEED_NORMAL ? 8 : 4);
   calculate_next_intr(e);
 }
 
@@ -3432,36 +3482,32 @@ static void serial_synchronize(Emulator* e) {
     return;
   }
 
-  SERIAL.sync_ticks = TICKS;
-
-  if (LIKELY(!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL)) {
-    return;
-  }
-
-  Ticks cpu_tick = e->state.cpu_tick;
-  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
-    SERIAL.tick_count += cpu_tick;
-    if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
-      /* Since we're never connected to another device, always shift in 0xff. */
-      SERIAL.sb = (SERIAL.sb << 1) | 1;
-      SERIAL.transferred_bits++;
-      if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
-        SERIAL.transferring = 0;
-        INTR.new_if |= IF_SERIAL;
-        calculate_next_serial_intr(e);
+  if (UNLIKELY(SERIAL.transferring && SERIAL.clock == SERIAL_CLOCK_INTERNAL)) {
+    Ticks cpu_tick = e->state.cpu_tick;
+    for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
+      SERIAL.tick_count += cpu_tick;
+      if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
+        /* Since we're never connected to another device, always shift in
+         * 0xff. */
+        SERIAL.sb = (SERIAL.sb << 1) | 1;
+        SERIAL.transferred_bits++;
+        if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
+          SERIAL.transferring = 0;
+          INTR.new_if |= IF_SERIAL;
+          SERIAL.sync_ticks = TICKS - delta_ticks;
+          calculate_next_serial_intr(e);
+        }
+      } else if (UNLIKELY(SERIAL.tick_count == 0 &&
+                          SERIAL.transferred_bits == 0)) {
+        INTR.if_ |= (INTR.new_if & IF_SERIAL);
       }
-    } else if (UNLIKELY(SERIAL.tick_count == 0 &&
-                        SERIAL.transferred_bits == 0)) {
-      INTR.if_ |= (INTR.new_if & IF_SERIAL);
     }
   }
+  SERIAL.sync_ticks = TICKS;
 }
 
 static void tick(Emulator* e) {
   INTR.if_ = INTR.new_if;
-  if ((TICKS & CPU_2X_TICK) == 0) {
-    ppu_tick(e);
-  }
   TICKS += e->state.cpu_tick;
 }
 
@@ -3774,6 +3820,9 @@ static void execute_instruction(Emulator* e) {
     if (TICKS >= SERIAL.next_intr_ticks) {
       serial_synchronize(e);
     }
+    if (TICKS >= PPU.next_intr_ticks) {
+      ppu_synchronize(e);
+    }
   }
 
   Bool should_dispatch =
@@ -3784,12 +3833,12 @@ static void execute_instruction(Emulator* e) {
     if (CPU_SPEED.switching) {
       dma_synchronize(e);
       serial_synchronize(e);
+      ppu_synchronize(e);
       timer_synchronize(e);
       CPU_SPEED.switching = FALSE;
       CPU_SPEED.speed ^= 1;
       INTR.stop = FALSE;
       if (CPU_SPEED.speed == SPEED_NORMAL) {
-        TICKS = ALIGN_UP(TICKS, CPU_TICK);
         e->state.cpu_tick = CPU_TICK;
         HOOK(speed_switch_i, 1);
       } else {
@@ -4188,8 +4237,8 @@ Result init_emulator(Emulator* e) {
     }
   }
 
-  APU.sync_ticks = TICKS = 0;
   e->state.cpu_tick = CPU_TICK;
+  calculate_next_ppu_intr(e);
   return OK;
   ON_ERROR_RETURN;
 }
