@@ -576,7 +576,7 @@ static inline Bool hit_breakpoint(Emulator* e) {
 }
 
 Bool HOOK_emulator_step(Emulator* e, const char* func_name) {
-  if (emulator_get_trace() && !e->state.interrupt.halt) {
+  if (emulator_get_trace() && INTR.state < CPU_STATE_HALT) {
     printf("A:%02X F:%c%c%c%c BC:%04X DE:%04x HL:%04x SP:%04x PC:%04x", REG.A,
            REG.F.Z ? 'Z' : '-', REG.F.N ? 'N' : '-', REG.F.H ? 'H' : '-',
            REG.F.C ? 'C' : '-', REG.BC, REG.DE, REG.HL, REG.SP, REG.PC);

@@ -409,16 +409,21 @@ typedef struct {
   u8 last_p10_p13;
 } Joypad;
 
+typedef enum {
+  CPU_STATE_NORMAL = 0,
+  CPU_STATE_STOP = 1,
+  CPU_STATE_ENABLE_IME = 2,
+  CPU_STATE_HALT_BUG = 3,
+  CPU_STATE_HALT = 4,
+  CPU_STATE_HALT_DI = 5,
+} CpuState;
+
 typedef struct {
   Bool ime;      /* Interrupt Master Enable */
   u8 ie;         /* Interrupt Enable */
   u8 if_;        /* Interrupt Request, delayed by 1 tick for some IRQs. */
   u8 new_if;     /* The new value of IF, updated in 1 tick. */
-  Bool enable;   /* Set after EI instruction. This delays updating IME. */
-  Bool halt;     /* Halted, waiting for an interrupt. */
-  Bool halt_di;  /* Halted w/ disabled interrupts. */
-  Bool halt_bug; /* Halt bug occurred. */
-  Bool stop;     /* Stopped, waiting for an interrupt. */
+  CpuState state;
 } Interrupt;
 
 typedef struct {
@@ -2168,7 +2173,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       serial_synchronize(e);
       ppu_synchronize(e);
       timer_synchronize(e);
-      INTR.new_if = INTR.if_ = value;
+      INTR.new_if = INTR.if_ = value & IF_ALL;
       break;
     case IO_LCDC_ADDR: {
       ppu_synchronize(e);
@@ -3642,16 +3647,15 @@ static u8 s_opcode_bytes[] = {
 #define DEC_R(R) BASIC_OP_R(R, DEC); DEC_FLAGS
 #define DEC_RR(RR) REG.RR--; TICK
 #define DEC_MR(MR) BASIC_OP_MR(MR, DEC); DEC_FLAGS
-#define DI INTR.ime = INTR.enable = FALSE;
-#define EI INTR.enable = TRUE;
+#define DI INTR.state = CPU_STATE_NORMAL; INTR.ime = FALSE;
+#define EI INTR.state = CPU_STATE_ENABLE_IME;
 #define HALT                                   \
   if (INTR.ime) {                              \
-    INTR.halt = TRUE;                          \
+    INTR.state = CPU_STATE_HALT;               \
   } else if (INTR.ie & INTR.new_if & IF_ALL) { \
-    INTR.halt_bug = TRUE;                      \
+    INTR.state = CPU_STATE_HALT_BUG;           \
   } else {                                     \
-    INTR.halt = TRUE;                          \
-    INTR.halt_di = TRUE;                       \
+    INTR.state = CPU_STATE_HALT_DI;            \
   }
 #define INC u++
 #define INC_FLAGS FZ_EQ0(u); FN = 0; FH = MASK8(u) == 0
@@ -3692,7 +3696,7 @@ static u8 s_opcode_bytes[] = {
 #define RES_MR(BIT, MR) BASIC_OP_MR(MR, RES(BIT))
 #define RET new_pc = READ16(RSP); RSP += 2; TICK
 #define RET_F(COND) TICK; if (COND) { RET; }
-#define RETI INTR.enable = FALSE; INTR.ime = TRUE; RET
+#define RETI INTR.state = CPU_STATE_NORMAL; INTR.ime = TRUE; RET
 #define RL c = (u >> 7) & 1; u = (u << 1) | FC; FC = c
 #define RLA BASIC_OP_R(A, RL); FZ = FN = FH = 0
 #define RL_R(R) BASIC_OP_R(R, RL); SHIFT_FLAGS
@@ -3722,7 +3726,7 @@ static u8 s_opcode_bytes[] = {
 #define SRL FC = u & 1; u >>= 1
 #define SRL_R(R) BASIC_OP_R(R, SRL); SHIFT_FLAGS
 #define SRL_MR(MR) BASIC_OP_MR(MR, SRL); SHIFT_FLAGS
-#define STOP INTR.stop = TRUE;
+#define STOP INTR.state = CPU_STATE_STOP;
 #define FC_SUB(X, Y) FC = ((int)(X) - (int)(Y) < 0)
 #define FH_SUB(X, Y) FH = ((int)MASK8(X) - (int)MASK8(Y) < 0)
 #define FCH_SUB(X, Y) FC_SUB(X, Y); FH_SUB(X, Y)
@@ -3747,19 +3751,20 @@ static u8 s_opcode_bytes[] = {
 #define XOR_N RA ^= READ_N; XOR_FLAGS
 
 static void dispatch_interrupt(Emulator* e) {
-  if (!(INTR.ime || INTR.halt)) {
+  Bool was_halt = INTR.state >= CPU_STATE_HALT;
+  if (!(INTR.ime || was_halt)) {
     return;
   }
 
-  Bool was_halt = INTR.halt;
-  INTR.halt = INTR.stop = INTR.ime = FALSE;
+  INTR.ime = FALSE;
+  INTR.state = CPU_STATE_NORMAL;
 
   /* Write MSB of PC. */
   RSP--; WRITE8(RSP, REG.PC >> 8);
 
   /* Now check which interrupt to raise, after having written the MSB of PC.
    * This behavior is needed to pass the ie_push mooneye-gb test. */
-  u8 interrupt = INTR.new_if & INTR.ie & IF_ALL;
+  u8 interrupt = INTR.new_if & INTR.ie;
 
   Bool delay = FALSE;
   u8 mask = 0;
@@ -3807,7 +3812,7 @@ static void dispatch_interrupt(Emulator* e) {
 }
 
 static void execute_instruction(Emulator* e) {
-  u8 opcode;
+  u8 opcode = 0;
   s8 s;
   u8 u, c;
   u16 u16;
@@ -3825,59 +3830,82 @@ static void execute_instruction(Emulator* e) {
     }
   }
 
-  Bool should_dispatch =
-      (INTR.ime || INTR.halt) && ((INTR.new_if & INTR.ie & IF_ALL) != 0);
+  Bool should_dispatch = FALSE;
 
-  if (UNLIKELY(INTR.stop && !should_dispatch)) {
-    // TODO(binji): proper timing of speed switching.
-    if (CPU_SPEED.switching) {
-      dma_synchronize(e);
-      serial_synchronize(e);
-      ppu_synchronize(e);
-      timer_synchronize(e);
-      CPU_SPEED.switching = FALSE;
-      CPU_SPEED.speed ^= 1;
-      INTR.stop = FALSE;
-      if (CPU_SPEED.speed == SPEED_NORMAL) {
-        e->state.cpu_tick = CPU_TICK;
-        HOOK(speed_switch_i, 1);
-      } else {
-        e->state.cpu_tick = CPU_2X_TICK;
-        HOOK(speed_switch_i, 2);
-      }
-    } else {
-      TICKS += CPU_TICK;
-      return;
-    }
-  }
-
-  if (UNLIKELY(INTR.enable)) {
-    INTR.enable = FALSE;
-    INTR.ime = TRUE;
-  }
-
-  if (UNLIKELY(INTR.halt_bug)) {
-    /* When interrupts are disabled during a HALT, the following byte will be
-     * duplicated when decoding. */
-    opcode = read_u8(e, REG.PC);
-    REG.PC--;
-    INTR.halt_bug = FALSE;
+  if (LIKELY(INTR.state == CPU_STATE_NORMAL)) {
+    should_dispatch = INTR.ime && (INTR.new_if & INTR.ie) != 0;
+    opcode = read_u8_tick(e, REG.PC);
   } else {
-    tick(e);
-    opcode = read_u8(e, REG.PC);
+    switch (INTR.state) {
+      case CPU_STATE_NORMAL:
+        assert(0);
+
+      case CPU_STATE_STOP:
+        should_dispatch = INTR.ime && (INTR.new_if & INTR.ie) != 0;
+        if (UNLIKELY(!should_dispatch)) {
+          // TODO(binji): proper timing of speed switching.
+          if (CPU_SPEED.switching) {
+            dma_synchronize(e);
+            serial_synchronize(e);
+            ppu_synchronize(e);
+            timer_synchronize(e);
+            CPU_SPEED.switching = FALSE;
+            CPU_SPEED.speed ^= 1;
+            INTR.state = CPU_STATE_NORMAL;
+            if (CPU_SPEED.speed == SPEED_NORMAL) {
+              e->state.cpu_tick = CPU_TICK;
+              HOOK(speed_switch_i, 1);
+            } else {
+              e->state.cpu_tick = CPU_2X_TICK;
+              HOOK(speed_switch_i, 2);
+            }
+          } else {
+            TICKS += CPU_TICK;
+            return;
+          }
+        }
+        opcode = read_u8_tick(e, REG.PC);
+        break;
+
+      case CPU_STATE_ENABLE_IME:
+        should_dispatch = INTR.ime && (INTR.new_if & INTR.ie) != 0;
+        INTR.ime = TRUE;
+        INTR.state = CPU_STATE_NORMAL;
+        opcode = read_u8_tick(e, REG.PC);
+        break;
+
+      case CPU_STATE_HALT_BUG:
+        /* When interrupts are disabled during a HALT, the following byte will
+         * be duplicated when decoding. */
+        should_dispatch = INTR.ime && (INTR.new_if & INTR.ie) != 0;
+        opcode = read_u8(e, REG.PC);
+        REG.PC--;
+        INTR.state = CPU_STATE_NORMAL;
+        break;
+
+      case CPU_STATE_HALT:
+        should_dispatch = (INTR.new_if & INTR.ie) != 0;
+        tick(e);
+        if (UNLIKELY(should_dispatch)) {
+          dispatch_interrupt(e);
+        }
+        return;
+
+      case CPU_STATE_HALT_DI:
+        should_dispatch = (INTR.new_if & INTR.ie) != 0;
+        opcode = read_u8_tick(e, REG.PC);
+        if (UNLIKELY(should_dispatch)) {
+          HOOK0(interrupt_during_halt_di_v);
+          INTR.state = CPU_STATE_NORMAL;
+          should_dispatch = FALSE;
+          break;
+        }
+        return;
+    }
   }
 
   if (UNLIKELY(should_dispatch)) {
-    if (UNLIKELY(INTR.halt_di)) {
-      HOOK0(interrupt_during_halt_di_v);
-      INTR.halt = INTR.halt_di = FALSE;
-    } else {
-      dispatch_interrupt(e);
-      return;
-    }
-  }
-
-  if (UNLIKELY(INTR.halt)) {
+    dispatch_interrupt(e);
     return;
   }
 
