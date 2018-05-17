@@ -1885,7 +1885,15 @@ static u8 read_u8(Emulator* e, Address addr) {
     HOOK(read_during_dma_a, addr);
     return INVALID_READ_BYTE;
   }
-  return read_u8_pair(e, map_address(addr), FALSE);
+  if (LIKELY(addr < 0x8000)) {
+    u32 bank = addr >> ROM_BANK_SHIFT;
+    u32 rom_addr = MMAP_STATE.rom_base[bank] | (addr & ADDR_MASK_16K);
+    u8 value = e->cart_info->data[rom_addr];
+    HOOK(read_rom_ib, rom_addr, value);
+    return value;
+  } else {
+    return read_u8_pair(e, map_address(addr), FALSE);
+  }
 }
 
 static void write_vram(Emulator* e, MaskedAddress addr, u8 value) {
