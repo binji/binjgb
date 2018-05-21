@@ -2889,8 +2889,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
 
   /* Cache map_addr info. */
   u16 map_addr = 0;
-  u8 attr = 0;
-  PaletteRGBA* pal = NULL;
+  RGBA* pal = NULL;
   u8 lo = 0, hi = 0;
 
   int i;
@@ -2922,29 +2921,31 @@ static void ppu_mode3_synchronize(Emulator* e) {
             tile_index = 256 + (s8)tile_index;
           }
           if (IS_CGB) {
-            attr = VRAM.data[0x2000 + map_addr];
-            pal = &PPU.bgcp.palettes[attr & 0x7];
+            u8 attr = VRAM.data[0x2000 + map_addr];
+            pal = PPU.bgcp.palettes[attr & 0x7].color;
             if (attr & 0x08) { tile_index += 0x200; }
             if (attr & 0x40) { my7 = 7 - my7; }
             if (attr & 0x80) { priority = TRUE; }
+            u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
+            lo = VRAM.data[tile_addr];
+            hi = VRAM.data[tile_addr + 1];
+            if (attr & 0x20) {
+              lo = reverse_bits_u8(lo);
+              hi = reverse_bits_u8(hi);
+            }
           } else {
-            attr = 0;
-            pal = &PPU.bgp.rgba;
+            pal = PPU.bgp.rgba.color;
             priority = FALSE;
-          }
-          u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
-          lo = VRAM.data[tile_addr];
-          hi = VRAM.data[tile_addr + 1];
-          if (attr & 0x20) {
-            lo = reverse_bits_u8(lo);
-            hi = reverse_bits_u8(hi);
+            u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
+            lo = VRAM.data[tile_addr];
+            hi = VRAM.data[tile_addr + 1];
           }
           u8 shift = mx & 7;
           lo <<= shift;
           hi <<= shift;
         }
-        u8 palette_index = ((hi >> 6) & 2) | ((lo >> 7) & 1);
-        pixel[i] = pal->color[palette_index];
+        u8 palette_index = ((hi >> 6) & 2) | (lo >> 7);
+        pixel[i] = pal[palette_index];
         bg_is_zero[i] = palette_index == 0;
         bg_priority[i] = priority;
       }
