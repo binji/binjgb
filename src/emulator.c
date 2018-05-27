@@ -1000,6 +1000,7 @@ static RGBA s_color_to_rgba[] = {[COLOR_WHITE] = RGBA_WHITE,
 static Result init_memory_map(Emulator*);
 static void apu_synchronize(Emulator*);
 static void dma_synchronize(Emulator*);
+static void intr_synchronize(Emulator*);
 static void ppu_synchronize(Emulator*);
 static void ppu_mode3_synchronize(Emulator*);
 static void serial_synchronize(Emulator*);
@@ -1642,9 +1643,7 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
       return TAC_UNUSED | PACK(TIMER.on, TAC_TIMER_ON) |
              PACK(TIMER.clock_select, TAC_CLOCK_SELECT);
     case IO_IF_ADDR:
-      ppu_synchronize(e);
-      serial_synchronize(e);
-      timer_synchronize(e);
+      intr_synchronize(e);
       return IF_UNUSED | INTR.if_;
     case IO_LCDC_ADDR:
       return PACK(LCDC.display, LCDC_DISPLAY) |
@@ -2170,9 +2169,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       break;
     }
     case IO_IF_ADDR:
-      serial_synchronize(e);
-      ppu_synchronize(e);
-      timer_synchronize(e);
+      intr_synchronize(e);
       INTR.new_if = INTR.if_ = value & IF_ALL;
       break;
     case IO_LCDC_ADDR: {
@@ -3156,7 +3153,7 @@ static void ppu_synchronize(Emulator* e) {
           break;
       }
 
-      PPU.sync_ticks = ticks;
+      PPU.sync_ticks = ticks + CPU_TICK;
       calculate_next_ppu_intr(e);
     }
   }
@@ -3389,6 +3386,13 @@ static void apu_update(Emulator* e, u32 total_ticks) {
     apu_update_channels(e, ticks / APU_TICKS);
     total_ticks -= ticks;
   }
+}
+
+static void intr_synchronize(Emulator* e) {
+  dma_synchronize(e);
+  serial_synchronize(e);
+  ppu_synchronize(e);
+  timer_synchronize(e);
 }
 
 static void apu_synchronize(Emulator* e) {
@@ -3845,10 +3849,7 @@ static void execute_instruction(Emulator* e) {
         if (UNLIKELY(!should_dispatch)) {
           // TODO(binji): proper timing of speed switching.
           if (CPU_SPEED.switching) {
-            dma_synchronize(e);
-            serial_synchronize(e);
-            ppu_synchronize(e);
-            timer_synchronize(e);
+            intr_synchronize(e);
             CPU_SPEED.switching = FALSE;
             CPU_SPEED.speed ^= 1;
             INTR.state = CPU_STATE_NORMAL;
@@ -3887,6 +3888,7 @@ static void execute_instruction(Emulator* e) {
         should_dispatch = (INTR.new_if & INTR.ie) != 0;
         tick(e);
         if (UNLIKELY(should_dispatch)) {
+          intr_synchronize(e);
           dispatch_interrupt(e);
         }
         return;
@@ -3905,6 +3907,7 @@ static void execute_instruction(Emulator* e) {
   }
 
   if (UNLIKELY(should_dispatch)) {
+    intr_synchronize(e);
     dispatch_interrupt(e);
     return;
   }
