@@ -16,6 +16,7 @@
 static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
 static bool s_paused_at_start;
+static u32 s_random_seed = 0xcabba6e5;
 
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
@@ -24,7 +25,8 @@ static void usage(int argc, char** argv) {
       "  -t,--trace         trace each instruction\n"
       "  -f,--font-scale=F  set the global font scale factor to F\n"
       "  -l,--log S=N       set log level for system S to N\n\n"
-      "  -p,--pause         pause at start\n",
+      "  -p,--pause         pause at start\n"
+      "  -s,--seed=SEED     random seed used for initializing RAM\n",
       argv[0]);
 
   emulator_print_log_systems();
@@ -37,6 +39,7 @@ void parse_arguments(int argc, char** argv) {
     {'f', "font-scale", 1},
     {'l', "log", 1},
     {'p', "pause", 0},
+    {'s', "seed", 1},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -97,6 +100,10 @@ void parse_arguments(int argc, char** argv) {
             s_paused_at_start = true;
             break;
 
+          case 's':
+            s_random_seed = atoi(result.value);
+            break;
+
           default:
             assert(0);
             break;
@@ -136,7 +143,7 @@ int main(int argc, char** argv) {
 
   Debugger debugger;
   if (!debugger.Init(s_rom_filename, audio_frequency, audio_frames,
-                     s_font_scale, s_paused_at_start)) {
+                     s_font_scale, s_paused_at_start, s_random_seed)) {
     return 1;
   }
   debugger.Run();

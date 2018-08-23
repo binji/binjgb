@@ -64,6 +64,7 @@ static Bool s_paused;
 static f32 s_audio_volume = 0.5f;
 static Bool s_rewinding;
 static Ticks s_rewind_start;
+static u32 s_random_seed = 0xcabba6e5;
 
 static Overlay s_overlay;
 static StatusText s_status_text;
@@ -296,7 +297,8 @@ static void usage(int argc, char** argv) {
       "usage: %s [options] <in.gb>\n"
       "  -h,--help               help\n"
       "  -j,--read-joypad FILE   read joypad input from FILE\n"
-      "  -J,--write-joypad FILE  write joypad input to FILE\n",
+      "  -J,--write-joypad FILE  write joypad input to FILE\n"
+      "  -s,--seed SEED          random seed used for initializing RAM\n",
       argv[0]);
 }
 
@@ -305,6 +307,7 @@ void parse_arguments(int argc, char** argv) {
     {'h', "help", 0},
     {'j', "read-joypad", 1},
     {'J', "write-joypad", 1},
+    {'s', "seed", 1},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -340,6 +343,10 @@ void parse_arguments(int argc, char** argv) {
 
           case 'J':
             s_write_joypad_filename = result.value;
+            break;
+
+          case 's':
+            s_random_seed = atoi(result.value);
             break;
 
           default:
@@ -385,6 +392,7 @@ int main(int argc, char** argv) {
   emulator_init.rom = rom;
   emulator_init.audio_frequency = AUDIO_FREQUENCY;
   emulator_init.audio_frames = AUDIO_FRAMES;
+  emulator_init.random_seed = s_random_seed;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 

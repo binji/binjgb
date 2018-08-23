@@ -636,6 +636,7 @@ typedef struct {
 
 typedef struct {
   u32 header; /* Set to SAVE_STATE_HEADER; makes it easier to save state. */
+  u32 random_seed;
   u8 cart_info_index;
   MemoryMapState memory_map_state;
   Registers reg;
@@ -4221,7 +4222,34 @@ Result init_audio_buffer(Emulator* e, u32 frequency, u32 frames) {
   ON_ERROR_RETURN;
 }
 
-Result init_emulator(Emulator* e) {
+static u32 random_u32(u32* state) {
+  /* xorshift32: https://en.wikipedia.org/wiki/Xorshift */
+  u32 x = *state;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  *state = x;
+  return x;
+}
+
+static void randomize_buffer(u32* seed, u8* buffer, u32 size) {
+  while (size >= sizeof(u32)) {
+    u32 x = random_u32(seed);
+    memcpy(buffer, &x, sizeof(x));
+    buffer += sizeof(u32);
+    size -= sizeof(u32);
+  }
+  if (size > 0) {
+    u32 x = random_u32(seed);
+    switch (size) {
+      case 3: *buffer++ = x & 0xff; x >>= 8; break;
+      case 2: *buffer++ = x & 0xff; x >>= 8; break;
+      case 1: *buffer++ = x & 0xff; x >>= 8; break;
+    }
+  }
+}
+
+Result init_emulator(Emulator* e, u32 random_seed) {
   static u8 s_initial_wave_ram[WAVE_RAM_SIZE] = {
       0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
       0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
@@ -4279,6 +4307,13 @@ Result init_emulator(Emulator* e) {
       palette->data[i * 2 + 1] = 0x7f;
     }
   }
+
+  /* Randomize RAM */
+  e->state.random_seed = random_seed;
+  randomize_buffer(&random_seed, e->state.vram.data, VIDEO_RAM_SIZE);
+  randomize_buffer(&random_seed, e->state.ext_ram.data, EXT_RAM_MAX_SIZE);
+  randomize_buffer(&random_seed, e->state.wram.data, WORK_RAM_SIZE);
+  randomize_buffer(&random_seed, e->state.hram, HIGH_RAM_SIZE);
 
   e->state.cpu_tick = CPU_TICK;
   calculate_next_ppu_intr(e);
@@ -4457,7 +4492,7 @@ error:
 Emulator* emulator_new(const EmulatorInit* init) {
   Emulator* e = xcalloc(1, sizeof(Emulator));
   CHECK(SUCCESS(set_rom_file_data(e, &init->rom)));
-  CHECK(SUCCESS(init_emulator(e)));
+  CHECK(SUCCESS(init_emulator(e, init->random_seed)));
   CHECK(
       SUCCESS(init_audio_buffer(e, init->audio_frequency, init->audio_frames)));
   return e;

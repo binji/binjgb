@@ -111,7 +111,7 @@ Debugger::~Debugger() {
 }
 
 bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
-                    int font_scale, bool paused_at_start) {
+                    int font_scale, bool paused_at_start, u32 random_seed) {
   FileData rom;
   if (!SUCCESS(file_read(filename, &rom))) {
     return false;
@@ -123,6 +123,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   emulator_init.rom = rom;
   emulator_init.audio_frequency = audio_frequency;
   emulator_init.audio_frames = audio_frames;
+  emulator_init.random_seed = random_seed;
   e = emulator_new(&emulator_init);
   if (e == nullptr) {
     return false;

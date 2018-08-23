@@ -32,6 +32,7 @@ static u32 s_print_ops_limit = MAX_PRINT_OPS_LIMIT;
 static Bool s_profile;
 static u32 s_profile_limit = 30;
 static const char* s_rom_filename;
+static u32 s_random_seed = 0xcabba6e5;
 
 
 Result write_frame_ppm(struct Emulator* e, const char* filename) {
@@ -68,7 +69,8 @@ void usage(int argc, char** argv) {
       "     --print-ops       print execution count of each opcode\n"
       "     --print-ops-limit max opcodes to print\n"
       "     --profile         print execution count of each opcode\n"
-      "     --profile-limit   max opcodes to print\n",
+      "     --profile-limit   max opcodes to print\n"
+      "  -s,--seed SEED       random seed used for initializing RAM\n",
       argv[0],
       DEFAULT_FRAMES);
 
@@ -99,6 +101,7 @@ void parse_options(int argc, char**argv) {
     {0, "print-ops", 0},
     {0, "profile-limit", 1},
     {0, "profile", 0},
+    {'s', "seed", 1},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -165,6 +168,10 @@ void parse_options(int argc, char**argv) {
 
           case 'a':
             s_animate = TRUE;
+            break;
+
+          case 's':
+            s_random_seed = atoi(result.value);
             break;
 
           default:
@@ -368,6 +375,7 @@ int main(int argc, char** argv) {
   emulator_init.rom = rom;
   emulator_init.audio_frequency = AUDIO_FREQUENCY;
   emulator_init.audio_frames = AUDIO_FRAMES;
+  emulator_init.random_seed = s_random_seed;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 

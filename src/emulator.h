@@ -126,6 +126,7 @@ typedef struct EmulatorInit {
   FileData rom;
   int audio_frequency;
   int audio_frames;
+  u32 random_seed;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {

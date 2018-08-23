@@ -33,6 +33,7 @@ struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;
   s_init.audio_frames = audio_frames;
+  s_init.random_seed = 0xcabba6e5;
 
   e = emulator_new(&s_init);
 

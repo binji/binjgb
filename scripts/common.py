@@ -45,7 +45,8 @@ def Run(exe, *args, **kwargs):
 
 
 def RunTester(rom, frames=None, out_ppm=None, animate=False,
-              controller_input=None, exe=None, timeout_sec=None):
+              controller_input=None, exe=None, timeout_sec=None,
+              seed=0):
   exe = exe or TESTER
   cmd = []
   if frames:
@@ -58,6 +59,7 @@ def RunTester(rom, frames=None, out_ppm=None, animate=False,
     cmd.append('-a')
   if timeout_sec:
     cmd.extend(['-t', str(timeout_sec)])
+  cmd.extend(['-s', str(seed)])
   cmd.append(rom)
   Run(exe, *cmd)
 
