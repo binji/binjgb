@@ -26,9 +26,7 @@ else ()
   if (CMAKE_COMPILER_IS_GNUCXX AND
       CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
     # TODO(binji): These warnings should only be disabled for imgui.
-    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}
-      "-Wno-class-memaccess -Wno-stringop-truncation"
-      )
+    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -Wno-stringop-truncation)
   endif ()
 endif ()
 
@@ -68,6 +66,7 @@ if (NOT EMSCRIPTEN)
     add_executable(binjgb-debugger
       third_party/imgui/imgui.cpp
       third_party/imgui/imgui_draw.cpp
+      third_party/imgui/imgui_widgets.cpp
       third_party/imgui_dock/imgui_dock.cpp
       src/memory.c
       src/common.c

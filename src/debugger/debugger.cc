@@ -117,6 +117,8 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     return false;
   }
 
+  ImGui::CreateContext();
+
   run_state = paused_at_start ? Paused : Running;
 
   ZERO_MEMORY(emulator_init);
