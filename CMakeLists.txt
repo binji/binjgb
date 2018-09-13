@@ -23,6 +23,13 @@ else ()
   if (WERROR)
     add_definitions(-Werror)
   endif ()
+  if (CMAKE_COMPILER_IS_GNUCXX AND
+      CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
+    # TODO(binji): These warnings should only be disabled for imgui.
+    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}
+      "-Wno-class-memaccess -Wno-stringop-truncation"
+      )
+  endif ()
 endif ()
 
 function (target_copy_to_bin name)

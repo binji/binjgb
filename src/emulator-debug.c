@@ -248,7 +248,7 @@ void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size) {
 #define REPLACE(old, new, len)                       \
   else if (strncmp(src, old, len) == 0) {            \
     *dst = 0; /* NULL-terminate so strncat works. */ \
-    strncat(dst, new, len);                          \
+    strncat(dst, new, fmt + sizeof(fmt) - dst - 1);  \
     dst += len;                                      \
     src += len;                                      \
   }
@@ -288,12 +288,12 @@ static int disassemble_instr(u8 data[3], char* buffer, size_t size) {
       if (!mnemonic) {
         mnemonic = "*INVALID*";
       }
-      strncpy(temp, mnemonic, sizeof(temp));
+      strncpy(temp, mnemonic, sizeof(temp) - 1);
       break;
     }
     case 2:
       if (opcode == 0xcb) {
-        strncpy(temp, s_cb_opcode_mnemonic[data[1]], sizeof(temp));
+        strncpy(temp, s_cb_opcode_mnemonic[data[1]], sizeof(temp) - 1);
       } else {
         snprintf(temp, sizeof(temp), s_opcode_mnemonic[opcode], data[1]);
       }
@@ -317,7 +317,7 @@ static int disassemble_instr(u8 data[3], char* buffer, size_t size) {
 }
 
 int emulator_disassemble(Emulator* e, Address addr, char* buffer, size_t size) {
-  char instr[100];
+  char instr[120];
   char hex[][3] = {"  ", "  ", "  "};
 
   u8 data[3] = {read_u8_raw(e, addr), read_u8_raw(e, addr + 1),
