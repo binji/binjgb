@@ -4310,7 +4310,6 @@ Result init_emulator(Emulator* e, u32 random_seed) {
 
   /* Randomize RAM */
   e->state.random_seed = random_seed;
-  randomize_buffer(&random_seed, e->state.vram.data, VIDEO_RAM_SIZE);
   randomize_buffer(&random_seed, e->state.ext_ram.data, EXT_RAM_MAX_SIZE);
   randomize_buffer(&random_seed, e->state.wram.data, WORK_RAM_SIZE);
   randomize_buffer(&random_seed, e->state.hram, HIGH_RAM_SIZE);
