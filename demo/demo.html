@@ -195,6 +195,11 @@
             @click="playFile(selectedFile)">
           play
         </button>
+        <button
+            v-bind:disabled="isFilesListEmpty"
+            @click="deleteFile(selectedFile)">
+          delete
+        </button>
         <img class="file-image"
             v-show="selectedFileHasImage"
             :src="selectedFileImageSrc"></img>
