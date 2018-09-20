@@ -28,6 +28,7 @@ intptr_t host_ui_get_frame_buffer_texture(struct HostUI*);
 void host_ui_set_palette(struct HostUI*, RGBA palette[4]);
 void host_ui_enable_palette(struct HostUI*, Bool enabled);
 void host_ui_render_screen_overlay(struct HostUI*, struct HostTexture*);
+Bool host_ui_capture_keyboard(struct HostUI*);
 
 #ifdef __cplusplus
 }

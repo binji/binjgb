@@ -160,3 +160,6 @@ void host_ui_render_screen_overlay(struct HostUI* ui, HostTexture* tex) {
   glDisable(GL_BLEND);
 }
 
+Bool host_ui_capture_keyboard(struct HostUI* ui) {
+  return FALSE;
+}

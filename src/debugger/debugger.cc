@@ -141,10 +141,14 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
     static_cast<Debugger*>(ctx->user_data)->OnAudioBufferFull();
   };
   host_init.hooks.key_down = [](HostHookContext* ctx, HostKeycode code) {
-    static_cast<Debugger*>(ctx->user_data)->OnKeyDown(code);
+    if (!ImGui::GetIO().WantCaptureKeyboard) {
+      static_cast<Debugger*>(ctx->user_data)->OnKeyDown(code);
+    }
   };
   host_init.hooks.key_up = [](HostHookContext* ctx, HostKeycode code) {
-    static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
+    if (!ImGui::GetIO().WantCaptureKeyboard) {
+      static_cast<Debugger*>(ctx->user_data)->OnKeyUp(code);
+    }
   };
   // TODO: make these configurable?
   host_init.rewind.frames_per_base_state = 45;

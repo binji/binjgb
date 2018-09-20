@@ -420,3 +420,7 @@ void host_ui_render_screen_overlay(struct HostUI* ui, HostTexture* tex) {
   // TODO(binji)
   assert(0);
 }
+
+Bool host_ui_capture_keyboard(struct HostUI* ui) {
+  return static_cast<Bool>(ImGui::GetIO().WantCaptureKeyboard);
+}

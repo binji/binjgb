@@ -238,15 +238,17 @@ void host_render_audio(Host* host) {
 
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* host = user_data;
-  const u8* state = SDL_GetKeyboardState(NULL);
-  joyp->up = state[SDL_SCANCODE_UP];
-  joyp->down = state[SDL_SCANCODE_DOWN];
-  joyp->left = state[SDL_SCANCODE_LEFT];
-  joyp->right = state[SDL_SCANCODE_RIGHT];
-  joyp->B = state[SDL_SCANCODE_Z];
-  joyp->A = state[SDL_SCANCODE_X];
-  joyp->start = state[SDL_SCANCODE_RETURN];
-  joyp->select = state[SDL_SCANCODE_TAB];
+  if (!host_ui_capture_keyboard(host->ui)) {
+    const u8* state = SDL_GetKeyboardState(NULL);
+    joyp->up = state[SDL_SCANCODE_UP];
+    joyp->down = state[SDL_SCANCODE_DOWN];
+    joyp->left = state[SDL_SCANCODE_LEFT];
+    joyp->right = state[SDL_SCANCODE_RIGHT];
+    joyp->B = state[SDL_SCANCODE_Z];
+    joyp->A = state[SDL_SCANCODE_X];
+    joyp->start = state[SDL_SCANCODE_RETURN];
+    joyp->select = state[SDL_SCANCODE_TAB];
+  }
 
   /* Prefer controller input, if any */
   if (host->controller) {
