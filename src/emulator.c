@@ -2893,10 +2893,10 @@ static void ppu_mode3_synchronize(Emulator* e) {
   RGBA* pal = NULL;
   u8 lo = 0, hi = 0;
 
+  Bool priority = FALSE;
   int i;
   for (; PPU.mode3_render_ticks < TICKS && x < SCREEN_WIDTH;
        PPU.mode3_render_ticks += CPU_TICK, pixel += 4, x += 4) {
-    Bool priority = FALSE;
     Bool bg_is_zero[4] = {TRUE, TRUE, TRUE, TRUE},
          bg_priority[4] = {FALSE, FALSE, FALSE, FALSE};
 
@@ -2926,7 +2926,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
             pal = PPU.bgcp.palettes[attr & 0x7].color;
             if (attr & 0x08) { tile_index += 0x200; }
             if (attr & 0x40) { my7 = 7 - my7; }
-            if (attr & 0x80) { priority = TRUE; }
+            priority = (attr & 0x80) != 0;
             u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
             lo = VRAM.data[tile_addr];
             hi = VRAM.data[tile_addr + 1];
