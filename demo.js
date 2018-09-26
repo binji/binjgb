@@ -158,6 +158,7 @@ var vm = new Vue({
       this.ticks = _emulator_get_ticks_f64(emulator.e);
     },
     togglePause: function() {
+      if (!this.loaded) return;
       this.paused = !this.paused;
     },
     rewindTo: function(event) {
@@ -185,6 +186,33 @@ var vm = new Vue({
         this.loadedFile = file;
         startEmulator(romBuffer, extRamBuffer);
       });
+    },
+    deleteFile: function(file) {
+      let index = this.files.list.findIndex(x => x.sha1 === file.sha1);
+      if (index >= 0) {
+        return dbPromise.then((db) => {
+          return new Promise((resolve, reject) => {
+            let transaction = db.transaction('games', 'readwrite');
+            transaction.onerror = (event) => reject(event.target.error);
+            let request =
+                transaction.objectStore('games').openCursor(file.sha1);
+            request.onsuccess = (event) => {
+              let cursor = event.target.result;
+              if (cursor) {
+                this.files.list.splice(index, 1);
+                cursor.delete();
+                if (this.loadedFile && this.loadedFile.sha1 === file.sha1) {
+                  this.loaded = false;
+                  this.loadedFile = null;
+                  this.paused = true;
+                  this.canvas.show = false;
+                  stopEmulator();
+                }
+              }
+            };
+          });
+        });
+      }
     },
     uploadClicked: function() {
       $('#upload').click();
@@ -327,12 +355,16 @@ var vm = new Vue({
 })();
 
 function startEmulator(romBuffer, extRamBuffer) {
-  if (emulator) {
-    emulator.cleanup();
-  }
-
+  stopEmulator();
   emulator = new Emulator(romBuffer, extRamBuffer);
   emulator.run();
+}
+
+function stopEmulator() {
+  if (emulator) {
+    emulator.cleanup();
+    emulator = null;
+  }
 }
 
 function copyInto(buffer, ptr) {
