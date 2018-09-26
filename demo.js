@@ -20,40 +20,24 @@ const EVENT_UNTIL_TICKS = 4;
 const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 
-var $ = document.querySelector.bind(document);
-var emulator = null;
-var dbPromise = null;
+const $ = document.querySelector.bind(document);
+let emulator = null;
 
-(function initIndexedDB() {
-  dbPromise = new Promise((resolve, reject) => {
-    var request = window.indexedDB.open('db', 1);
-    request.onerror = (event) => {
-      reject(event);
-    };
-    request.onsuccess = (event) => {
-      resolve(event.target.result);
-    };
-    request.onupgradeneeded = (event) => {
-      var db = event.target.result;
-      var objectStore = db.createObjectStore('games', {keyPath: 'sha1'});
-      objectStore.createIndex('sha1', 'sha1', {unique: true});
-      resolve(db);
-    };
-  });
-})();
+const dbPromise = idb.open('db', 1, upgradeDb => {
+  const objectStore = upgradeDb.createObjectStore('games', {keyPath : 'sha1'});
+  objectStore.createIndex('sha1', 'sha1', {unique : true});
+});
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
-    let reader = new FileReader();
-    reader.onerror = (event) => reject(event.error);
-    reader.onloadend = (event) => {
-      resolve(event.target.result);
-    };
+    const reader = new FileReader();
+    reader.onerror = event => reject(event.error);
+    reader.onloadend = event => resolve(event.target.result);
     reader.readAsArrayBuffer(file);
   });
 }
 
-var data = {
+let data = {
   fps: 60,
   ticks: 0,
   loaded: false,
@@ -75,7 +59,7 @@ var data = {
   }
 };
 
-var vm = new Vue({
+let vm = new Vue({
   el: '.main',
   data: data,
   created: function() {
@@ -101,19 +85,12 @@ var vm = new Vue({
       return (144 * this.canvas.scale) + 'px';
     },
     rewindTime: function() {
-      function zeroPadLeft(num, width) {
-        num = '' + (num | 0);
-        while (num.length < width) {
-          num = '0' + num;
-        }
-        return num;
-      }
-
-      var ticks = this.ticks;
-      var hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
-      var min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
-      var sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
-      var ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
+      const zeroPadLeft = (num, width) => ('' + (num | 0)).padStart(width, '0');
+      const ticks = this.ticks;
+      const hr = (ticks / (60 * 60 * CPU_TICKS_PER_SECOND)) | 0;
+      const min = zeroPadLeft((ticks / (60 * CPU_TICKS_PER_SECOND)) % 60, 2);
+      const sec = zeroPadLeft((ticks / CPU_TICKS_PER_SECOND) % 60, 2);
+      const ms = zeroPadLeft((ticks / (CPU_TICKS_PER_SECOND / 1000)) % 1000, 3);
       return `${hr}:${min}:${sec}.${ms}`;
     },
     pauseLabel: function() {
@@ -129,7 +106,7 @@ var vm = new Vue({
       return this.files.list[this.files.selected];
     },
     selectedFileHasImage: function() {
-      let file = this.selectedFile;
+      const file = this.selectedFile;
       return file && file.image;
     },
     selectedFileImageSrc: function() {
@@ -169,103 +146,65 @@ var vm = new Vue({
     selectFile: function(index) {
       this.files.selected = index;
     },
-    playFile: function(file) {
-      readFile(file.rom).then((romBuffer) => {
-        if (file.extRam) {
-          return readFile(file.extRam).then((extRamBuffer) => {
-            return {romBuffer, extRamBuffer};
-          });
-        } else {
-          return {romBuffer, extRamBuffer: null};
-        }
-      }).then(({romBuffer, extRamBuffer}) => {
-        this.paused = false;
-        this.loaded = true;
-        this.canvas.show = true;
-        this.files.show = false;
-        this.loadedFile = file;
-        startEmulator(romBuffer, extRamBuffer);
-      });
+    playFile: async function(file) {
+      const [romBuffer, extRamBuffer] = await Promise.all([
+        readFile(file.rom),
+        file.extRam ? readFile(file.extRam) : Promise.resolve(null)
+      ]);
+      this.paused = false;
+      this.loaded = true;
+      this.canvas.show = true;
+      this.files.show = false;
+      this.loadedFile = file;
+      startEmulator(romBuffer, extRamBuffer);
     },
-    deleteFile: function(file) {
-      let index = this.files.list.findIndex(x => x.sha1 === file.sha1);
-      if (index >= 0) {
-        return dbPromise.then((db) => {
-          return new Promise((resolve, reject) => {
-            let transaction = db.transaction('games', 'readwrite');
-            transaction.onerror = (event) => reject(event.target.error);
-            let request =
-                transaction.objectStore('games').openCursor(file.sha1);
-            request.onsuccess = (event) => {
-              let cursor = event.target.result;
-              if (cursor) {
-                this.files.list.splice(index, 1);
-                cursor.delete();
-                if (this.loadedFile && this.loadedFile.sha1 === file.sha1) {
-                  this.loaded = false;
-                  this.loadedFile = null;
-                  this.paused = true;
-                  this.canvas.show = false;
-                  stopEmulator();
-                }
-              }
-            };
-          });
-        });
+    deleteFile: async function(file) {
+      const db = await dbPromise;
+      const tx = db.transaction('games', 'readwrite');
+      const cursor = await tx.objectStore('games').openCursor(file.sha1);
+      if (!cursor) return;
+      cursor.delete();
+      await tx.complete;
+      const index = this.files.list.findIndex(x => x.sha1 === file.sha1);
+      if (index < 0) return;
+      this.files.list.splice(index, 1);
+      if (this.loadedFile && this.loadedFile.sha1 === file.sha1) {
+        this.loaded = false;
+        this.loadedFile = null;
+        this.paused = true;
+        this.canvas.show = false;
+        stopEmulator();
       }
     },
     uploadClicked: function() {
       $('#upload').click();
     },
-    uploadFile: function(event) {
-      let file = event.target.files[0];
-      let name = file.name;
-      return readFile(file).then((buffer) => {
-        const sha1 = SHA1Digest(buffer);
-        let rom = new Blob([buffer]);
-        let data = {sha1, name, rom, modified: new Date()};
-        return dbPromise.then((db) => {
-          return new Promise((resolve, reject) => {
-            let transaction = db.transaction('games', 'readwrite');
-            transaction.onerror = (event) => {
-              if (event.target.error.name === 'ConstraintError') {
-                console.log(`ROM with sha1 '${sha1}' already in database.`);
-                resolve(buffer);
-              } else {
-                reject(event.target.error);
-              }
-            };
-            transaction.oncomplete = (event) => {
-              this.files.list.push(data);
-              resolve(buffer);
-            };
-            transaction.objectStore('games').add(data);
-          });
-        });
-      });
+    uploadFile: async function(event) {
+      const file = event.target.files[0];
+      const [db, buffer] = await Promise.all([dbPromise, readFile(file)]);
+      const sha1 = SHA1Digest(buffer);
+      const name = file.name;
+      const rom = new Blob([buffer]);
+      const data = {sha1, name, rom, modified: new Date};
+      const tx = db.transaction('games', 'readwrite');
+      tx.objectStore('games').add(data)
+      await tx.complete;
+      this.files.list.push(data);
     },
-    updateExtRam: function() {
+    updateExtRam: async function() {
       if (!emulator) return;
-      let extRamBlob = new Blob([emulator.getExtRam()]);
-      let imageDataURL = $('canvas').toDataURL();
-      return dbPromise.then((db) => {
-        return new Promise((resolve, reject) => {
-          let transaction = db.transaction('games', 'readwrite');
-          transaction.onerror = (event) => reject(event.target.error);
-          let request = transaction.objectStore('games').openCursor(
-              this.loadedFile.sha1);
-          request.onsuccess = (event) => {
-            let cursor = event.target.result;
-            if (cursor) {
-              Object.assign(this.loadedFile, cursor.value);
-              this.loadedFile.extRam = extRamBlob;
-              this.loadedFile.image = imageDataURL;
-              this.loadedFile.modified = new Date();
-              cursor.update(this.loadedFile);
-            }
-          };
-        });
-      });
+      const extRamBlob = new Blob([emulator.getExtRam()]);
+      const imageDataURL = $('canvas').toDataURL();
+      const tx = db.transaction('games', 'readwrite');
+      const cursor = await tx.objectStore('games').openCursor(
+          this.loadedFile.sha1);
+      if (!cursor) return;
+      Object.assign(this.loadedFile, cursor.value);
+      this.loadedFile.extRam = extRamBlob;
+      this.loadedFile.image = imageDataURL;
+      this.loadedFile.modified = new Date;
+      cursor.update(this.loadedFile);
+      return tx.complete;
     },
     toggleOpenDialog: function() {
       this.files.show = !this.files.show;
@@ -273,24 +212,16 @@ var vm = new Vue({
         this.paused = true;
       }
     },
-    readFiles: function() {
+    readFiles: async function() {
       this.files.list.length = 0;
-
-      dbPromise.then((db) => {
-        let transaction = db.transaction('games');
-        return new Promise((resolve, reject) => {
-          transaction.onerror = resolve(db);
-          transaction.onsuccess = resolve(db);
-          let request = transaction.objectStore('games').openCursor();
-          request.onsuccess = (event) => {
-            let cursor = event.target.result;
-            if (cursor) {
-              this.files.list.push(cursor.value);
-              cursor.continue();
-            }
-          };
-        });
+      const db = await dbPromise;
+      const tx = db.transaction('games');
+      tx.objectStore('games').iterateCursor(cursor => {
+        if (!cursor) return;
+        this.files.list.push(cursor.value);
+        cursor.continue();
       });
+      return tx.complete;
     },
     prettySize: function(size) {
       if (size >= 1024 * 1024) {
@@ -302,7 +233,7 @@ var vm = new Vue({
       }
     },
     prettyDate: function(date) {
-      let options = {
+      const options = {
         year: 'numeric',
         month: 'numeric',
         day: 'numeric',
@@ -315,7 +246,7 @@ var vm = new Vue({
 });
 
 (function bindKeyInput() {
-  var keyRewind = function(e, isKeyDown) {
+  function keyRewind(e, isKeyDown) {
     if (emulator.isRewinding() !== isKeyDown) {
       if (isKeyDown) {
         vm.paused = true;
@@ -327,7 +258,7 @@ var vm = new Vue({
     }
   };
 
-  var keyFuncs = {
+  const keyFuncs = {
     'ArrowDown': _set_joyp_down,
     'ArrowLeft': _set_joyp_left,
     'ArrowRight': _set_joyp_right,
@@ -340,8 +271,8 @@ var vm = new Vue({
     'Space': (e, isKeyDown) => { if (isKeyDown) vm.togglePause(); },
   };
 
-  var makeKeyFunc = (isKeyDown) => {
-    return (event) => {
+  const makeKeyFunc = isKeyDown => {
+    return event => {
       if (!emulator) return;
       if (event.code in keyFuncs) {
         keyFuncs[event.code](emulator.e, isKeyDown);
@@ -372,17 +303,17 @@ function copyInto(buffer, ptr) {
 }
 
 function Emulator(romBuffer, extRamBuffer) {
-  let canvasEl = $('canvas');
+  const canvasEl = $('canvas');
   this.cleanupFuncs = [];
   this.renderer = new WebGLRenderer(canvasEl);
   // this.renderer = new Canvas2DRenderer(canvasEl);
-  this.audio = new AudioContext();
+  this.audio = new AudioContext;
   this.defer(() => this.audio.close());
 
   this.joypadBuffer = _joypad_new();
   this.defer(() => _joypad_delete(this.joypadBuffer));
 
-  var romData = _malloc(romBuffer.byteLength);
+  const romData = _malloc(romBuffer.byteLength);
   this.defer(() => _free(romData));
   copyInto(romBuffer, romData);
   this.e = _emulator_new_simple(
@@ -420,7 +351,7 @@ function Emulator(romBuffer, extRamBuffer) {
 }
 
 Emulator.prototype.readExtRam = function(extRamBuffer) {
-  let file_data = _ext_ram_file_data_new(this.e);
+  const file_data = _ext_ram_file_data_new(this.e);
   if (_get_file_data_size(file_data) == extRamBuffer.byteLength) {
     copyInto(extRamBuffer, _get_file_data_ptr(file_data));
     _emulator_read_ext_ram(this.e, file_data);
@@ -429,11 +360,10 @@ Emulator.prototype.readExtRam = function(extRamBuffer) {
 };
 
 Emulator.prototype.getExtRam = function() {
-  let file_data = _ext_ram_file_data_new(this.e);
+  const file_data = _ext_ram_file_data_new(this.e);
   _emulator_write_ext_ram(this.e, file_data);
-  let buffer = new Uint8Array(
-      Module.buffer, _get_file_data_ptr(file_data),
-      _get_file_data_size(file_data));
+  const buffer = new Uint8Array(Module.buffer, _get_file_data_ptr(file_data),
+                                _get_file_data_size(file_data));
   _file_data_delete(file_data);
   return buffer;
 };
@@ -444,7 +374,7 @@ Emulator.prototype.defer = function(f) {
 };
 
 Emulator.prototype.cleanup = function() {
-  for (var i = 0; i < this.cleanupFuncs.length; ++i) {
+  for (let i = 0; i < this.cleanupFuncs.length; ++i) {
     this.cleanupFuncs[i].call(this);
   }
 };
@@ -475,10 +405,10 @@ Emulator.prototype.setAutoRewind = function(enabled) {
     const updateMs = 16;
 
     this.rewindIntervalId = setInterval(() => {
-      var oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
-      var start = emulator.getTicks();
-      var delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
-      var rewindTo = Math.max(oldest, start - delta);
+      const oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+      const start = emulator.getTicks();
+      const delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
+      const rewindTo = Math.max(oldest, start - delta);
       this.rewindToTicks(rewindTo);
       vm.ticks = emulator.getTicks();
     }, updateMs);
@@ -513,7 +443,7 @@ Emulator.prototype.isRewinding = function() {
 
 Emulator.prototype.runUntil = function(ticks) {
   while (true) {
-    var event = _emulator_run_until_f64(this.e, ticks);
+    const event = _emulator_run_until_f64(this.e, ticks);
     if (event & EVENT_NEW_FRAME) {
       if (!this.isRewinding()) {
         _rewind_append(this.rewindBuffer, this.e);
@@ -521,27 +451,27 @@ Emulator.prototype.runUntil = function(ticks) {
       this.renderer.uploadTexture(this.frameBuffer);
     }
     if ((event & EVENT_AUDIO_BUFFER_FULL) && !this.isRewinding()) {
-      var nowAudioSec = this.audio.currentTime;
-      var nowPlusLatency = nowAudioSec + AUDIO_LATENCY_SEC;
+      const nowAudioSec = this.audio.currentTime;
+      const nowPlusLatency = nowAudioSec + AUDIO_LATENCY_SEC;
       this.startAudioSec = (this.startAudioSec || nowPlusLatency);
       if (this.startAudioSec >= nowAudioSec) {
-        var buffer =
+        const buffer =
             this.audio.createBuffer(2, AUDIO_FRAMES, this.audio.sampleRate);
-        var channel0 = buffer.getChannelData(0);
-        var channel1 = buffer.getChannelData(1);
-        var outPos = 0;
-        var inPos = 0;
-        for (var i = 0; i < AUDIO_FRAMES; i++) {
+        const channel0 = buffer.getChannelData(0);
+        const channel1 = buffer.getChannelData(1);
+        let outPos = 0;
+        let inPos = 0;
+        for (let i = 0; i < AUDIO_FRAMES; i++) {
           channel0[outPos] = (this.audioBuffer[inPos] - 128) / 128;
           channel1[outPos] = (this.audioBuffer[inPos + 1] - 128) / 128;
           outPos++;
           inPos += 2;
         }
-        var bufferSource = this.audio.createBufferSource();
+        const bufferSource = this.audio.createBufferSource();
         bufferSource.buffer = buffer;
         bufferSource.connect(this.audio.destination);
         bufferSource.start(this.startAudioSec);
-        var bufferSec = AUDIO_FRAMES / this.audio.sampleRate;
+        const bufferSec = AUDIO_FRAMES / this.audio.sampleRate;
         this.startAudioSec += bufferSec;
       } else {
         console.log(
@@ -562,13 +492,15 @@ Emulator.prototype.runUntil = function(ticks) {
 Emulator.prototype.renderVideo = function(startMs) {
   this.requestAnimationFrame();
 
+  let deltaSec = 0;
+
   if (!this.isRewinding()) {
-    var startSec = startMs / 1000;
-    var deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
-    var startTicks = this.getTicks();
-    var deltaTicks =
+    const startSec = startMs / 1000;
+    deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
+    const startTicks = this.getTicks();
+    const deltaTicks =
         Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
-    var runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
+    const runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
 
     this.runUntil(runUntilTicks);
 
@@ -585,18 +517,14 @@ Emulator.prototype.renderVideo = function(startMs) {
 };
 
 Emulator.prototype.beginRewind = function() {
-  if (this.isRewinding()) {
-    throw Error('Already rewinding!');
-  }
+  if (this.isRewinding()) return;
   this.rewindState =
       _rewind_begin(this.e, this.rewindBuffer, this.joypadBuffer);
 };
 
 Emulator.prototype.rewindToTicks = function(ticks) {
-  if (!this.isRewinding()) {
-    throw Error('Not rewinding!');
-  }
-  var result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
+  if (!this.isRewinding()) return;
+  const result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
   if (result === RESULT_OK) {
     _emulator_set_rewind_joypad_callback(this.rewindState);
     this.runUntil(ticks);
@@ -605,9 +533,7 @@ Emulator.prototype.rewindToTicks = function(ticks) {
 };
 
 Emulator.prototype.endRewind = function() {
-  if (!this.isRewinding()) {
-    throw Error('Not rewinding!');
-  }
+  if (!this.isRewinding()) return;
   _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
   _rewind_end(this.rewindState);
   this.rewindState = null;
@@ -631,11 +557,11 @@ Canvas2DRenderer.prototype.uploadTexture = function(buffer) {
 };
 
 function WebGLRenderer(el) {
-  var gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
+  const gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
 
-  var w = SCREEN_WIDTH / 256;
-  var h = SCREEN_HEIGHT / 256;
-  var buffer = gl.createBuffer();
+  const w = SCREEN_WIDTH / 256;
+  const h = SCREEN_HEIGHT / 256;
+  const buffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
     -1, -1,  0, h,
@@ -644,15 +570,15 @@ function WebGLRenderer(el) {
     +1, +1,  w, 0,
   ]), gl.STATIC_DRAW);
 
-  var texture = gl.createTexture();
+  const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texImage2D(
       gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
 
-  var compileShader = function(type, source) {
-    var shader = gl.createShader(type);
+  function compileShader(type, source) {
+    const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
@@ -661,7 +587,7 @@ function WebGLRenderer(el) {
     return shader;
   };
 
-  var vertexShader = compileShader(gl.VERTEX_SHADER,
+  const vertexShader = compileShader(gl.VERTEX_SHADER,
     'attribute vec2 aPos;' +
     'attribute vec2 aTexCoord;' +
     'varying highp vec2 vTexCoord;' +
@@ -670,7 +596,7 @@ function WebGLRenderer(el) {
     '  vTexCoord = aTexCoord;' +
     '}'
   );
-  var fragmentShader = compileShader(gl.FRAGMENT_SHADER,
+  const fragmentShader = compileShader(gl.FRAGMENT_SHADER,
       'varying highp vec2 vTexCoord;' +
       'uniform sampler2D uSampler;' +
       'void main(void) {' +
@@ -678,7 +604,7 @@ function WebGLRenderer(el) {
       '}'
   );
 
-  var program = gl.createProgram();
+  const program = gl.createProgram();
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
   gl.linkProgram(program);
@@ -687,9 +613,9 @@ function WebGLRenderer(el) {
   }
   gl.useProgram(program);
 
-  var aPos = gl.getAttribLocation(program, 'aPos');
-  var aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
-  var uSampler = gl.getUniformLocation(program, 'uSampler');
+  const aPos = gl.getAttribLocation(program, 'aPos');
+  const aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
+  const uSampler = gl.getUniformLocation(program, 'uSampler');
 
   gl.enableVertexAttribArray(aPos);
   gl.enableVertexAttribArray(aTexCoord);
