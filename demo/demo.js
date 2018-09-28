@@ -156,7 +156,7 @@ let vm = new Vue({
       this.canvas.show = true;
       this.files.show = false;
       this.loadedFile = file;
-      startEmulator(romBuffer, extRamBuffer);
+      Emulator.start(romBuffer, extRamBuffer);
     },
     deleteFile: async function(file) {
       const db = await dbPromise;
@@ -173,7 +173,7 @@ let vm = new Vue({
         this.loadedFile = null;
         this.paused = true;
         this.canvas.show = false;
-        stopEmulator();
+        Emulator.stop();
       }
     },
     uploadClicked: function() {
@@ -195,6 +195,7 @@ let vm = new Vue({
       if (!emulator) return;
       const extRamBlob = new Blob([emulator.getExtRam()]);
       const imageDataURL = $('canvas').toDataURL();
+      const db = await dbPromise;
       const tx = db.transaction('games', 'readwrite');
       const cursor = await tx.objectStore('games').openCursor(
           this.loadedFile.sha1);
@@ -250,13 +251,13 @@ let vm = new Vue({
     if (emulator.isRewinding() !== isKeyDown) {
       if (isKeyDown) {
         vm.paused = true;
-        emulator.setAutoRewind(true);
+        emulator.autoRewind = true;
       } else {
-        emulator.setAutoRewind(false);
+        emulator.autoRewind = false;
         vm.paused = false;
       }
     }
-  };
+  }
 
   const keyFuncs = {
     'ArrowDown': _set_joyp_down,
@@ -285,353 +286,357 @@ let vm = new Vue({
   window.addEventListener('keyup', makeKeyFunc(false));
 })();
 
-function startEmulator(romBuffer, extRamBuffer) {
-  stopEmulator();
-  emulator = new Emulator(romBuffer, extRamBuffer);
-  emulator.run();
-}
-
-function stopEmulator() {
-  if (emulator) {
-    emulator.cleanup();
-    emulator = null;
-  }
-}
-
 function copyInto(buffer, ptr) {
   HEAPU8.set(new Uint8Array(buffer), ptr, buffer.byteLength);
 }
 
-function Emulator(romBuffer, extRamBuffer) {
-  const canvasEl = $('canvas');
-  this.cleanupFuncs = [];
-  this.renderer = new WebGLRenderer(canvasEl);
-  // this.renderer = new Canvas2DRenderer(canvasEl);
-  this.audio = new AudioContext;
-  this.defer(() => this.audio.close());
-
-  this.joypadBuffer = _joypad_new();
-  this.defer(() => _joypad_delete(this.joypadBuffer));
-
-  const romData = _malloc(romBuffer.byteLength);
-  this.defer(() => _free(romData));
-  copyInto(romBuffer, romData);
-  this.e = _emulator_new_simple(
-      romData, romBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES,
-      this.joypadBuffer);
-  if (this.e == 0) {
-    throw Error('Invalid ROM.');
+class Emulator {
+  static start(romBuffer, extRamBuffer) {
+    Emulator.stop();
+    emulator = new Emulator(romBuffer, extRamBuffer);
+    emulator.run();
   }
-  this.defer(() => _emulator_delete(this.e));
 
-  _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
-
-  this.rewindState = null;
-  this.rewindBuffer = _rewind_new_simple(
-      this.e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
-  this.defer(() => _rewind_delete(this.rewindBuffer));
-
-  this.rewindIntervalId = 0;
-
-  this.frameBuffer = new Uint8Array(
-      Module.buffer, _get_frame_buffer_ptr(this.e),
-      _get_frame_buffer_size(this.e));
-  this.audioBuffer = new Uint8Array(
-      Module.buffer, _get_audio_buffer_ptr(this.e),
-      _get_audio_buffer_capacity(this.e));
-
-  this.lastSec = 0;
-  this.startAudioSec = 0;
-  this.leftoverTicks = 0;
-  this.fps = 60;
-
-  if (extRamBuffer) {
-    this.readExtRam(extRamBuffer);
+  static stop() {
+    if (emulator) {
+      emulator.cleanup();
+      emulator = null;
+    }
   }
-}
 
-Emulator.prototype.readExtRam = function(extRamBuffer) {
-  const file_data = _ext_ram_file_data_new(this.e);
-  if (_get_file_data_size(file_data) == extRamBuffer.byteLength) {
-    copyInto(extRamBuffer, _get_file_data_ptr(file_data));
-    _emulator_read_ext_ram(this.e, file_data);
-  }
-  _file_data_delete(file_data);
-};
+  constructor(romBuffer, extRamBuffer) {
+    const canvasEl = $('canvas');
+    this.cleanupFuncs = [];
+    // this.renderer = new WebGLRenderer(canvasEl);
+    this.renderer = new Canvas2DRenderer(canvasEl);
+    this.audio = new AudioContext;
+    this.defer(() => this.audio.close());
 
-Emulator.prototype.getExtRam = function() {
-  const file_data = _ext_ram_file_data_new(this.e);
-  _emulator_write_ext_ram(this.e, file_data);
-  const buffer = new Uint8Array(Module.buffer, _get_file_data_ptr(file_data),
-                                _get_file_data_size(file_data));
-  _file_data_delete(file_data);
-  return buffer;
-};
+    this.joypadBuffer = _joypad_new();
+    this.defer(() => _joypad_delete(this.joypadBuffer));
 
+    const romData = _malloc(romBuffer.byteLength);
+    this.defer(() => _free(romData));
+    copyInto(romBuffer, romData);
+    this.e = _emulator_new_simple(
+        romData, romBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES,
+        this.joypadBuffer);
+    if (this.e == 0) {
+      throw Error('Invalid ROM.');
+    }
+    this.defer(() => _emulator_delete(this.e));
 
-Emulator.prototype.defer = function(f) {
-  this.cleanupFuncs.push(f);
-};
+    _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
 
-Emulator.prototype.cleanup = function() {
-  for (let i = 0; i < this.cleanupFuncs.length; ++i) {
-    this.cleanupFuncs[i].call(this);
-  }
-};
+    this.rewindState = null;
+    this.rewindBuffer = _rewind_new_simple(
+        this.e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
+    this.defer(() => _rewind_delete(this.rewindBuffer));
 
-Emulator.prototype.isPaused = function() {
-  return this.rafCancelToken === null;
-};
-
-Emulator.prototype.pause = function() {
-  if (!this.isPaused()) {
-    this.cancelAnimationFrame();
-    this.audio.suspend();
-    this.beginRewind();
-  }
-};
-
-Emulator.prototype.resume = function() {
-  if (this.isPaused()) {
-    this.endRewind();
-    this.requestAnimationFrame();
-    this.audio.resume();
-  }
-};
-
-Emulator.prototype.setAutoRewind = function(enabled) {
-  if (enabled) {
-    const rewindFactor = 1.5;
-    const updateMs = 16;
-
-    this.rewindIntervalId = setInterval(() => {
-      const oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
-      const start = emulator.getTicks();
-      const delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
-      const rewindTo = Math.max(oldest, start - delta);
-      this.rewindToTicks(rewindTo);
-      vm.ticks = emulator.getTicks();
-    }, updateMs);
-    this.defer(() => clearInterval(this.rewindIntervalId));
-  } else {
-    clearInterval(this.rewindIntervalId);
     this.rewindIntervalId = 0;
-  }
-};
 
-Emulator.prototype.requestAnimationFrame = function() {
-  this.rafCancelToken = requestAnimationFrame(this.renderVideo.bind(this));
-};
+    this.frameBuffer = new Uint8Array(
+        Module.buffer, _get_frame_buffer_ptr(this.e),
+        _get_frame_buffer_size(this.e));
+    this.audioBuffer = new Uint8Array(
+        Module.buffer, _get_audio_buffer_ptr(this.e),
+        _get_audio_buffer_capacity(this.e));
 
-Emulator.prototype.cancelAnimationFrame = function() {
-  cancelAnimationFrame(this.rafCancelToken);
-  this.rafCancelToken = null;
-};
+    this.lastSec = 0;
+    this.startAudioSec = 0;
+    this.leftoverTicks = 0;
+    this.fps = 60;
 
-Emulator.prototype.run = function() {
-  this.requestAnimationFrame();
-  this.defer(() => this.cancelAnimationFrame());
-};
-
-Emulator.prototype.getTicks = function() {
-  return _emulator_get_ticks_f64(this.e);
-};
-
-Emulator.prototype.isRewinding = function() {
-  return this.rewindState !== null;
-};
-
-Emulator.prototype.runUntil = function(ticks) {
-  while (true) {
-    const event = _emulator_run_until_f64(this.e, ticks);
-    if (event & EVENT_NEW_FRAME) {
-      if (!this.isRewinding()) {
-        _rewind_append(this.rewindBuffer, this.e);
-      }
-      this.renderer.uploadTexture(this.frameBuffer);
+    if (extRamBuffer) {
+      this.readExtRam(extRamBuffer);
     }
-    if ((event & EVENT_AUDIO_BUFFER_FULL) && !this.isRewinding()) {
-      const nowAudioSec = this.audio.currentTime;
-      const nowPlusLatency = nowAudioSec + AUDIO_LATENCY_SEC;
-      this.startAudioSec = (this.startAudioSec || nowPlusLatency);
-      if (this.startAudioSec >= nowAudioSec) {
-        const buffer =
-            this.audio.createBuffer(2, AUDIO_FRAMES, this.audio.sampleRate);
-        const channel0 = buffer.getChannelData(0);
-        const channel1 = buffer.getChannelData(1);
-        let outPos = 0;
-        let inPos = 0;
-        for (let i = 0; i < AUDIO_FRAMES; i++) {
-          channel0[outPos] = (this.audioBuffer[inPos] - 128) / 128;
-          channel1[outPos] = (this.audioBuffer[inPos + 1] - 128) / 128;
-          outPos++;
-          inPos += 2;
+  }
+
+  readExtRam(extRamBuffer) {
+    const file_data = _ext_ram_file_data_new(this.e);
+    if (_get_file_data_size(file_data) == extRamBuffer.byteLength) {
+      copyInto(extRamBuffer, _get_file_data_ptr(file_data));
+      _emulator_read_ext_ram(this.e, file_data);
+    }
+    _file_data_delete(file_data);
+  }
+
+  getExtRam() {
+    const file_data = _ext_ram_file_data_new(this.e);
+    _emulator_write_ext_ram(this.e, file_data);
+    const buffer = new Uint8Array(Module.buffer, _get_file_data_ptr(file_data),
+                                  _get_file_data_size(file_data));
+    _file_data_delete(file_data);
+    return buffer;
+  }
+
+  defer(f) {
+    this.cleanupFuncs.push(f);
+  }
+
+  cleanup() {
+    for (let func of this.cleanupFuncs) {
+      func.call(this);
+    }
+  }
+
+  get isPaused() {
+    return this.rafCancelToken === null;
+  }
+
+  pause() {
+    if (!this.isPaused) {
+      this.cancelAnimationFrame();
+      this.audio.suspend();
+      this.beginRewind();
+    }
+  }
+
+  resume() {
+    if (this.isPaused) {
+      this.endRewind();
+      this.requestAnimationFrame();
+      this.audio.resume();
+    }
+  }
+
+  set autoRewind(enabled) {
+    if (enabled) {
+      const rewindFactor = 1.5;
+      const updateMs = 16;
+
+      this.rewindIntervalId = setInterval(() => {
+        const oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
+        const start = emulator.ticks;
+        const delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
+        const rewindTo = Math.max(oldest, start - delta);
+        this.rewindToTicks(rewindTo);
+        vm.ticks = emulator.ticks;
+      }, updateMs);
+      this.defer(() => clearInterval(this.rewindIntervalId));
+    } else {
+      clearInterval(this.rewindIntervalId);
+      this.rewindIntervalId = 0;
+    }
+  }
+
+  requestAnimationFrame() {
+    this.rafCancelToken = requestAnimationFrame(this.renderVideo.bind(this));
+  }
+
+  cancelAnimationFrame() {
+    cancelAnimationFrame(this.rafCancelToken);
+    this.rafCancelToken = null;
+  }
+
+  run() {
+    this.requestAnimationFrame();
+    this.defer(() => this.cancelAnimationFrame());
+  }
+
+  get ticks() {
+    return _emulator_get_ticks_f64(this.e);
+  }
+
+  isRewinding() {
+    return this.rewindState !== null;
+  }
+
+  runUntil(ticks) {
+    while (true) {
+      const event = _emulator_run_until_f64(this.e, ticks);
+      if (event & EVENT_NEW_FRAME) {
+        if (!this.isRewinding()) {
+          _rewind_append(this.rewindBuffer, this.e);
         }
-        const bufferSource = this.audio.createBufferSource();
-        bufferSource.buffer = buffer;
-        bufferSource.connect(this.audio.destination);
-        bufferSource.start(this.startAudioSec);
-        const bufferSec = AUDIO_FRAMES / this.audio.sampleRate;
-        this.startAudioSec += bufferSec;
-      } else {
-        console.log(
-            'Resetting audio (' + this.startAudioSec.toFixed(2) + ' < ' +
-            nowAudioSec.toFixed(2) + ')');
-        this.startAudioSec = nowPlusLatency;
+        this.renderer.uploadTexture(this.frameBuffer);
+      }
+      if ((event & EVENT_AUDIO_BUFFER_FULL) && !this.isRewinding()) {
+        const nowAudioSec = this.audio.currentTime;
+        const nowPlusLatency = nowAudioSec + AUDIO_LATENCY_SEC;
+        this.startAudioSec = (this.startAudioSec || nowPlusLatency);
+        if (this.startAudioSec >= nowAudioSec) {
+          const buffer =
+              this.audio.createBuffer(2, AUDIO_FRAMES, this.audio.sampleRate);
+          const channel0 = buffer.getChannelData(0);
+          const channel1 = buffer.getChannelData(1);
+          let outPos = 0;
+          let inPos = 0;
+          for (let i = 0; i < AUDIO_FRAMES; i++) {
+            channel0[outPos] = (this.audioBuffer[inPos] - 128) / 128;
+            channel1[outPos] = (this.audioBuffer[inPos + 1] - 128) / 128;
+            outPos++;
+            inPos += 2;
+          }
+          const bufferSource = this.audio.createBufferSource();
+          bufferSource.buffer = buffer;
+          bufferSource.connect(this.audio.destination);
+          bufferSource.start(this.startAudioSec);
+          const bufferSec = AUDIO_FRAMES / this.audio.sampleRate;
+          this.startAudioSec += bufferSec;
+        } else {
+          console.log(
+              'Resetting audio (' + this.startAudioSec.toFixed(2) + ' < ' +
+              nowAudioSec.toFixed(2) + ')');
+          this.startAudioSec = nowPlusLatency;
+        }
+      }
+      if (event & EVENT_UNTIL_TICKS) {
+        break;
       }
     }
-    if (event & EVENT_UNTIL_TICKS) {
-      break;
+    if (_emulator_was_ext_ram_updated(this.e)) {
+      vm.extRamUpdated = true;
     }
   }
-  if (_emulator_was_ext_ram_updated(this.e)) {
-    vm.extRamUpdated = true;
-  }
-};
 
-Emulator.prototype.renderVideo = function(startMs) {
-  this.requestAnimationFrame();
+  renderVideo(startMs) {
+    this.requestAnimationFrame();
 
-  let deltaSec = 0;
+    let deltaSec = 0;
 
-  if (!this.isRewinding()) {
-    const startSec = startMs / 1000;
-    deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
-    const startTicks = this.getTicks();
-    const deltaTicks =
-        Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
-    const runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
+    if (!this.isRewinding()) {
+      const startSec = startMs / 1000;
+      deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
+      const startTicks = this.ticks;
+      const deltaTicks =
+          Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
+      const runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
 
-    this.runUntil(runUntilTicks);
+      this.runUntil(runUntilTicks);
 
-    this.leftoverTicks = (this.getTicks() - runUntilTicks) | 0;
-    this.lastSec = startSec;
-  }
+      this.leftoverTicks = (this.ticks - runUntilTicks) | 0;
+      this.lastSec = startSec;
+    }
 
-  function lerp(from, to, alpha) {
-    return (alpha * from) + (1 - alpha) * to;
-  }
+    function lerp(from, to, alpha) {
+      return (alpha * from) + (1 - alpha) * to;
+    }
 
-  this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);
-  this.renderer.renderTexture();
-};
-
-Emulator.prototype.beginRewind = function() {
-  if (this.isRewinding()) return;
-  this.rewindState =
-      _rewind_begin(this.e, this.rewindBuffer, this.joypadBuffer);
-};
-
-Emulator.prototype.rewindToTicks = function(ticks) {
-  if (!this.isRewinding()) return;
-  const result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
-  if (result === RESULT_OK) {
-    _emulator_set_rewind_joypad_callback(this.rewindState);
-    this.runUntil(ticks);
+    this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);
     this.renderer.renderTexture();
   }
-};
 
-Emulator.prototype.endRewind = function() {
-  if (!this.isRewinding()) return;
-  _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
-  _rewind_end(this.rewindState);
-  this.rewindState = null;
-  this.lastSec = 0;
-  this.startAudioSec = 0;
-  this.leftoverTicks = 0;
-};
-
-
-function Canvas2DRenderer(el) {
-  this.ctx = el.getContext('2d');
-  this.imageData = this.ctx.createImageData(el.width, el.height);
-}
-
-Canvas2DRenderer.prototype.renderTexture = function() {
-  this.ctx.putImageData(this.imageData, 0, 0);
-};
-
-Canvas2DRenderer.prototype.uploadTexture = function(buffer) {
-  this.imageData.data.set(buffer);
-};
-
-function WebGLRenderer(el) {
-  const gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
-
-  const w = SCREEN_WIDTH / 256;
-  const h = SCREEN_HEIGHT / 256;
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-    -1, -1,  0, h,
-    +1, -1,  w, h,
-    -1, +1,  0, 0,
-    +1, +1,  w, 0,
-  ]), gl.STATIC_DRAW);
-
-  const texture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(
-      gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-
-  function compileShader(type, source) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.log('compileShader failed: ' + gl.getShaderInfoLog(shader));
-    }
-    return shader;
-  };
-
-  const vertexShader = compileShader(gl.VERTEX_SHADER,
-    'attribute vec2 aPos;' +
-    'attribute vec2 aTexCoord;' +
-    'varying highp vec2 vTexCoord;' +
-    'void main(void) {' +
-    '  gl_Position = vec4(aPos, 0.0, 1.0);' +
-    '  vTexCoord = aTexCoord;' +
-    '}'
-  );
-  const fragmentShader = compileShader(gl.FRAGMENT_SHADER,
-      'varying highp vec2 vTexCoord;' +
-      'uniform sampler2D uSampler;' +
-      'void main(void) {' +
-      '  gl_FragColor = texture2D(uSampler, vTexCoord);' +
-      '}'
-  );
-
-  const program = gl.createProgram();
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.log('program link failed: ' + gl.getProgramInfoLog(program));
+  beginRewind() {
+    if (this.isRewinding()) return;
+    this.rewindState =
+        _rewind_begin(this.e, this.rewindBuffer, this.joypadBuffer);
   }
-  gl.useProgram(program);
 
-  const aPos = gl.getAttribLocation(program, 'aPos');
-  const aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
-  const uSampler = gl.getUniformLocation(program, 'uSampler');
+  rewindToTicks(ticks) {
+    if (!this.isRewinding()) return;
+    const result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
+    if (result === RESULT_OK) {
+      _emulator_set_rewind_joypad_callback(this.rewindState);
+      this.runUntil(ticks);
+      this.renderer.renderTexture();
+    }
+  }
 
-  gl.enableVertexAttribArray(aPos);
-  gl.enableVertexAttribArray(aTexCoord);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, gl.FALSE, 16, 0);
-  gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, gl.FALSE, 16, 8);
-  gl.uniform1i(uSampler, 0);
+  endRewind() {
+    if (!this.isRewinding()) return;
+    _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
+    _rewind_end(this.rewindState);
+    this.rewindState = null;
+    this.lastSec = 0;
+    this.startAudioSec = 0;
+    this.leftoverTicks = 0;
+  }
 }
 
-WebGLRenderer.prototype.renderTexture = function() {
-  this.gl.clearColor(0.5, 0.5, 0.5, 1.0);
-  this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-  this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-};
+class Canvas2DRenderer {
+  constructor(el) {
+    this.ctx = el.getContext('2d');
+    this.imageData = this.ctx.createImageData(el.width, el.height);
+  }
 
-WebGLRenderer.prototype.uploadTexture = function(buffer) {
-  this.gl.texSubImage2D(
-      this.gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, this.gl.RGBA,
-      this.gl.UNSIGNED_BYTE, buffer);
-};
+  renderTexture() {
+    this.ctx.putImageData(this.imageData, 0, 0);
+  }
+
+  uploadTexture(buffer) {
+    this.imageData.data.set(buffer);
+  }
+}
+
+class WebGLRenderer {
+  constructor(el) {
+    const gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
+
+    const w = SCREEN_WIDTH / 256;
+    const h = SCREEN_HEIGHT / 256;
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1, -1,  0, h,
+      +1, -1,  w, h,
+      -1, +1,  0, 0,
+      +1, +1,  w, 0,
+    ]), gl.STATIC_DRAW);
+
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+        gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.log('compileShader failed: ' + gl.getShaderInfoLog(shader));
+      }
+      return shader;
+    }
+
+    const vertexShader = compileShader(gl.VERTEX_SHADER,
+      'attribute vec2 aPos;' +
+      'attribute vec2 aTexCoord;' +
+      'varying highp vec2 vTexCoord;' +
+      'void main(void) {' +
+      '  gl_Position = vec4(aPos, 0.0, 1.0);' +
+      '  vTexCoord = aTexCoord;' +
+      '}'
+    );
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER,
+        'varying highp vec2 vTexCoord;' +
+        'uniform sampler2D uSampler;' +
+        'void main(void) {' +
+        '  gl_FragColor = texture2D(uSampler, vTexCoord);' +
+        '}'
+    );
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.log('program link failed: ' + gl.getProgramInfoLog(program));
+    }
+    gl.useProgram(program);
+
+    const aPos = gl.getAttribLocation(program, 'aPos');
+    const aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
+    const uSampler = gl.getUniformLocation(program, 'uSampler');
+
+    gl.enableVertexAttribArray(aPos);
+    gl.enableVertexAttribArray(aTexCoord);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, gl.FALSE, 16, 0);
+    gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, gl.FALSE, 16, 8);
+    gl.uniform1i(uSampler, 0);
+  }
+
+  renderTexture() {
+    this.gl.clearColor(0.5, 0.5, 0.5, 1.0);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+    this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  uploadTexture(buffer) {
+    this.gl.texSubImage2D(
+        this.gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, this.gl.RGBA,
+        this.gl.UNSIGNED_BYTE, buffer);
+  }
+}
