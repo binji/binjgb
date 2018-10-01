@@ -286,8 +286,8 @@ let vm = new Vue({
   window.addEventListener('keyup', makeKeyFunc(false));
 })();
 
-function copyIntoWasm(destPtr, srcBuffer) {
-  HEAPU8.set(new Uint8Array(srcBuffer), destPtr, srcBuffer.byteLength);
+function makeWasmBuffer(ptr, size) {
+  return new Uint8Array(Module.buffer, ptr, size);
 }
 
 class Emulator {
@@ -306,7 +306,8 @@ class Emulator {
 
   constructor(romBuffer, extRamBuffer) {
     this.romDataPtr = _malloc(romBuffer.byteLength);
-    copyIntoWasm(this.romDataPtr, romBuffer);
+    makeWasmBuffer(this.romDataPtr, romBuffer.byteLength)
+        .set(new Uint8Array(romBuffer));
     this.e = _emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
         AUDIO_FRAMES);
@@ -333,15 +334,14 @@ class Emulator {
     clearInterval(this.rewindIntervalId);
     this.rewind.destroy();
     _emulator_delete(this.e);
-    _free(romDataPtr);
+    _free(this.romDataPtr);
   }
 
   withNewFileData(cb) {
     const fileDataPtr = _ext_ram_file_data_new(this.e);
-    const buffer = new Uint8Array(
-        Module.buffer, _get_file_data_ptr(fileDataPtr),
-        _get_file_data_size(fileDataPtr));
-    const  result = cb(fileDataPtr, buffer);
+    const buffer = makeWasmBuffer(
+        _get_file_data_ptr(fileDataPtr), _get_file_data_size(fileDataPtr));
+    const result = cb(fileDataPtr, buffer);
     _file_data_delete(fileDataPtr);
     return result;
   }
@@ -349,14 +349,17 @@ class Emulator {
   loadExtRam(extRamBuffer) {
     this.withNewFileData((fileDataPtr, buffer) => {
       if (buffer.byteLength === extRamBuffer.byteLength) {
-        copyInto(extRamBuffer, _get_file_data_ptr(fileDataPtr));
+        buffer.set(new Uint8Array(extRamBuffer));
         _emulator_read_ext_ram(this.e, fileDataPtr);
       }
     });
   }
 
   getExtRam() {
-    return this.withNewFileData((_, buffer) => new Uint8Array(buffer));
+    return this.withNewFileData((fileDataPtr, buffer) => {
+      _emulator_write_ext_ram(this.e, fileDataPtr);
+      return new Uint8Array(buffer);
+    });
   }
 
   get isPaused() {
@@ -476,9 +479,10 @@ class Emulator {
 
 class Audio {
   constructor(e) {
-    this.buffer = new Uint8Array(
-        Module.buffer, _get_audio_buffer_ptr(e), _get_audio_buffer_capacity(e));
+    this.buffer =
+        makeWasmBuffer(_get_audio_buffer_ptr(e), _get_audio_buffer_capacity(e));
     this.startSec = 0;
+    this.resume();
   }
 
   get sampleRate() { return Audio.ctx.sampleRate; }
@@ -528,9 +532,8 @@ class Video {
       console.log(`Error creating WebGLRenderer: ${error}`);
       this.renderer = new Canvas2DRenderer(el);
     }
-
-    this.buffer = new Uint8Array(
-        Module.buffer, _get_frame_buffer_ptr(e), _get_frame_buffer_size(e));
+    this.buffer =
+        makeWasmBuffer(_get_frame_buffer_ptr(e), _get_frame_buffer_size(e));
   }
 
   uploadTexture() {
