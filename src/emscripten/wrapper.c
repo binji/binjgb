@@ -27,8 +27,7 @@ static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
 struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
-                                     int audio_frequency, int audio_frames,
-                                     JoypadBuffer* joypad_buffer) {
+                                     int audio_frequency, int audio_frames) {
   s_init.rom.data = rom_data;
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;

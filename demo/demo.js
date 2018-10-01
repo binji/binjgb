@@ -19,6 +19,8 @@ const EVENT_AUDIO_BUFFER_FULL = 2;
 const EVENT_UNTIL_TICKS = 4;
 const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
+const REWIND_FACTOR = 1.5;
+const REWIND_UPDATE_MS = 16;
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
@@ -121,10 +123,8 @@ let vm = new Vue({
       if (newPaused) {
         emulator.pause();
         this.updateTicks();
-        this.rewind.minTicks =
-            _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
-        this.rewind.maxTicks =
-            _rewind_get_newest_ticks_f64(emulator.rewindBuffer);
+        this.rewind.minTicks = emulator.rewind.oldestTicks;
+        this.rewind.maxTicks = emulator.rewind.newestTicks;
       } else {
         emulator.resume();
       }
@@ -132,7 +132,7 @@ let vm = new Vue({
   },
   methods: {
     updateTicks: function() {
-      this.ticks = _emulator_get_ticks_f64(emulator.e);
+      this.ticks = emulator.ticks;
     },
     togglePause: function() {
       if (!this.loaded) return;
@@ -248,7 +248,7 @@ let vm = new Vue({
 
 (function bindKeyInput() {
   function keyRewind(e, isKeyDown) {
-    if (emulator.isRewinding() !== isKeyDown) {
+    if (emulator.isRewinding !== isKeyDown) {
       if (isKeyDown) {
         vm.paused = true;
         emulator.autoRewind = true;
@@ -286,8 +286,8 @@ let vm = new Vue({
   window.addEventListener('keyup', makeKeyFunc(false));
 })();
 
-function copyInto(buffer, ptr) {
-  HEAPU8.set(new Uint8Array(buffer), ptr, buffer.byteLength);
+function copyIntoWasm(destPtr, srcBuffer) {
+  HEAPU8.set(new Uint8Array(srcBuffer), destPtr, srcBuffer.byteLength);
 }
 
 class Emulator {
@@ -299,85 +299,64 @@ class Emulator {
 
   static stop() {
     if (emulator) {
-      emulator.cleanup();
+      emulator.destroy();
       emulator = null;
     }
   }
 
   constructor(romBuffer, extRamBuffer) {
-    const canvasEl = $('canvas');
-    this.cleanupFuncs = [];
-    // this.renderer = new WebGLRenderer(canvasEl);
-    this.renderer = new Canvas2DRenderer(canvasEl);
-    this.audio = new AudioContext;
-    this.defer(() => this.audio.close());
-
-    this.joypadBuffer = _joypad_new();
-    this.defer(() => _joypad_delete(this.joypadBuffer));
-
-    const romData = _malloc(romBuffer.byteLength);
-    this.defer(() => _free(romData));
-    copyInto(romBuffer, romData);
+    this.romDataPtr = _malloc(romBuffer.byteLength);
+    copyIntoWasm(this.romDataPtr, romBuffer);
     this.e = _emulator_new_simple(
-        romData, romBuffer.byteLength, this.audio.sampleRate, AUDIO_FRAMES,
-        this.joypadBuffer);
+        this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
+        AUDIO_FRAMES);
     if (this.e == 0) {
-      throw Error('Invalid ROM.');
+      throw new Error('Invalid ROM.');
     }
-    this.defer(() => _emulator_delete(this.e));
 
-    _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
-
-    this.rewindState = null;
-    this.rewindBuffer = _rewind_new_simple(
-        this.e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
-    this.defer(() => _rewind_delete(this.rewindBuffer));
-
+    this.audio = new Audio(this.e);
+    this.video = new Video(this.e, $('canvas'));
+    this.rewind = new Rewind(this.e);
     this.rewindIntervalId = 0;
 
-    this.frameBuffer = new Uint8Array(
-        Module.buffer, _get_frame_buffer_ptr(this.e),
-        _get_frame_buffer_size(this.e));
-    this.audioBuffer = new Uint8Array(
-        Module.buffer, _get_audio_buffer_ptr(this.e),
-        _get_audio_buffer_capacity(this.e));
-
-    this.lastSec = 0;
-    this.startAudioSec = 0;
+    this.lastRafSec = 0;
     this.leftoverTicks = 0;
     this.fps = 60;
 
     if (extRamBuffer) {
-      this.readExtRam(extRamBuffer);
+      this.loadExtRam(extRamBuffer);
     }
   }
 
-  readExtRam(extRamBuffer) {
-    const file_data = _ext_ram_file_data_new(this.e);
-    if (_get_file_data_size(file_data) == extRamBuffer.byteLength) {
-      copyInto(extRamBuffer, _get_file_data_ptr(file_data));
-      _emulator_read_ext_ram(this.e, file_data);
-    }
-    _file_data_delete(file_data);
+  destroy() {
+    this.cancelAnimationFrame();
+    clearInterval(this.rewindIntervalId);
+    this.rewind.destroy();
+    _emulator_delete(this.e);
+    _free(romDataPtr);
+  }
+
+  withNewFileData(cb) {
+    const fileDataPtr = _ext_ram_file_data_new(this.e);
+    const buffer = new Uint8Array(
+        Module.buffer, _get_file_data_ptr(fileDataPtr),
+        _get_file_data_size(fileDataPtr));
+    const  result = cb(fileDataPtr, buffer);
+    _file_data_delete(fileDataPtr);
+    return result;
+  }
+
+  loadExtRam(extRamBuffer) {
+    this.withNewFileData((fileDataPtr, buffer) => {
+      if (buffer.byteLength === extRamBuffer.byteLength) {
+        copyInto(extRamBuffer, _get_file_data_ptr(fileDataPtr));
+        _emulator_read_ext_ram(this.e, fileDataPtr);
+      }
+    });
   }
 
   getExtRam() {
-    const file_data = _ext_ram_file_data_new(this.e);
-    _emulator_write_ext_ram(this.e, file_data);
-    const buffer = new Uint8Array(Module.buffer, _get_file_data_ptr(file_data),
-                                  _get_file_data_size(file_data));
-    _file_data_delete(file_data);
-    return buffer;
-  }
-
-  defer(f) {
-    this.cleanupFuncs.push(f);
-  }
-
-  cleanup() {
-    for (let func of this.cleanupFuncs) {
-      func.call(this);
-    }
+    return this.withNewFileData((_, buffer) => new Uint8Array(buffer));
   }
 
   get isPaused() {
@@ -387,7 +366,7 @@ class Emulator {
   pause() {
     if (!this.isPaused) {
       this.cancelAnimationFrame();
-      this.audio.suspend();
+      this.audio.pause();
       this.beginRewind();
     }
   }
@@ -400,20 +379,39 @@ class Emulator {
     }
   }
 
+  get isRewinding() {
+    return this.rewind.isRewinding;
+  }
+
+  beginRewind() {
+    this.rewind.beginRewind();
+  }
+
+  rewindToTicks(ticks) {
+    if (this.rewind.rewindToTicks(ticks)) {
+      this.runUntil(ticks);
+      this.video.renderTexture();
+    }
+  }
+
+  endRewind() {
+    this.rewind.endRewind();
+    this.lastRafSec = 0;
+    this.leftoverTicks = 0;
+    this.audio.startSec = 0;
+  }
+
   set autoRewind(enabled) {
     if (enabled) {
-      const rewindFactor = 1.5;
-      const updateMs = 16;
-
       this.rewindIntervalId = setInterval(() => {
-        const oldest = _rewind_get_oldest_ticks_f64(emulator.rewindBuffer);
-        const start = emulator.ticks;
-        const delta = rewindFactor * updateMs / 1000 * CPU_TICKS_PER_SECOND;
+        const oldest = this.rewind.oldestTicks;
+        const start = this.ticks;
+        const delta =
+            REWIND_FACTOR * REWIND_UPDATE_MS / 1000 * CPU_TICKS_PER_SECOND;
         const rewindTo = Math.max(oldest, start - delta);
         this.rewindToTicks(rewindTo);
         vm.ticks = emulator.ticks;
-      }, updateMs);
-      this.defer(() => clearInterval(this.rewindIntervalId));
+      }, REWIND_UPDATE_MS);
     } else {
       clearInterval(this.rewindIntervalId);
       this.rewindIntervalId = 0;
@@ -421,7 +419,7 @@ class Emulator {
   }
 
   requestAnimationFrame() {
-    this.rafCancelToken = requestAnimationFrame(this.renderVideo.bind(this));
+    this.rafCancelToken = requestAnimationFrame(this.rafCallback.bind(this));
   }
 
   cancelAnimationFrame() {
@@ -431,55 +429,21 @@ class Emulator {
 
   run() {
     this.requestAnimationFrame();
-    this.defer(() => this.cancelAnimationFrame());
   }
 
   get ticks() {
     return _emulator_get_ticks_f64(this.e);
   }
 
-  isRewinding() {
-    return this.rewindState !== null;
-  }
-
   runUntil(ticks) {
     while (true) {
       const event = _emulator_run_until_f64(this.e, ticks);
       if (event & EVENT_NEW_FRAME) {
-        if (!this.isRewinding()) {
-          _rewind_append(this.rewindBuffer, this.e);
-        }
-        this.renderer.uploadTexture(this.frameBuffer);
+        this.rewind.pushBuffer();
+        this.video.uploadTexture();
       }
-      if ((event & EVENT_AUDIO_BUFFER_FULL) && !this.isRewinding()) {
-        const nowAudioSec = this.audio.currentTime;
-        const nowPlusLatency = nowAudioSec + AUDIO_LATENCY_SEC;
-        this.startAudioSec = (this.startAudioSec || nowPlusLatency);
-        if (this.startAudioSec >= nowAudioSec) {
-          const buffer =
-              this.audio.createBuffer(2, AUDIO_FRAMES, this.audio.sampleRate);
-          const channel0 = buffer.getChannelData(0);
-          const channel1 = buffer.getChannelData(1);
-          let outPos = 0;
-          let inPos = 0;
-          for (let i = 0; i < AUDIO_FRAMES; i++) {
-            channel0[outPos] = (this.audioBuffer[inPos] - 128) / 128;
-            channel1[outPos] = (this.audioBuffer[inPos + 1] - 128) / 128;
-            outPos++;
-            inPos += 2;
-          }
-          const bufferSource = this.audio.createBufferSource();
-          bufferSource.buffer = buffer;
-          bufferSource.connect(this.audio.destination);
-          bufferSource.start(this.startAudioSec);
-          const bufferSec = AUDIO_FRAMES / this.audio.sampleRate;
-          this.startAudioSec += bufferSec;
-        } else {
-          console.log(
-              'Resetting audio (' + this.startAudioSec.toFixed(2) + ' < ' +
-              nowAudioSec.toFixed(2) + ')');
-          this.startAudioSec = nowPlusLatency;
-        }
+      if ((event & EVENT_AUDIO_BUFFER_FULL) && !this.isRewinding) {
+        this.audio.pushBuffer();
       }
       if (event & EVENT_UNTIL_TICKS) {
         break;
@@ -490,57 +454,91 @@ class Emulator {
     }
   }
 
-  renderVideo(startMs) {
+  rafCallback(startMs) {
     this.requestAnimationFrame();
-
     let deltaSec = 0;
-
-    if (!this.isRewinding()) {
+    if (!this.isRewinding) {
       const startSec = startMs / 1000;
-      deltaSec = Math.max(startSec - (this.lastSec || startSec), 0);
+      deltaSec = Math.max(startSec - (this.lastRafSec || startSec), 0);
       const startTicks = this.ticks;
       const deltaTicks =
           Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
       const runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
-
       this.runUntil(runUntilTicks);
-
       this.leftoverTicks = (this.ticks - runUntilTicks) | 0;
-      this.lastSec = startSec;
+      this.lastRafSec = startSec;
     }
-
-    function lerp(from, to, alpha) {
-      return (alpha * from) + (1 - alpha) * to;
-    }
-
+    const lerp = (from, to, alpha) => (alpha * from) + (1 - alpha) * to;
     this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);
-    this.renderer.renderTexture();
+    this.video.renderTexture();
+  }
+}
+
+class Audio {
+  constructor(e) {
+    this.buffer = new Uint8Array(
+        Module.buffer, _get_audio_buffer_ptr(e), _get_audio_buffer_capacity(e));
+    this.startSec = 0;
   }
 
-  beginRewind() {
-    if (this.isRewinding()) return;
-    this.rewindState =
-        _rewind_begin(this.e, this.rewindBuffer, this.joypadBuffer);
-  }
+  get sampleRate() { return Audio.ctx.sampleRate; }
 
-  rewindToTicks(ticks) {
-    if (!this.isRewinding()) return;
-    const result = _rewind_to_ticks_wrapper(this.rewindState, ticks);
-    if (result === RESULT_OK) {
-      _emulator_set_rewind_joypad_callback(this.rewindState);
-      this.runUntil(ticks);
-      this.renderer.renderTexture();
+  pushBuffer() {
+    const nowSec = Audio.ctx.currentTime;
+    const nowPlusLatency = nowSec + AUDIO_LATENCY_SEC;
+    this.startSec = (this.startSec || nowPlusLatency);
+    if (this.startSec >= nowSec) {
+      const buffer = Audio.ctx.createBuffer(2, AUDIO_FRAMES, this.sampleRate);
+      const channel0 = buffer.getChannelData(0);
+      const channel1 = buffer.getChannelData(1);
+      for (let i = 0; i < AUDIO_FRAMES; i++) {
+        channel0[i] = this.buffer[2 * i] / 127.5 - 1;
+        channel1[i] = this.buffer[2 * i + 1] / 127.5 - 1;
+      }
+      const bufferSource = Audio.ctx.createBufferSource();
+      bufferSource.buffer = buffer;
+      bufferSource.connect(Audio.ctx.destination);
+      bufferSource.start(this.startSec);
+      const bufferSec = AUDIO_FRAMES / this.sampleRate;
+      this.startSec += bufferSec;
+    } else {
+      console.log(
+          'Resetting audio (' + this.startSec.toFixed(2) + ' < ' +
+          nowSec.toFixed(2) + ')');
+      this.startSec = nowPlusLatency;
     }
   }
 
-  endRewind() {
-    if (!this.isRewinding()) return;
-    _emulator_set_default_joypad_callback(this.e, this.joypadBuffer);
-    _rewind_end(this.rewindState);
-    this.rewindState = null;
-    this.lastSec = 0;
-    this.startAudioSec = 0;
-    this.leftoverTicks = 0;
+  pause() {
+    Audio.ctx.suspend();
+  }
+
+  resume() {
+    Audio.ctx.resume();
+  }
+}
+
+Audio.ctx = new AudioContext;
+
+class Video {
+  constructor(e, el) {
+    try {
+      this.renderer = new WebGLRenderer(el);
+    } catch (error) {
+      console.log(`Error creating WebGLRenderer: ${error}`);
+      this.renderer = new Canvas2DRenderer(el);
+    }
+
+    this.buffer = new Uint8Array(
+        Module.buffer, _get_frame_buffer_ptr(e), _get_frame_buffer_size(e));
+  }
+
+  uploadTexture() {
+    this.renderer.uploadTexture(this.buffer);
+  }
+
+  renderTexture() {
+    this.renderer.renderTexture();
   }
 }
 
@@ -562,6 +560,9 @@ class Canvas2DRenderer {
 class WebGLRenderer {
   constructor(el) {
     const gl = this.gl = el.getContext('webgl', {preserveDrawingBuffer: true});
+    if (gl === null) {
+      throw new Error('unable to create webgl context');
+    }
 
     const w = SCREEN_WIDTH / 256;
     const h = SCREEN_HEIGHT / 256;
@@ -586,34 +587,32 @@ class WebGLRenderer {
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.log('compileShader failed: ' + gl.getShaderInfoLog(shader));
+        throw new Error(`compileShader failed: ${gl.getShaderInfoLog(shader)}`);
       }
       return shader;
     }
 
     const vertexShader = compileShader(gl.VERTEX_SHADER,
-      'attribute vec2 aPos;' +
-      'attribute vec2 aTexCoord;' +
-      'varying highp vec2 vTexCoord;' +
-      'void main(void) {' +
-      '  gl_Position = vec4(aPos, 0.0, 1.0);' +
-      '  vTexCoord = aTexCoord;' +
-      '}'
-    );
+       `attribute vec2 aPos;
+        attribute vec2 aTexCoord;
+        varying highp vec2 vTexCoord;
+        void main(void) {
+          gl_Position = vec4(aPos, 0.0, 1.0);
+          vTexCoord = aTexCoord;
+        }`);
     const fragmentShader = compileShader(gl.FRAGMENT_SHADER,
-        'varying highp vec2 vTexCoord;' +
-        'uniform sampler2D uSampler;' +
-        'void main(void) {' +
-        '  gl_FragColor = texture2D(uSampler, vTexCoord);' +
-        '}'
-    );
+       `varying highp vec2 vTexCoord;
+        uniform sampler2D uSampler;
+        void main(void) {
+          gl_FragColor = texture2D(uSampler, vTexCoord);
+        }`);
 
     const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.log('program link failed: ' + gl.getProgramInfoLog(program));
+      throw new Error(`program link failed: ${gl.getProgramInfoLog(program)}`);
     }
     gl.useProgram(program);
 
@@ -638,5 +637,56 @@ class WebGLRenderer {
     this.gl.texSubImage2D(
         this.gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, this.gl.RGBA,
         this.gl.UNSIGNED_BYTE, buffer);
+  }
+}
+
+class Rewind {
+  constructor(e) {
+    this.e = e;
+    this.joypadBufferPtr = _joypad_new();
+    this.statePtr = 0;
+    this.bufferPtr = _rewind_new_simple(
+        e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
+    _emulator_set_default_joypad_callback(e, this.joypadBufferPtr);
+  }
+
+  destroy() {
+    _rewind_delete(this.bufferPtr);
+    _joypad_delete(this.joypadBufferPtr);
+  }
+
+  get oldestTicks() {
+    return _rewind_get_oldest_ticks_f64(this.bufferPtr);
+  }
+
+  get newestTicks() {
+    return _rewind_get_newest_ticks_f64(this.bufferPtr);
+  }
+
+  pushBuffer() {
+    if (!this.isRewinding) {
+      _rewind_append(this.bufferPtr, this.e);
+    }
+  }
+
+  get isRewinding() {
+    return this.statePtr !== 0;
+  }
+
+  beginRewind() {
+    if (this.isRewinding) return;
+    this.statePtr = _rewind_begin(this.e, this.bufferPtr, this.joypadBufferPtr);
+  }
+
+  rewindToTicks(ticks) {
+    if (!this.isRewinding) return;
+    return _rewind_to_ticks_wrapper(this.statePtr, ticks) === RESULT_OK;
+  }
+
+  endRewind() {
+    if (!this.isRewinding) return;
+    _emulator_set_default_joypad_callback(this.e, this.joypadBufferPtr);
+    _rewind_end(this.statePtr);
+    this.statePtr = 0;
   }
 }
