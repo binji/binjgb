@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #ifndef _MSC_VER
 #include <sys/time.h>
@@ -285,7 +286,7 @@ void print_ops(void) {
     printf("  ...\n");
   }
   printf("distinct: %d\n", distinct);
-  printf("total: %lu\n", total);
+  printf("total: %" PRIu64 "\n", total);
 }
 
 void swap_pair(U32Pair* a, U32Pair* b) {
