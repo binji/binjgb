@@ -285,7 +285,7 @@ void print_ops(void) {
     printf("  ...\n");
   }
   printf("distinct: %d\n", distinct);
-  printf("total: %lu\n", total);
+  printf("total: %llu\n", total);
 }
 
 void swap_pair(U32Pair* a, U32Pair* b) {

@@ -10,6 +10,8 @@
 #include "imgui_dock.h"
 #include "imgui-helpers.h"
 
+#include <string>
+
 Debugger::ROMWindow::ROMWindow(Debugger* d) : Window(d) {}
 
 void Debugger::ROMWindow::Init() {
