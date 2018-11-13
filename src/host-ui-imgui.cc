@@ -113,12 +113,11 @@ Result HostUI::init() {
 
 Result HostUI::init_gl() {
   static const char* s_vertex_shader =
-      "#version 130\n"
-      "attribute vec2 aPos;\n"
-      "attribute vec2 aUV;\n"
-      "attribute vec4 aColor;\n"
-      "varying vec2 vUV;\n"
-      "varying vec4 vColor;\n"
+      "in vec2 aPos;\n"
+      "in vec2 aUV;\n"
+      "in vec4 aColor;\n"
+      "out vec2 vUV;\n"
+      "out vec4 vColor;\n"
       "uniform mat3 uProjMatrix;\n"
       "void main(void) {\n"
       "  gl_Position = vec4(uProjMatrix * vec3(aPos, 1.0), 1.0);\n"
@@ -127,9 +126,9 @@ Result HostUI::init_gl() {
       "}\n";
 
   static const char* s_fragment_shader =
-      "#version 130\n"
-      "varying vec2 vUV;\n"
-      "varying vec4 vColor;\n"
+      "in vec2 vUV;\n"
+      "in vec4 vColor;\n"
+      "out vec4 oColor;\n"
       "uniform int uUsePalette;\n"
       "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
@@ -138,7 +137,7 @@ Result HostUI::init_gl() {
       "  if (uUsePalette != 0) {\n"
       "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
       "  }\n"
-      "  gl_FragColor = color;\n"
+      "  oColor = color;\n"
       "}\n";
 
   glGenBuffers(1, &vbo);

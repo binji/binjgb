@@ -34,18 +34,17 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   };
 
   static const char* s_vertex_shader =
-      "#version 130\n"
-      "attribute vec2 aPos;\n"
-      "attribute vec2 aTexCoord;\n"
-      "varying vec2 vTexCoord;\n"
+      "in vec2 aPos;\n"
+      "in vec2 aTexCoord;\n"
+      "out vec2 vTexCoord;\n"
       "void main(void) {\n"
       "  gl_Position = vec4(aPos, 0.0, 1.0);\n"
       "  vTexCoord = aTexCoord;\n"
       "}\n";
 
   static const char* s_fragment_shader =
-      "#version 130\n"
-      "varying vec2 vTexCoord;\n"
+      "in vec2 vTexCoord;\n"
+      "out vec4 oColor;\n"
       "uniform int uUsePalette;\n"
       "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
@@ -54,7 +53,7 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
       "  if (uUsePalette != 0) {\n"
       "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
       "  }\n"
-      "  gl_FragColor = color;\n"
+      "  oColor = color;\n"
       "}\n";
 
   ui->window = window;
