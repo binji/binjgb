@@ -49,7 +49,7 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
       "uniform vec4 uPalette[4];\n"
       "uniform sampler2D uSampler;\n"
       "void main(void) {\n"
-      "  vec4 color = texture2D(uSampler, vTexCoord);\n"
+      "  vec4 color = texture(uSampler, vTexCoord);\n"
       "  if (uUsePalette != 0) {\n"
       "    color = uPalette[int(clamp(color.x * 256.0, 0.0, 3.0))];\n"
       "  }\n"
