@@ -35,7 +35,11 @@ Result host_gl_init_procs(void) {
 Result host_gl_shader(GLenum type, const GLchar* source, GLuint* out_shader) {
   assert(type == GL_VERTEX_SHADER || type == GL_FRAGMENT_SHADER);
   GLuint shader = glCreateShader(type);
-  glShaderSource(shader, 1, &source, NULL);
+  char version[128];
+  snprintf(version, sizeof(version) - 1, "#version %d\n",
+           host_gl_shader_version());
+  const GLchar* sources[] = {version, source};
+  glShaderSource(shader, 2, sources, NULL);
   glCompileShader(shader);
   CHECK_LOG(shader, Shader, GL_COMPILE_STATUS, type == GL_VERTEX_SHADER
                                                    ? "GL_VERTEX_SHADER"
@@ -55,4 +59,11 @@ Result host_gl_program(GLuint vert_shader, GLuint frag_shader,
   *out_program = program;
   return OK;
   ON_ERROR_RETURN;
+}
+
+int host_gl_shader_version(void) {
+  const GLubyte* string = glGetString(GL_SHADING_LANGUAGE_VERSION);
+  int major, minor;
+  sscanf((const char*)string, "%d.%d", &major, &minor);
+  return major * 100 + minor;
 }
