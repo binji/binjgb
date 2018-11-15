@@ -104,7 +104,7 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
       (event->window.event == SDL_WINDOWEVENT_SHOWN ||
        event->window.event == SDL_WINDOWEVENT_RESIZED)) {
     int iw, ih;
-    SDL_GetWindowSize(ui->window, &iw, &ih);
+    SDL_GL_GetDrawableSize(ui->window, &iw, &ih);
     f32 w = iw, h = ih;
     f32 aspect = w / h;
     f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;

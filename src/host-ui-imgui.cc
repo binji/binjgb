@@ -288,7 +288,8 @@ void HostUI::begin_frame() {
 
 void HostUI::end_frame() {
   ImGuiIO& io = ImGui::GetIO();
-  glViewport(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+  glViewport(0, 0, io.DisplaySize.x * io.DisplayFramebufferScale.x,
+             io.DisplaySize.y * io.DisplayFramebufferScale.y);
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui::Render();
