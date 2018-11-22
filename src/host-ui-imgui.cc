@@ -22,11 +22,13 @@ struct HostUI {
   Result init();
   Result init_gl();
   void init_font();
+  void init_cursors();
   void event(union SDL_Event*);
   void upload_frame_buffer(FrameBuffer*);
   void render_draw_lists(ImDrawData*);
   void begin_frame();
   void end_frame();
+  void update_mouse_cursor();
   void set_palette(RGBA palette[4]);
   void enable_palette(bool enabled);
 
@@ -52,9 +54,12 @@ struct HostUI {
   // Global so it can be accessed by render_draw_lists callback, which has no
   // user_data pointer.
   static HostUI* s_ui;
+
+  static SDL_Cursor* s_cursors[ImGuiMouseCursor_COUNT];
 };
 
 HostUI* HostUI::s_ui;
+SDL_Cursor* HostUI::s_cursors[ImGuiMouseCursor_COUNT];
 
 HostUI::HostUI(SDL_Window* window)
     : window(window),
@@ -80,8 +85,10 @@ Result HostUI::init() {
   }
 
   init_font();
+  init_cursors();
 
   ImGuiIO& io = ImGui::GetIO();
+  io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;
   io.DisplaySize.x = 0;
   io.DisplaySize.y = 0;
   io.KeyMap[ImGuiKey_Tab] = SDLK_TAB;
@@ -196,6 +203,25 @@ void HostUI::init_font() {
   io.Fonts->TexID = (void*)(intptr_t)font_texture;
 }
 
+void HostUI::init_cursors() {
+  s_cursors[ImGuiMouseCursor_Arrow] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+  s_cursors[ImGuiMouseCursor_TextInput] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_IBEAM);
+  s_cursors[ImGuiMouseCursor_ResizeAll] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEALL);
+  s_cursors[ImGuiMouseCursor_ResizeNS] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
+  s_cursors[ImGuiMouseCursor_ResizeEW] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
+  s_cursors[ImGuiMouseCursor_ResizeNESW] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW);
+  s_cursors[ImGuiMouseCursor_ResizeNWSE] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE);
+  s_cursors[ImGuiMouseCursor_Hand] =
+      SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+}
+
 void HostUI::event(union SDL_Event* event) {
   ImGuiIO& io = ImGui::GetIO();
   switch (event->type) {
@@ -294,6 +320,25 @@ void HostUI::end_frame() {
   glClear(GL_COLOR_BUFFER_BIT);
   ImGui::Render();
   SDL_GL_SwapWindow(window);
+  update_mouse_cursor();
+}
+
+void HostUI::update_mouse_cursor() {
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) {
+    return;
+  }
+
+  ImGuiMouseCursor cursor = ImGui::GetMouseCursor();
+  if (io.MouseDrawCursor || cursor == ImGuiMouseCursor_None) {
+    // Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
+    SDL_ShowCursor(SDL_FALSE);
+  } else {
+    // Show OS mouse cursor
+    SDL_SetCursor(s_cursors[cursor] ? s_cursors[cursor]
+                                    : s_cursors[ImGuiMouseCursor_Arrow]);
+    SDL_ShowCursor(SDL_TRUE);
+  }
 }
 
 void HostUI::set_palette(RGBA palette[4]) {

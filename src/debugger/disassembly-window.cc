@@ -9,8 +9,10 @@
 #include <inttypes.h>
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_disassembly_window_name[] = "Disassembly";
 
 Debugger::DisassemblyWindow::DisassemblyWindow(Debugger* d) : Window(d) {}
 
@@ -19,7 +21,9 @@ void Debugger::DisassemblyWindow::Tick() {
   const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
   const ImU32 kBreakpointColor = IM_COL32(192, 0, 0, 255);
 
-  if (ImGui::BeginDock("Disassembly", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_disassembly_window_name, &is_open)) {
     Ticks now = emulator_get_ticks(d->e);
     u32 day, hr, min, sec, ms;
     emulator_ticks_to_time(now, &day, &hr, &min, &sec, &ms);
@@ -275,7 +279,7 @@ void Debugger::DisassemblyWindow::Tick() {
 
     ImGui::EndChild();
   }
-  ImGui::EndDock();
+  ImGui::End();
 }
 
 void Debugger::StepInstruction() {

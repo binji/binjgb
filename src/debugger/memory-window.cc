@@ -7,8 +7,10 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_memory_window_name[] = "Memory";
 
 Debugger::MemoryWindow::MemoryWindow(Debugger* d) : Window(d) {
   memory_editor.UserData = this;
@@ -23,7 +25,9 @@ Debugger::MemoryWindow::MemoryWindow(Debugger* d) : Window(d) {
 }
 
 void Debugger::MemoryWindow::Tick() {
-  if (ImGui::BeginDock("Memory", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_memory_window_name, &is_open)) {
     static const char* region_names[] = {
         "ALL", "ROM", "VRAM", "EXT RAM", "WRAM", "OAM", "I/O",
     };
@@ -40,5 +44,5 @@ void Debugger::MemoryWindow::Tick() {
     }
     memory_editor.DrawContents(nullptr, size, memory_editor_base);
   }
-  ImGui::EndDock();
+  ImGui::End();
 }

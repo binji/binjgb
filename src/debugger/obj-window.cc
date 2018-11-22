@@ -7,8 +7,10 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_obj_window_name[] = "Obj";
 
 static ImVec2 GetObjSizeVec2(ObjSize obj_size, f32 scale) {
   if (obj_size == OBJ_SIZE_8X16) {
@@ -21,7 +23,9 @@ static ImVec2 GetObjSizeVec2(ObjSize obj_size, f32 scale) {
 Debugger::ObjWindow::ObjWindow(Debugger* d) : Window(d) {}
 
 void Debugger::ObjWindow::Tick() {
-  if (ImGui::BeginDock("Obj", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_obj_window_name, &is_open)) {
     ObjSize obj_size = emulator_get_obj_size(d->e);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
@@ -92,7 +96,7 @@ void Debugger::ObjWindow::Tick() {
       ImGui::LabelText("Palette", "OBP%d", obj.palette);
     }
   }
-  ImGui::EndDock();
+  ImGui::End();
 }
 
 int Debugger::ObjWindow::GetObjTile(Obj obj) {

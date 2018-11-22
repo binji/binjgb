@@ -11,7 +11,9 @@
 
 #include "imgui-helpers.h"
 #include "imgui.h"
-#include "imgui_dock.h"
+
+// static
+const char Debugger::s_rewind_window_name[] = "Rewind";
 
 Debugger::RewindWindow::RewindWindow(Debugger* d) : Window(d) {
   emulator_init_state_file_data(&reverse_step_save_state);
@@ -22,7 +24,9 @@ Debugger::RewindWindow::~RewindWindow() {
 }
 
 void Debugger::RewindWindow::Tick() {
-  if (ImGui::BeginDock("Rewind", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_rewind_window_name, &is_open)) {
     bool rewinding = host_is_rewinding(d->host);
     if (ImGui::Checkbox("Rewind", &rewinding)) {
       if (rewinding) {
@@ -157,7 +161,7 @@ void Debugger::RewindWindow::Tick() {
     draw_bar(rw_stats.info_ranges[2], rw_stats.info_ranges[3], 0xff3eab32);
     ImGui::Dummy(ImVec2(w, h));
   }
-  ImGui::EndDock();
+  ImGui::End();
 }
 
 void Debugger::BeginRewind() {

@@ -218,6 +218,7 @@ class Debugger {
     bool size8x16 = false;
   };
 
+  ImGuiID dockspace_id;
   AudioWindow audio_window;
   DisassemblyWindow disassembly_window;
   EmulatorWindow emulator_window;
@@ -227,6 +228,16 @@ class Debugger {
   RewindWindow rewind_window;
   ROMWindow rom_window;
   TiledataWindow tiledata_window;
+
+  static const char s_audio_window_name[];
+  static const char s_disassembly_window_name[];
+  static const char s_emulator_window_name[];
+  static const char s_map_window_name[];
+  static const char s_memory_window_name[];
+  static const char s_obj_window_name[];
+  static const char s_rewind_window_name[];
+  static const char s_rom_window_name[];
+  static const char s_tiledata_window_name[];
 };
 
 #endif  // #define BINJGB_DEBUGGER_H__

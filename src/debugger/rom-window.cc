@@ -7,10 +7,12 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
 
 #include <string>
+
+// static
+const char Debugger::s_rom_window_name[] = "ROM";
 
 Debugger::ROMWindow::ROMWindow(Debugger* d) : Window(d) {}
 
@@ -34,7 +36,9 @@ void Debugger::ROMWindow::Init() {
 }
 
 void Debugger::ROMWindow::Tick() {
-  if (ImGui::BeginDock("ROM", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_rom_window_name, &is_open)) {
     host_upload_texture(d->host, rom_texture, rom_texture_width,
                         rom_texture_height, emulator_get_rom_usage());
 
@@ -140,5 +144,5 @@ void Debugger::ROMWindow::Tick() {
     }
     ImGui::EndChild();
   }
-  ImGui::EndDock();
+  ImGui::End();
 }

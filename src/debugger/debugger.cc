@@ -13,8 +13,9 @@
 #include <utility>
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+#include "imgui_internal.h"
 
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
@@ -119,6 +120,11 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
 
   ImGui::CreateContext();
 
+  auto& io = ImGui::GetIO();
+  io.FontGlobalScale = font_scale;
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  io.ConfigDockingWithShift = false;
+
   run_state = paused_at_start ? Paused : Running;
 
   ZERO_MEMORY(emulator_init);
@@ -166,7 +172,6 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   save_filename = replace_extension(filename, SAVE_EXTENSION);
   save_state_filename = replace_extension(filename, SAVE_STATE_EXTENSION);
   rom_usage_filename = replace_extension(filename, ROM_USAGE_EXTENSION);
-  ImGui::GetIO().FontGlobalScale = font_scale;
 
   is_cgb = emulator_is_cgb(e);
 
@@ -213,49 +218,62 @@ void Debugger::Run() {
     host_upload_texture(host, tile_data_texture, TILE_DATA_TEXTURE_WIDTH,
                         TILE_DATA_TEXTURE_HEIGHT, tile_data);
 
-    // Create a frameless top-level window to hold the workspace.
+    dockspace_id = ImGui::GetID("Dockspace");
+
+    // Create a frameless top-level window to hold the dockspace.
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_MenuBar;
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     if (ImGui::Begin("##root", nullptr, flags)) {
       MainMenuBar();
 
-      ImGui::BeginWorkspace();
+      // Initialize default dock layout.
+      if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGui::GetIO().DisplaySize);
 
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
+        ImGuiID left, mid, right;
+        ImGuiID left_top, left_bottom;
+        ImGuiID mid_top, mid_bottom;
+
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.333f, &left,
+                                    &mid);
+        ImGui::DockBuilderSplitNode(left, ImGuiDir_Up, 0.666f, &left_top,
+                                    &left_bottom);
+        mid = ImGui::DockBuilderSplitNode(mid, ImGuiDir_Left, 0.5f, nullptr,
+                                          &right);
+        ImGui::DockBuilderSplitNode(mid, ImGuiDir_Up, 0.5f, &mid_top,
+                                    &mid_bottom);
+
+        ImGui::DockBuilderDockWindow(s_emulator_window_name, left_top);
+        ImGui::DockBuilderDockWindow(s_audio_window_name, left_bottom);
+        ImGui::DockBuilderDockWindow(s_rewind_window_name, left_bottom);
+        ImGui::DockBuilderDockWindow(s_obj_window_name, mid_top);
+        ImGui::DockBuilderDockWindow(s_tiledata_window_name, mid_top);
+        ImGui::DockBuilderDockWindow(s_map_window_name, mid_bottom);
+        ImGui::DockBuilderDockWindow(s_disassembly_window_name, right);
+        ImGui::DockBuilderDockWindow(s_memory_window_name, right);
+        ImGui::DockBuilderDockWindow(s_rom_window_name, right);
+        ImGui::DockBuilderFinish(dockspace_id);
+      }
+
+      ImGui::DockSpace(dockspace_id);
+
       emulator_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Bottom);
       audio_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       rewind_window.Tick();
-
-      ImGui::SetNextDockParentToRoot();
-      ImGui::SetNextDock(ImGuiDockSlot_Right);
       tiledata_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       obj_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       map_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Right);
       rom_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       memory_window.Tick();
-
-      ImGui::SetNextDock(ImGuiDockSlot_Tab);
       disassembly_window.Tick();
-
-      ImGui::EndWorkspace();
     }
 
     ImGui::End();

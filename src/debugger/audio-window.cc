@@ -7,13 +7,17 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_audio_window_name[] = "Audio";
 
 Debugger::AudioWindow::AudioWindow(Debugger* d) : Window(d) {}
 
 void Debugger::AudioWindow::Tick() {
-  if (ImGui::BeginDock("Audio", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_audio_window_name, &is_open)) {
     EmulatorConfig config = emulator_get_config(d->e);
     ImGui::Text("channel enable");
     ImGui::SameLine(0, 20);
@@ -37,5 +41,5 @@ void Debugger::AudioWindow::Tick() {
                      128, ImVec2(0, 80));
 
   }
-  ImGui::EndDock();
+  ImGui::End();
 }

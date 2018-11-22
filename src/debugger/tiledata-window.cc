@@ -7,13 +7,17 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_tiledata_window_name[] = "TileData";
 
 Debugger::TiledataWindow::TiledataWindow(Debugger* d) : Window(d) {}
 
 void Debugger::TiledataWindow::Tick() {
-  if (ImGui::BeginDock("TileData", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_tiledata_window_name, &is_open)) {
     ImGui::SliderInt("Scale", &scale, 1, 5);
 
     PaletteRGBA palette_rgba;
@@ -110,5 +114,5 @@ void Debugger::TiledataWindow::Tick() {
     ImGui::LabelText("Address", "%d:%04x", d->GetTileBank(hovering_tile_index),
                      d->GetTileAddr(hovering_tile_index));
   }
-  ImGui::EndDock();
+  ImGui::End();
 }

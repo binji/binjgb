@@ -7,13 +7,17 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_map_window_name[] = "Map";
 
 Debugger::MapWindow::MapWindow(Debugger* d) : Window(d) {}
 
 void Debugger::MapWindow::Tick() {
-  if (ImGui::BeginDock("Map", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(Debugger::s_map_window_name, &is_open)) {
     static const char* layer_names[] = {"BG", "Window"};
 
     ImGui::SliderInt("Scale", &scale, 1, 5);
@@ -137,6 +141,6 @@ void Debugger::MapWindow::Tick() {
                        (attr & 0x80) ? "Above Obj" : "Normal");
     }
   }
-  ImGui::EndDock();
+  ImGui::End();
 }
 

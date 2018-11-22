@@ -7,14 +7,18 @@
 #include "debugger.h"
 
 #include "imgui.h"
-#include "imgui_dock.h"
 
 #include "imgui-helpers.h"
+
+// static
+const char Debugger::s_emulator_window_name[] = "Binjgb";
 
 Debugger::EmulatorWindow::EmulatorWindow(Debugger* d) : Window(d) {}
 
 void Debugger::EmulatorWindow::Tick() {
-  if (ImGui::BeginDock("Binjgb", &is_open)) {
+  if (!is_open) return;
+
+  if (ImGui::Begin(s_emulator_window_name, &is_open)) {
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     HostTexture* fb_texture = host_get_frame_buffer_texture(d->host);
     ImVec2 avail_size = ImGui::GetContentRegionAvail();
@@ -58,6 +62,6 @@ void Debugger::EmulatorWindow::Tick() {
 
     draw_list->PopClipRect();
   }
-  ImGui::EndDock();
+  ImGui::End();
 }
 
