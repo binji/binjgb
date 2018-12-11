@@ -30,7 +30,8 @@ class Debugger {
   ~Debugger();
 
   bool Init(const char* filename, int audio_frequency, int audio_frames,
-            int font_scale, bool paused_at_start, u32 random_seed);
+            int font_scale, bool paused_at_start, u32 random_seed,
+            bool force_dmg);
   void Run();
 
  private:

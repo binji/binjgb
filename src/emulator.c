@@ -4249,7 +4249,7 @@ static void randomize_buffer(u32* seed, u8* buffer, u32 size) {
   }
 }
 
-Result init_emulator(Emulator* e, u32 random_seed) {
+Result init_emulator(Emulator* e, const EmulatorInit* init) {
   static u8 s_initial_wave_ram[WAVE_RAM_SIZE] = {
       0x60, 0x0d, 0xda, 0xdd, 0x50, 0x0f, 0xad, 0xed,
       0xc0, 0xde, 0xf0, 0x0d, 0xbe, 0xef, 0xfe, 0xed,
@@ -4258,8 +4258,8 @@ Result init_emulator(Emulator* e, u32 random_seed) {
   log_cart_info(e->cart_info);
   MMAP_STATE.rom_base[0] = 0;
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
-  IS_CGB = e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
-           e->cart_info->cgb_flag == CGB_FLAG_REQUIRED;
+  IS_CGB = !init->force_dmg && (e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
+                                e->cart_info->cgb_flag == CGB_FLAG_REQUIRED);
   set_af_reg(e, 0xb0);
   REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
@@ -4309,6 +4309,7 @@ Result init_emulator(Emulator* e, u32 random_seed) {
   }
 
   /* Randomize RAM */
+  u32 random_seed = init->random_seed;
   e->state.random_seed = random_seed;
   randomize_buffer(&random_seed, e->state.ext_ram.data, EXT_RAM_MAX_SIZE);
   randomize_buffer(&random_seed, e->state.wram.data, WORK_RAM_SIZE);
@@ -4491,7 +4492,7 @@ error:
 Emulator* emulator_new(const EmulatorInit* init) {
   Emulator* e = xcalloc(1, sizeof(Emulator));
   CHECK(SUCCESS(set_rom_file_data(e, &init->rom)));
-  CHECK(SUCCESS(init_emulator(e, init->random_seed)));
+  CHECK(SUCCESS(init_emulator(e, init)));
   CHECK(
       SUCCESS(init_audio_buffer(e, init->audio_frequency, init->audio_frames)));
   return e;

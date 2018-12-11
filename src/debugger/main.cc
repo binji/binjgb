@@ -17,6 +17,7 @@ static const char* s_rom_filename;
 static f32 s_font_scale = 1.0f;
 static bool s_paused_at_start;
 static u32 s_random_seed = 0xcabba6e5;
+static bool s_force_dmg;
 
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
@@ -26,7 +27,8 @@ static void usage(int argc, char** argv) {
       "  -f,--font-scale=F  set the global font scale factor to F\n"
       "  -l,--log S=N       set log level for system S to N\n\n"
       "  -p,--pause         pause at start\n"
-      "  -s,--seed=SEED     random seed used for initializing RAM\n",
+      "  -s,--seed=SEED     random seed used for initializing RAM\n"
+      "     --force-dmg     force running as a DMG (original gameboy)\n",
       argv[0]);
 
   emulator_print_log_systems();
@@ -40,6 +42,7 @@ void parse_arguments(int argc, char** argv) {
     {'l', "log", 1},
     {'p', "pause", 0},
     {'s', "seed", 1},
+    {0, "force-dmg", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -105,7 +108,11 @@ void parse_arguments(int argc, char** argv) {
             break;
 
           default:
-            assert(0);
+            if (strcmp(result.option->long_name, "force-dmg") == 0) {
+              s_force_dmg = TRUE;
+            } else {
+              abort();
+            }
             break;
         }
         break;
@@ -143,7 +150,8 @@ int main(int argc, char** argv) {
 
   Debugger debugger;
   if (!debugger.Init(s_rom_filename, audio_frequency, audio_frames,
-                     s_font_scale, s_paused_at_start, s_random_seed)) {
+                     s_font_scale, s_paused_at_start, s_random_seed,
+                     s_force_dmg)) {
     return 1;
   }
   debugger.Run();

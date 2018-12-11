@@ -127,6 +127,7 @@ typedef struct EmulatorInit {
   int audio_frequency;
   int audio_frames;
   u32 random_seed;
+  Bool force_dmg;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {
