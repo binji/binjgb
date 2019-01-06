@@ -133,7 +133,11 @@ else (EMSCRIPTEN)
   set(LINK_FLAGS
     --memory-init-file 0
     -s EXPORTED_FUNCTIONS=\"@${EXPORTED_JSON}\"
-    -s NO_EXIT_RUNTIME=1
+    -s MALLOC=emmalloc
+    -s ASSERTIONS=0
+    -s ENVIRONMENT=web
+    -s FILESYSTEM=0
+    -s EXIT_RUNTIME=0
   )
   if (WASM)
     set(LINK_FLAGS ${LINK_FLAGS} -s WASM=1)
