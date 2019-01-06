@@ -291,8 +291,7 @@ static void joypad_playback_callback(struct JoypadButtons* joyp,
 }
 
 static void init_joypad_playback_state(JoypadPlayback* playback,
-                                       JoypadBuffer* buffer,
-                                       struct Emulator* e) {
+                                       JoypadBuffer* buffer, Emulator* e) {
   playback->e = e;
   playback->buffer = buffer;
   playback->current =
@@ -300,8 +299,7 @@ static void init_joypad_playback_state(JoypadPlayback* playback,
   playback->next = joypad_get_next_state(playback->current);
 }
 
-void emulator_set_joypad_playback_callback(struct Emulator* e,
-                                           JoypadBuffer* buffer,
+void emulator_set_joypad_playback_callback(Emulator* e, JoypadBuffer* buffer,
                                            JoypadPlayback* playback) {
   init_joypad_playback_state(playback, buffer, e);
   emulator_set_joypad_callback(e, joypad_playback_callback, playback);

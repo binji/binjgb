@@ -13,7 +13,7 @@
 #include "rewind.h"
 
 typedef struct {
-  struct Emulator* e;
+  Emulator* e;
   RewindBuffer* rewind_buffer;
   JoypadBuffer* joypad_buffer;
   RewindResult rewind_result;
@@ -21,13 +21,13 @@ typedef struct {
   JoypadStateIter next;
 } RewindState;
 
-static struct Emulator* e;
+static Emulator* e;
 
 static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
-struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
-                                     int audio_frequency, int audio_frames) {
+Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
+                              int audio_frequency, int audio_frames) {
   s_init.rom.data = rom_data;
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;
@@ -39,11 +39,11 @@ struct Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
   return e;
 }
 
-f64 emulator_get_ticks_f64(struct Emulator* e) {
+f64 emulator_get_ticks_f64(Emulator* e) {
   return (f64)emulator_get_ticks(e);
 }
 
-EmulatorEvent emulator_run_until_f64(struct Emulator* e, f64 until_ticks_f64) {
+EmulatorEvent emulator_run_until_f64(Emulator* e, f64 until_ticks_f64) {
   return emulator_run_until(e, (Ticks)until_ticks_f64);
 }
 
@@ -62,12 +62,12 @@ static void default_joypad_callback(JoypadButtons* joyp, void* user_data) {
   joypad_append_if_new(joypad_buffer, joyp, ticks);
 }
 
-void emulator_set_default_joypad_callback(struct Emulator* e,
+void emulator_set_default_joypad_callback(Emulator* e,
                                           JoypadBuffer* joypad_buffer) {
   emulator_set_joypad_callback(e, default_joypad_callback, joypad_buffer);
 }
 
-RewindBuffer* rewind_new_simple(struct Emulator* e, int frames_per_base_state,
+RewindBuffer* rewind_new_simple(Emulator* e, int frames_per_base_state,
                                 size_t buffer_capacity) {
   RewindInit init;
   init.frames_per_base_state = frames_per_base_state;
@@ -77,7 +77,7 @@ RewindBuffer* rewind_new_simple(struct Emulator* e, int frames_per_base_state,
 
 static RewindState s_rewind_state;
 
-RewindState* rewind_begin(struct Emulator* e, RewindBuffer* rewind_buffer,
+RewindState* rewind_begin(Emulator* e, RewindBuffer* rewind_buffer,
                           JoypadBuffer* joypad_buffer) {
   s_rewind_state.e = e;
   s_rewind_state.rewind_buffer = rewind_buffer;
@@ -124,7 +124,7 @@ void rewind_end(RewindState* state) {
 }
 
 #define DEFINE_JOYP_SET(name) \
-  void set_joyp_##name(struct Emulator* e, Bool set) { s_buttons.name = set; }
+  void set_joyp_##name(Emulator* e, Bool set) { s_buttons.name = set; }
 
 DEFINE_JOYP_SET(up)
 DEFINE_JOYP_SET(down)
@@ -135,27 +135,27 @@ DEFINE_JOYP_SET(A)
 DEFINE_JOYP_SET(start)
 DEFINE_JOYP_SET(select)
 
-void* get_frame_buffer_ptr(struct Emulator* e) {
+void* get_frame_buffer_ptr(Emulator* e) {
   return *emulator_get_frame_buffer(e);
 }
 
-size_t get_frame_buffer_size(struct Emulator* e) { return sizeof(FrameBuffer); }
+size_t get_frame_buffer_size(Emulator* e) { return sizeof(FrameBuffer); }
 
-void* get_audio_buffer_ptr(struct Emulator* e) {
+void* get_audio_buffer_ptr(Emulator* e) {
   return emulator_get_audio_buffer(e)->data;
 }
 
-size_t get_audio_buffer_capacity(struct Emulator* e) {
+size_t get_audio_buffer_capacity(Emulator* e) {
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
   return audio_buffer->end - audio_buffer->data;
 }
 
-size_t get_audio_buffer_size(struct Emulator* e) {
+size_t get_audio_buffer_size(Emulator* e) {
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
   return audio_buffer->position - audio_buffer->data;
 }
 
-FileData* ext_ram_file_data_new(struct Emulator* e) {
+FileData* ext_ram_file_data_new(Emulator* e) {
   FileData* file_data = xmalloc(sizeof(FileData));
   emulator_init_ext_ram_file_data(e, file_data);
   return file_data;

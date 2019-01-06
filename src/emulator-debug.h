@@ -65,8 +65,6 @@ typedef enum {
   ROM_USAGE_CODE_START = 4, /* Start of an opcode. */
 } RomUsage;
 
-struct Emulator;
-
 #define TILE_DATA_TEXTURE_WIDTH 256
 #define TILE_DATA_TEXTURE_HEIGHT 192
 typedef u8 TileData[TILE_DATA_TEXTURE_WIDTH * TILE_DATA_TEXTURE_HEIGHT];
@@ -78,7 +76,7 @@ typedef u8 TileMap[TILE_MAP_SIZE];
 
 #if 0
 typedef struct EmulatorHookContext {
-  struct Emulator* e;
+  Emulator* e;
   void* user_data;
 } EmulatorHookContext;
 
@@ -87,7 +85,7 @@ typedef struct EmulatorHooks {
   void (*message)(LogSystem, LogLevel, const char* message);
 } EmulatorHooks;
 
-void emulator_set_hooks(struct Emulator*, EmulatorHooks*);
+void emulator_set_hooks(Emulator*, EmulatorHooks*);
 #endif
 
 typedef struct {
@@ -109,9 +107,9 @@ const char* emulator_get_log_system_name(LogSystem);
 LogLevel emulator_get_log_level(LogSystem);
 void emulator_print_log_systems();
 
-Bool emulator_is_cgb(struct Emulator*);
+Bool emulator_is_cgb(Emulator*);
 
-int emulator_get_rom_size(struct Emulator*);
+int emulator_get_rom_size(Emulator*);
 Bool emulator_get_rom_usage_enabled(void);
 void emulator_set_rom_usage_enabled(Bool enable);
 u8* emulator_get_rom_usage(void);
@@ -127,44 +125,43 @@ void emulator_set_profiling_enabled(Bool enable);
 u32* emulator_get_profiling_counters(void);
 
 void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size);
-int emulator_disassemble(struct Emulator*, Address, char* buffer, size_t size);
-void emulator_disassemble_rom(struct Emulator*, u32 rom_addr, char* buffer,
+int emulator_disassemble(Emulator*, Address, char* buffer, size_t size);
+void emulator_disassemble_rom(Emulator*, u32 rom_addr, char* buffer,
                               size_t size);
-Registers emulator_get_registers(struct Emulator*);
+Registers emulator_get_registers(Emulator*);
 
 int emulator_get_max_breakpoint_id(void);
 Breakpoint emulator_get_breakpoint(int id);
-Breakpoint emulator_get_breakpoint_by_address(struct Emulator*, Address addr);
+Breakpoint emulator_get_breakpoint_by_address(Emulator*, Address addr);
 int emulator_add_empty_breakpoint(void);
-int emulator_add_breakpoint(struct Emulator*, Address, Bool enabled);
-void emulator_set_breakpoint_address(struct Emulator*, int id, Address);
+int emulator_add_breakpoint(Emulator*, Address, Bool enabled);
+void emulator_set_breakpoint_address(Emulator*, int id, Address);
 void emulator_enable_breakpoint(int id, Bool enabled);
 void emulator_remove_breakpoint(int id);
 
-int emulator_get_rom_bank(struct Emulator*, Address);
+int emulator_get_rom_bank(Emulator*, Address);
 
-u8 emulator_read_u8_raw(struct Emulator*, Address);
-void emulator_write_u8_raw(struct Emulator*, Address, u8);
+u8 emulator_read_u8_raw(Emulator*, Address);
+void emulator_write_u8_raw(Emulator*, Address, u8);
 
-TileDataSelect emulator_get_tile_data_select(struct Emulator*);
-TileMapSelect emulator_get_tile_map_select(struct Emulator*, LayerType);
-Palette emulator_get_palette(struct Emulator*, PaletteType);
-PaletteRGBA emulator_get_palette_rgba(struct Emulator*, PaletteType);
-PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator*, CgbPaletteType,
-                                          int index);
-void emulator_get_tile_data(struct Emulator*, TileData);
-void emulator_get_tile_map(struct Emulator*, TileMapSelect, TileMap);
-void emulator_get_tile_map_attr(struct Emulator*, TileMapSelect, TileMap);
-void emulator_get_bg_scroll(struct Emulator*, u8* x, u8* y);
-void emulator_get_window_scroll(struct Emulator*, u8* x, u8* y);
+TileDataSelect emulator_get_tile_data_select(Emulator*);
+TileMapSelect emulator_get_tile_map_select(Emulator*, LayerType);
+Palette emulator_get_palette(Emulator*, PaletteType);
+PaletteRGBA emulator_get_palette_rgba(Emulator*, PaletteType);
+PaletteRGBA emulator_get_cgb_palette_rgba(Emulator*, CgbPaletteType, int index);
+void emulator_get_tile_data(Emulator*, TileData);
+void emulator_get_tile_map(Emulator*, TileMapSelect, TileMap);
+void emulator_get_tile_map_attr(Emulator*, TileMapSelect, TileMap);
+void emulator_get_bg_scroll(Emulator*, u8* x, u8* y);
+void emulator_get_window_scroll(Emulator*, u8* x, u8* y);
 
-Bool emulator_get_display(struct Emulator*);
-Bool emulator_get_bg_display(struct Emulator*);
-Bool emulator_get_window_display(struct Emulator*);
-Bool emulator_get_obj_display(struct Emulator*);
+Bool emulator_get_display(Emulator*);
+Bool emulator_get_bg_display(Emulator*);
+Bool emulator_get_window_display(Emulator*);
+Bool emulator_get_obj_display(Emulator*);
 
-ObjSize emulator_get_obj_size(struct Emulator*);
-Obj emulator_get_obj(struct Emulator*, int index);
+ObjSize emulator_get_obj_size(Emulator*);
+Obj emulator_get_obj(Emulator*, int index);
 Bool obj_is_visible(const Obj* obj);
 
 RGBA color_to_rgba(Color color);

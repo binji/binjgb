@@ -358,8 +358,6 @@ typedef struct {
   ExtRamSize ext_ram_size;
 } CartInfo;
 
-struct Emulator;
-
 typedef struct {
   u8 byte_2000_3fff;
   u8 byte_4000_5fff;
@@ -380,9 +378,9 @@ typedef struct {
 } Mbc5;
 
 typedef struct {
-  u8 (*read_ext_ram)(struct Emulator*, MaskedAddress);
-  void (*write_rom)(struct Emulator*, MaskedAddress, u8);
-  void (*write_ext_ram)(struct Emulator*, MaskedAddress, u8);
+  u8 (*read_ext_ram)(Emulator*, MaskedAddress);
+  void (*write_rom)(Emulator*, MaskedAddress, u8);
+  void (*write_ext_ram)(Emulator*, MaskedAddress, u8);
 } MemoryMap;
 
 typedef struct {
@@ -665,7 +663,7 @@ typedef struct {
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
 
-typedef struct Emulator {
+struct Emulator {
   EmulatorConfig config;
   FileData file_data;
   CartInfo cart_infos[MAX_CART_INFOS];
@@ -676,7 +674,7 @@ typedef struct Emulator {
   FrameBuffer frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallbackInfo joypad_info;
-} Emulator;
+};
 
 
 /* Abbreviations of commonly accessed values. */
@@ -4147,7 +4145,7 @@ static void emulator_step_internal(Emulator* e) {
   }
 }
 
-EmulatorEvent emulator_run_until(struct Emulator* e, Ticks until_ticks) {
+EmulatorEvent emulator_run_until(Emulator* e, Ticks until_ticks) {
   AudioBuffer* ab = &e->audio_buffer;
   if (e->state.event & EMULATOR_EVENT_AUDIO_BUFFER_FULL) {
     ab->position = ab->data;
@@ -4321,41 +4319,41 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   ON_ERROR_RETURN;
 }
 
-void emulator_set_joypad_buttons(struct Emulator* e, JoypadButtons* buttons) {
+void emulator_set_joypad_buttons(Emulator* e, JoypadButtons* buttons) {
   JOYP.buttons = *buttons;
 }
 
-void emulator_set_joypad_callback(struct Emulator* e, JoypadCallback callback,
+void emulator_set_joypad_callback(Emulator* e, JoypadCallback callback,
                                   void* user_data) {
   e->joypad_info.callback = callback;
   e->joypad_info.user_data = user_data;
 }
 
-JoypadCallbackInfo emulator_get_joypad_callback(struct Emulator* e) {
+JoypadCallbackInfo emulator_get_joypad_callback(Emulator* e) {
   return e->joypad_info;
 }
 
-void emulator_set_config(struct Emulator* e, const EmulatorConfig* config) {
+void emulator_set_config(Emulator* e, const EmulatorConfig* config) {
   e->config = *config;
 }
 
-EmulatorConfig emulator_get_config(struct Emulator* e) {
+EmulatorConfig emulator_get_config(Emulator* e) {
   return e->config;
 }
 
-FrameBuffer* emulator_get_frame_buffer(struct Emulator* e) {
+FrameBuffer* emulator_get_frame_buffer(Emulator* e) {
   return &e->frame_buffer;
 }
 
-AudioBuffer* emulator_get_audio_buffer(struct Emulator* e) {
+AudioBuffer* emulator_get_audio_buffer(Emulator* e) {
   return &e->audio_buffer;
 }
 
-Ticks emulator_get_ticks(struct Emulator* e) {
+Ticks emulator_get_ticks(Emulator* e) {
   return TICKS;
 }
 
-u32 emulator_get_ppu_frame(struct Emulator* e) {
+u32 emulator_get_ppu_frame(Emulator* e) {
   return PPU.frame;
 }
 
@@ -4433,8 +4431,7 @@ Result emulator_write_ext_ram(Emulator* e, FileData* file_data) {
   ON_ERROR_RETURN;
 }
 
-Result emulator_read_ext_ram_from_file(struct Emulator* e,
-                                       const char* filename) {
+Result emulator_read_ext_ram_from_file(Emulator* e, const char* filename) {
   if (EXT_RAM.battery_type != BATTERY_TYPE_WITH_BATTERY)
     return OK;
   Result result = ERROR;
@@ -4448,8 +4445,7 @@ error:
   return result;
 }
 
-Result emulator_write_ext_ram_to_file(struct Emulator* e,
-                                      const char* filename) {
+Result emulator_write_ext_ram_to_file(Emulator* e, const char* filename) {
   if (EXT_RAM.battery_type != BATTERY_TYPE_WITH_BATTERY)
     return OK;
 
@@ -4465,7 +4461,7 @@ error:
   return result;
 }
 
-Result emulator_read_state_from_file(struct Emulator* e, const char* filename) {
+Result emulator_read_state_from_file(Emulator* e, const char* filename) {
   Result result = ERROR;
   FileData file_data;
   ZERO_MEMORY(file_data);
@@ -4477,7 +4473,7 @@ error:
   return result;
 }
 
-Result emulator_write_state_to_file(struct Emulator* e, const char* filename) {
+Result emulator_write_state_to_file(Emulator* e, const char* filename) {
   Result result = ERROR;
   FileData file_data;
   emulator_init_state_file_data(&file_data);

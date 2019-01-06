@@ -85,9 +85,9 @@
     }                                      \
   } while (0)
 
-static void rewind_sanity_check(RewindBuffer*, struct Emulator*);
+static void rewind_sanity_check(RewindBuffer*, Emulator*);
 
-RewindBuffer* rewind_new(const RewindInit* init, struct Emulator* e) {
+RewindBuffer* rewind_new(const RewindInit* init, Emulator* e) {
   RewindBuffer* buffer = xmalloc(sizeof(RewindBuffer));
   ZERO_MEMORY(*buffer);
   buffer->init = *init;
@@ -198,7 +198,7 @@ static RewindInfo* find_first_base_in_range(RewindInfoRange range) {
   return NULL;
 }
 
-void rewind_append(RewindBuffer* buf, struct Emulator* e) {
+void rewind_append(RewindBuffer* buf, Emulator* e) {
   Ticks ticks = emulator_get_ticks(e);
   (void)emulator_write_state(e, &buf->last_state);
 
@@ -373,7 +373,7 @@ Result rewind_to_ticks(RewindBuffer* buf, Ticks ticks,
   return OK;
 }
 
-void rewind_truncate_to(RewindBuffer* buffer, struct Emulator* e,
+void rewind_truncate_to(RewindBuffer* buffer, Emulator* e,
                         RewindResult* result) {
   /* Remove data from rewind buffer that are now invalid. */
   int info_range_index = result->info_range_index;
@@ -449,7 +449,7 @@ RewindStats rewind_get_stats(RewindBuffer* buffer) {
   return stats;
 }
 
-void rewind_sanity_check(RewindBuffer* buffer, struct Emulator* e) {
+void rewind_sanity_check(RewindBuffer* buffer, Emulator* e) {
 #if SANITY_CHECK
   assert(buffer->data_range[0].begin <= buffer->data_range[0].end);
   assert(buffer->data_range[0].end <= buffer->data_range[1].begin);

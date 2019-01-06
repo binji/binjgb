@@ -25,7 +25,7 @@ static int s_breakpoint_max_id;
 #define HOOK0_FALSE(name) HOOK_##name(e, __func__)
 
 #define DECLARE_LOG_HOOK(system, level, name, format) \
-  static void HOOK_##name(struct Emulator* e, const char* func_name, ...);
+  static void HOOK_##name(Emulator* e, const char* func_name, ...);
 
 #define DEFINE_LOG_HOOK(system, level, name, format)                        \
   void HOOK_##name(Emulator* e, const char* func_name, ...) {               \
@@ -112,13 +112,12 @@ static int s_breakpoint_max_id;
   X(M, D, write_io_ignored_as, "(%#04x, %#02x) ignored")                       \
   X(M, D, write_ram_disabled_ab, "(%#04x, %#02x) ignored, ram disabled")
 
-static Bool HOOK_emulator_step(struct Emulator*, const char* func_name);
-static void HOOK_read_rom_ib(struct Emulator*, const char* func_name,
-                             u32 rom_addr, u8 value);
-static void HOOK_exec_op_ai(struct Emulator*, const char* func_name, Address,
+static Bool HOOK_emulator_step(Emulator*, const char* func_name);
+static void HOOK_read_rom_ib(Emulator*, const char* func_name, u32 rom_addr,
+                             u8 value);
+static void HOOK_exec_op_ai(Emulator*, const char* func_name, Address,
                             u8 opcode);
-static void HOOK_exec_cb_op_i(struct Emulator*, const char* func_name,
-                              u8 opcode);
+static void HOOK_exec_cb_op_i(Emulator*, const char* func_name, u8 opcode);
 
 FOREACH_LOG_HOOKS(DECLARE_LOG_HOOK)
 
@@ -341,7 +340,7 @@ static void print_instruction(Emulator* e, Address addr) {
   printf("%s", temp);
 }
 
-void emulator_disassemble_rom(struct Emulator* e, u32 rom_addr, char* buffer,
+void emulator_disassemble_rom(Emulator* e, u32 rom_addr, char* buffer,
                               size_t size) {
   char instr[100];
   u8* rom = e->cart_info->data;
@@ -355,7 +354,7 @@ void emulator_disassemble_rom(struct Emulator* e, u32 rom_addr, char* buffer,
   snprintf(buffer, size, "[%02x]%#06x: %s", bank, addr, instr);
 }
 
-Registers emulator_get_registers(struct Emulator* e) { return REG; }
+Registers emulator_get_registers(Emulator* e) { return REG; }
 
 int emulator_get_max_breakpoint_id(void) {
   return s_breakpoint_max_id;
@@ -462,7 +461,7 @@ void emulator_remove_breakpoint(int id) {
   --s_breakpoint_count;
 }
 
-int emulator_get_rom_bank(struct Emulator* e, Address addr) {
+int emulator_get_rom_bank(Emulator* e, Address addr) {
   int region = addr >> ROM_BANK_SHIFT;
   if (region < 2) {
     return MMAP_STATE.rom_base[region] >> ROM_BANK_SHIFT;
@@ -471,11 +470,11 @@ int emulator_get_rom_bank(struct Emulator* e, Address addr) {
   }
 }
 
-u8 emulator_read_u8_raw(struct Emulator* e, Address addr) {
+u8 emulator_read_u8_raw(Emulator* e, Address addr) {
   return read_u8_raw(e, addr);
 }
 
-void emulator_write_u8_raw(struct Emulator* e, Address addr, u8 value) {
+void emulator_write_u8_raw(Emulator* e, Address addr, u8 value) {
   write_u8_raw(e, addr, value);
 }
 
@@ -516,7 +515,7 @@ void HOOK_read_rom_ib(Emulator* e, const char* func_name, u32 rom_addr,
 
 #define INVALID_ROM_ADDR (~0u)
 
-static u32 get_rom_addr(struct Emulator* e, Address addr) {
+static u32 get_rom_addr(Emulator* e, Address addr) {
   if (addr < 0x4000) {
     return e->state.memory_map_state.rom_base[0] | (addr & 0x3fff);
   } else if (addr < 0x8000) {
@@ -526,7 +525,7 @@ static u32 get_rom_addr(struct Emulator* e, Address addr) {
   }
 }
 
-static void mark_rom_usage_for_pc(struct Emulator* e, u32 rom_addr) {
+static void mark_rom_usage_for_pc(Emulator* e, u32 rom_addr) {
   if (!s_rom_usage_enabled || rom_addr == INVALID_ROM_ADDR) {
     return;
   }
@@ -725,18 +724,17 @@ void emulator_print_log_systems(void) {
   }
 }
 
-Bool emulator_is_cgb(struct Emulator* e) { return e->state.is_cgb; }
+Bool emulator_is_cgb(Emulator* e) { return e->state.is_cgb; }
 
-int emulator_get_rom_size(struct Emulator* e) {
+int emulator_get_rom_size(Emulator* e) {
   return s_rom_bank_count[e->cart_info->rom_size] << ROM_BANK_SHIFT;
 }
 
-TileDataSelect emulator_get_tile_data_select(struct Emulator* e) {
+TileDataSelect emulator_get_tile_data_select(Emulator* e) {
   return PPU.lcdc.bg_tile_data_select;
 }
 
-TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
-                                           LayerType layer_type) {
+TileMapSelect emulator_get_tile_map_select(Emulator* e, LayerType layer_type) {
   switch (layer_type) {
     case LAYER_TYPE_BG:
       return PPU.lcdc.bg_tile_map_select;
@@ -747,7 +745,7 @@ TileMapSelect emulator_get_tile_map_select(struct Emulator* e,
   }
 }
 
-Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
+Palette emulator_get_palette(Emulator* e, PaletteType type) {
   switch (type) {
     case PALETTE_TYPE_BGP:
       return PPU.bgp.palette;
@@ -766,12 +764,12 @@ Palette emulator_get_palette(struct Emulator* e, PaletteType type) {
   }
 }
 
-PaletteRGBA emulator_get_palette_rgba(struct Emulator* e, PaletteType type) {
+PaletteRGBA emulator_get_palette_rgba(Emulator* e, PaletteType type) {
   return palette_to_palette_rgba(emulator_get_palette(e, type));
 }
 
-PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator* e,
-                                          CgbPaletteType type, int index) {
+PaletteRGBA emulator_get_cgb_palette_rgba(Emulator* e, CgbPaletteType type,
+                                          int index) {
   assert(e->state.is_cgb);
   assert(index < 8);
   switch (type) {
@@ -781,7 +779,7 @@ PaletteRGBA emulator_get_cgb_palette_rgba(struct Emulator* e,
   }
 }
 
-void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
+void emulator_get_tile_data(Emulator* e, TileData out_tile_data) {
   assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
   assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
   const int banks = 2;
@@ -812,13 +810,13 @@ void emulator_get_tile_data(struct Emulator* e, TileData out_tile_data) {
   }
 }
 
-void emulator_get_tile_map(struct Emulator* e, TileMapSelect map_select,
+void emulator_get_tile_map(Emulator* e, TileMapSelect map_select,
                            TileMap out_tile_map) {
   size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
   memcpy(out_tile_map, &e->state.vram.data[offset], TILE_MAP_SIZE);
 }
 
-void emulator_get_tile_map_attr(struct Emulator* e, TileMapSelect map_select,
+void emulator_get_tile_map_attr(Emulator* e, TileMapSelect map_select,
                                 TileMap out_tile_map) {
   assert(emulator_is_cgb(e));
   size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
@@ -826,37 +824,37 @@ void emulator_get_tile_map_attr(struct Emulator* e, TileMapSelect map_select,
 }
 
 
-void emulator_get_bg_scroll(struct Emulator* e, u8* x, u8* y) {
+void emulator_get_bg_scroll(Emulator* e, u8* x, u8* y) {
   *x = PPU.scx;
   *y = PPU.scy;
 }
 
-void emulator_get_window_scroll(struct Emulator* e, u8* x, u8* y) {
+void emulator_get_window_scroll(Emulator* e, u8* x, u8* y) {
   *x = PPU.wx - WINDOW_X_OFFSET;
   *y = PPU.wy;
 }
 
-Bool emulator_get_display(struct Emulator* e) {
+Bool emulator_get_display(Emulator* e) {
   return PPU.lcdc.display;
 }
 
-Bool emulator_get_bg_display(struct Emulator* e) {
+Bool emulator_get_bg_display(Emulator* e) {
   return PPU.lcdc.bg_display;
 }
 
-Bool emulator_get_window_display(struct Emulator* e) {
+Bool emulator_get_window_display(Emulator* e) {
   return PPU.lcdc.window_display;
 }
 
-Bool emulator_get_obj_display(struct Emulator* e) {
+Bool emulator_get_obj_display(Emulator* e) {
   return PPU.lcdc.obj_display;
 }
 
-ObjSize emulator_get_obj_size(struct Emulator* e) {
+ObjSize emulator_get_obj_size(Emulator* e) {
   return PPU.lcdc.obj_size;
 }
 
-Obj emulator_get_obj(struct Emulator* e, int index) {
+Obj emulator_get_obj(Emulator* e, int index) {
   if (index >= 0 && index < OBJ_COUNT) {
     return e->state.oam[index];
   }

@@ -76,7 +76,7 @@ typedef struct Host {
   Ticks last_ticks;
 } Host;
 
-static struct Emulator* host_get_emulator(Host* host) {
+static Emulator* host_get_emulator(Host* host) {
   return host->hook_ctx.e;
 }
 
@@ -146,7 +146,7 @@ static HostKeycode scancode_to_keycode(SDL_Scancode scancode) {
 }
 
 Bool host_poll_events(Host* host) {
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   Bool running = TRUE;
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
@@ -204,7 +204,7 @@ void host_set_audio_volume(Host* host, f32 volume) {
 }
 
 void host_render_audio(Host* host) {
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   Audio* audio = &host->audio;
   AudioBuffer* audio_buffer = emulator_get_audio_buffer(e);
 
@@ -276,7 +276,7 @@ static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   joypad_append_if_new(host->joypad_buffer, joyp, ticks);
 }
 
-static Result host_init_joypad(Host* host, struct Emulator* e) {
+static Result host_init_joypad(Host* host, Emulator* e) {
   if (host->init.joypad_filename) {
     FileData file_data;
     CHECK(SUCCESS(file_read(host->init.joypad_filename, &file_data)));
@@ -329,7 +329,7 @@ error:
 }
 
 static void host_handle_event(Host* host, EmulatorEvent event) {
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   if (event & EMULATOR_EVENT_NEW_FRAME) {
     host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
                         *emulator_get_frame_buffer(e));
@@ -343,7 +343,7 @@ static void host_handle_event(Host* host, EmulatorEvent event) {
 }
 
 static EmulatorEvent host_run_until_ticks(struct Host* host, Ticks ticks) {
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   assert(emulator_get_ticks(e) <= ticks);
   EmulatorEvent event;
   do {
@@ -365,7 +365,7 @@ Result host_rewind_to_ticks(Host* host, Ticks ticks) {
   RewindResult* result = &host->rewind_state.rewind_result;
   CHECK(SUCCESS(rewind_to_ticks(host->rewind_buffer, ticks, result)));
 
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   CHECK(SUCCESS(emulator_read_state(e, &result->file_data)));
   assert(emulator_get_ticks(e) == result->info->ticks);
 
@@ -388,7 +388,7 @@ void host_end_rewind(Host* host) {
   assert(host->rewind_state.rewinding);
 
   if (host->rewind_state.rewind_result.info) {
-    struct Emulator* e = host_get_emulator(host);
+    Emulator* e = host_get_emulator(host);
     rewind_truncate_to(host->rewind_buffer, e,
                        &host->rewind_state.rewind_result);
     if (!host->init.joypad_filename) {
@@ -408,7 +408,7 @@ Bool host_is_rewinding(Host* host) {
   return host->rewind_state.rewinding;
 }
 
-Result host_init(Host* host, struct Emulator* e) {
+Result host_init(Host* host, Emulator* e) {
   CHECK_MSG(
       SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) == 0,
       "SDL_init failed.\n");
@@ -424,7 +424,7 @@ Result host_init(Host* host, struct Emulator* e) {
 
 EmulatorEvent host_run_ms(struct Host* host, f64 delta_ms) {
   assert(!host->rewind_state.rewinding);
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   Ticks delta_ticks = (Ticks)(delta_ms * CPU_TICKS_PER_SECOND / 1000);
   Ticks until_ticks = emulator_get_ticks(e) + delta_ticks;
   EmulatorEvent event = host_run_until_ticks(host, until_ticks);
@@ -434,14 +434,14 @@ EmulatorEvent host_run_ms(struct Host* host, f64 delta_ms) {
 
 EmulatorEvent host_step(Host* host) {
   assert(!host->rewind_state.rewinding);
-  struct Emulator* e = host_get_emulator(host);
+  Emulator* e = host_get_emulator(host);
   EmulatorEvent event = emulator_step(e);
   host_handle_event(host, event);
   host->last_ticks = emulator_get_ticks(e);
   return event;
 }
 
-Host* host_new(const HostInit *init, struct Emulator* e) {
+Host* host_new(const HostInit *init, Emulator* e) {
   Host* host = xcalloc(1, sizeof(Host));
   host->init = *init;
   host->hook_ctx.host = host;

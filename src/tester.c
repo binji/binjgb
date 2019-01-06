@@ -37,7 +37,7 @@ static u32 s_random_seed = 0xcabba6e5;
 static Bool s_force_dmg;
 
 
-Result write_frame_ppm(struct Emulator* e, const char* filename) {
+Result write_frame_ppm(Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
@@ -335,7 +335,7 @@ void extract_min_heap(U32Pair* min_heap, u32 last_index) {
   }
 }
 
-void print_profile(struct Emulator* e) {
+void print_profile(Emulator* e) {
   u32 rom_size = emulator_get_rom_size(e);
   u32* counters = emulator_get_profiling_counters();
   const u32 heap_limit = s_profile_limit;
@@ -368,7 +368,7 @@ void print_profile(struct Emulator* e) {
 
 int main(int argc, char** argv) {
   int result = 1;
-  struct Emulator* e = NULL;
+  Emulator* e = NULL;
   JoypadBuffer* joypad_buffer = NULL;
 
   parse_options(argc, argv);

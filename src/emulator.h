@@ -30,7 +30,7 @@ extern "C" {
 #define OBJ_X_OFFSET 8
 #define OBJ_Y_OFFSET 16
 
-struct Emulator;
+typedef struct Emulator Emulator;
 
 enum {
   APU_CHANNEL1,
@@ -149,40 +149,39 @@ enum {
 
 extern const size_t s_emulator_state_size;
 
-struct Emulator* emulator_new(const EmulatorInit*);
-void emulator_delete(struct Emulator*);
+Emulator* emulator_new(const EmulatorInit*);
+void emulator_delete(Emulator*);
 
-void emulator_set_joypad_buttons(struct Emulator*, JoypadButtons*);
-void emulator_set_joypad_callback(struct Emulator*, JoypadCallback,
-                                  void* user_data);
-JoypadCallbackInfo emulator_get_joypad_callback(struct Emulator*);
-void emulator_set_config(struct Emulator*, const EmulatorConfig*);
-EmulatorConfig emulator_get_config(struct Emulator*);
-FrameBuffer* emulator_get_frame_buffer(struct Emulator*);
-AudioBuffer* emulator_get_audio_buffer(struct Emulator*);
-Ticks emulator_get_ticks(struct Emulator*);
-u32 emulator_get_ppu_frame(struct Emulator*);
+void emulator_set_joypad_buttons(Emulator*, JoypadButtons*);
+void emulator_set_joypad_callback(Emulator*, JoypadCallback, void* user_data);
+JoypadCallbackInfo emulator_get_joypad_callback(Emulator*);
+void emulator_set_config(Emulator*, const EmulatorConfig*);
+EmulatorConfig emulator_get_config(Emulator*);
+FrameBuffer* emulator_get_frame_buffer(Emulator*);
+AudioBuffer* emulator_get_audio_buffer(Emulator*);
+Ticks emulator_get_ticks(Emulator*);
+u32 emulator_get_ppu_frame(Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
 
 void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
                             u32* ms);
 
-Bool emulator_was_ext_ram_updated(struct Emulator*);
+Bool emulator_was_ext_ram_updated(Emulator*);
 
 void emulator_init_state_file_data(FileData*);
-void emulator_init_ext_ram_file_data(struct Emulator*, FileData*);
-Result emulator_read_state(struct Emulator*, const FileData*);
-Result emulator_write_state(struct Emulator*, FileData*);
-Result emulator_read_ext_ram(struct Emulator*, const FileData*);
-Result emulator_write_ext_ram(struct Emulator*, FileData*);
+void emulator_init_ext_ram_file_data(Emulator*, FileData*);
+Result emulator_read_state(Emulator*, const FileData*);
+Result emulator_write_state(Emulator*, FileData*);
+Result emulator_read_ext_ram(Emulator*, const FileData*);
+Result emulator_write_ext_ram(Emulator*, FileData*);
 
-Result emulator_read_state_from_file(struct Emulator*, const char* filename);
-Result emulator_write_state_to_file(struct Emulator*, const char* filename);
-Result emulator_read_ext_ram_from_file(struct Emulator*, const char* filename);
-Result emulator_write_ext_ram_to_file(struct Emulator*, const char* filename);
+Result emulator_read_state_from_file(Emulator*, const char* filename);
+Result emulator_write_state_to_file(Emulator*, const char* filename);
+Result emulator_read_ext_ram_from_file(Emulator*, const char* filename);
+Result emulator_write_ext_ram_to_file(Emulator*, const char* filename);
 
-EmulatorEvent emulator_step(struct Emulator*);
-EmulatorEvent emulator_run_until(struct Emulator*, Ticks until_ticks);
+EmulatorEvent emulator_step(Emulator*);
+EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
 
 #ifdef __cplusplus
 }
