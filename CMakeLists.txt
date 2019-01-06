@@ -136,10 +136,9 @@ else (EMSCRIPTEN)
     -s NO_EXIT_RUNTIME=1
   )
   if (WASM)
-    set(LINK_FLAGS ${LINK_FLAGS}
-      -s WASM=1
-      -s \"BINARYEN_TRAP_MODE='allow'\"
-    )
+    set(LINK_FLAGS ${LINK_FLAGS} -s WASM=1)
+  else ()
+    set(LINK_FLAGS ${LINK_FLAGS} -s WASM=0)
   endif ()
 
   string(REPLACE ";" " " LINK_FLAGS_STR "${LINK_FLAGS}")
