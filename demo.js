@@ -25,6 +25,8 @@ const REWIND_UPDATE_MS = 16;
 const $ = document.querySelector.bind(document);
 let emulator = null;
 
+const binjgbPromise = Binjgb();
+
 const dbPromise = idb.open('db', 1, upgradeDb => {
   const objectStore = upgradeDb.createObjectStore('games', {keyPath : 'sha1'});
   objectStore.createIndex('sha1', 'sha1', {unique : true});
@@ -156,7 +158,7 @@ let vm = new Vue({
       this.canvas.show = true;
       this.files.show = false;
       this.loadedFile = file;
-      Emulator.start(romBuffer, extRamBuffer);
+      Emulator.start(await binjgbPromise, romBuffer, extRamBuffer);
     },
     deleteFile: async function(file) {
       const db = await dbPromise;
@@ -246,54 +248,14 @@ let vm = new Vue({
   }
 });
 
-(function bindKeyInput() {
-  function keyRewind(e, isKeyDown) {
-    if (emulator.isRewinding !== isKeyDown) {
-      if (isKeyDown) {
-        vm.paused = true;
-        emulator.autoRewind = true;
-      } else {
-        emulator.autoRewind = false;
-        vm.paused = false;
-      }
-    }
-  }
-
-  const keyFuncs = {
-    'ArrowDown': _set_joyp_down,
-    'ArrowLeft': _set_joyp_left,
-    'ArrowRight': _set_joyp_right,
-    'ArrowUp': _set_joyp_up,
-    'KeyZ': _set_joyp_B,
-    'KeyX': _set_joyp_A,
-    'Enter': _set_joyp_start,
-    'Tab': _set_joyp_select,
-    'Backspace': keyRewind,
-    'Space': (e, isKeyDown) => { if (isKeyDown) vm.togglePause(); },
-  };
-
-  const makeKeyFunc = isKeyDown => {
-    return event => {
-      if (!emulator) return;
-      if (event.code in keyFuncs) {
-        keyFuncs[event.code](emulator.e, isKeyDown);
-        event.preventDefault();
-      }
-    };
-  };
-
-  window.addEventListener('keydown', makeKeyFunc(true));
-  window.addEventListener('keyup', makeKeyFunc(false));
-})();
-
-function makeWasmBuffer(ptr, size) {
-  return new Uint8Array(Module.buffer, ptr, size);
+function makeWasmBuffer(module, ptr, size) {
+  return new Uint8Array(module.buffer, ptr, size);
 }
 
 class Emulator {
-  static start(romBuffer, extRamBuffer) {
+  static start(module, romBuffer, extRamBuffer) {
     Emulator.stop();
-    emulator = new Emulator(romBuffer, extRamBuffer);
+    emulator = new Emulator(module, romBuffer, extRamBuffer);
     emulator.run();
   }
 
@@ -304,20 +266,21 @@ class Emulator {
     }
   }
 
-  constructor(romBuffer, extRamBuffer) {
-    this.romDataPtr = _malloc(romBuffer.byteLength);
-    makeWasmBuffer(this.romDataPtr, romBuffer.byteLength)
+  constructor(module, romBuffer, extRamBuffer) {
+    this.module = module;
+    this.romDataPtr = this.module._malloc(romBuffer.byteLength);
+    makeWasmBuffer(this.module, this.romDataPtr, romBuffer.byteLength)
         .set(new Uint8Array(romBuffer));
-    this.e = _emulator_new_simple(
+    this.e = this.module._emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
         AUDIO_FRAMES);
     if (this.e == 0) {
       throw new Error('Invalid ROM.');
     }
 
-    this.audio = new Audio(this.e);
-    this.video = new Video(this.e, $('canvas'));
-    this.rewind = new Rewind(this.e);
+    this.audio = new Audio(module, this.e);
+    this.video = new Video(module, this.e, $('canvas'));
+    this.rewind = new Rewind(module, this.e);
     this.rewindIntervalId = 0;
 
     this.lastRafSec = 0;
@@ -327,22 +290,26 @@ class Emulator {
     if (extRamBuffer) {
       this.loadExtRam(extRamBuffer);
     }
+
+    this.bindKeys();
   }
 
   destroy() {
+    this.unbindKeys();
     this.cancelAnimationFrame();
     clearInterval(this.rewindIntervalId);
     this.rewind.destroy();
-    _emulator_delete(this.e);
-    _free(this.romDataPtr);
+    this.module._emulator_delete(this.e);
+    this.module._free(this.romDataPtr);
   }
 
   withNewFileData(cb) {
-    const fileDataPtr = _ext_ram_file_data_new(this.e);
+    const fileDataPtr = this.module._ext_ram_file_data_new(this.e);
     const buffer = makeWasmBuffer(
-        _get_file_data_ptr(fileDataPtr), _get_file_data_size(fileDataPtr));
+        this.module, this.module._get_file_data_ptr(fileDataPtr),
+        this.module._get_file_data_size(fileDataPtr));
     const result = cb(fileDataPtr, buffer);
-    _file_data_delete(fileDataPtr);
+    this.module._file_data_delete(fileDataPtr);
     return result;
   }
 
@@ -350,14 +317,14 @@ class Emulator {
     this.withNewFileData((fileDataPtr, buffer) => {
       if (buffer.byteLength === extRamBuffer.byteLength) {
         buffer.set(new Uint8Array(extRamBuffer));
-        _emulator_read_ext_ram(this.e, fileDataPtr);
+        this.module._emulator_read_ext_ram(this.e, fileDataPtr);
       }
     });
   }
 
   getExtRam() {
     return this.withNewFileData((fileDataPtr, buffer) => {
-      _emulator_write_ext_ram(this.e, fileDataPtr);
+      this.module._emulator_write_ext_ram(this.e, fileDataPtr);
       return new Uint8Array(buffer);
     });
   }
@@ -435,12 +402,12 @@ class Emulator {
   }
 
   get ticks() {
-    return _emulator_get_ticks_f64(this.e);
+    return this.module._emulator_get_ticks_f64(this.e);
   }
 
   runUntil(ticks) {
     while (true) {
-      const event = _emulator_run_until_f64(this.e, ticks);
+      const event = this.module._emulator_run_until_f64(this.e, ticks);
       if (event & EVENT_NEW_FRAME) {
         this.rewind.pushBuffer();
         this.video.uploadTexture();
@@ -452,7 +419,7 @@ class Emulator {
         break;
       }
     }
-    if (_emulator_was_ext_ram_updated(this.e)) {
+    if (this.module._emulator_was_ext_ram_updated(this.e)) {
       vm.extRamUpdated = true;
     }
   }
@@ -475,12 +442,69 @@ class Emulator {
     this.fps = lerp(this.fps, Math.min(1 / deltaSec, 10000), 0.3);
     this.video.renderTexture();
   }
+
+  bindKeys() {
+    this.keyFuncs = {
+      'ArrowDown': this.module._set_joyp_down.bind(null, this.e),
+      'ArrowLeft': this.module._set_joyp_left.bind(null, this.e),
+      'ArrowRight': this.module._set_joyp_right.bind(null, this.e),
+      'ArrowUp': this.module._set_joyp_up.bind(null, this.e),
+      'KeyZ': this.module._set_joyp_B.bind(null, this.e),
+      'KeyX': this.module._set_joyp_A.bind(null, this.e),
+      'Enter': this.module._set_joyp_start.bind(null, this.e),
+      'Tab': this.module._set_joyp_select.bind(null, this.e),
+      'Backspace': this.keyRewind.bind(this),
+      'Space': this.keyPause.bind(this),
+    };
+    this.boundKeyDown = this.keyDown.bind(this);
+    this.boundKeyUp = this.keyUp.bind(this);
+
+    window.addEventListener('keydown', this.boundKeyDown);
+    window.addEventListener('keyup', this.boundKeyUp);
+  }
+
+  unbindKeys() {
+    window.removeEventListener('keydown', this.boundKeyDown);
+    window.removeEventListener('keyup', this.boundKeyUp);
+  }
+
+  keyDown(event) {
+    if (event.code in this.keyFuncs) {
+      this.keyFuncs[event.code](true);
+      event.preventDefault();
+    }
+  }
+
+  keyUp(event) {
+    if (event.code in this.keyFuncs) {
+      this.keyFuncs[event.code](false);
+      event.preventDefault();
+    }
+  }
+
+  keyRewind(isKeyDown) {
+    if (this.isRewinding !== isKeyDown) {
+      if (isKeyDown) {
+        vm.paused = true;
+        this.autoRewind = true;
+      } else {
+        this.autoRewind = false;
+        vm.paused = false;
+      }
+    }
+  }
+
+  keyPause(isKeyDown) {
+    if (isKeyDown) vm.togglePause();
+  }
 }
 
 class Audio {
-  constructor(e) {
-    this.buffer =
-        makeWasmBuffer(_get_audio_buffer_ptr(e), _get_audio_buffer_capacity(e));
+  constructor(module, e) {
+    this.module = module;
+    this.buffer = makeWasmBuffer(
+        this.module, this.module._get_audio_buffer_ptr(e),
+        this.module._get_audio_buffer_capacity(e));
     this.startSec = 0;
     this.resume();
   }
@@ -525,15 +549,17 @@ class Audio {
 Audio.ctx = new AudioContext;
 
 class Video {
-  constructor(e, el) {
+  constructor(module, e, el) {
+    this.module = module;
     try {
       this.renderer = new WebGLRenderer(el);
     } catch (error) {
       console.log(`Error creating WebGLRenderer: ${error}`);
       this.renderer = new Canvas2DRenderer(el);
     }
-    this.buffer =
-        makeWasmBuffer(_get_frame_buffer_ptr(e), _get_frame_buffer_size(e));
+    this.buffer = makeWasmBuffer(
+        this.module, this.module._get_frame_buffer_ptr(e),
+        this.module._get_frame_buffer_size(e));
   }
 
   uploadTexture() {
@@ -644,31 +670,32 @@ class WebGLRenderer {
 }
 
 class Rewind {
-  constructor(e) {
+  constructor(module, e) {
+    this.module = module;
     this.e = e;
-    this.joypadBufferPtr = _joypad_new();
+    this.joypadBufferPtr = this.module._joypad_new();
     this.statePtr = 0;
-    this.bufferPtr = _rewind_new_simple(
+    this.bufferPtr = this.module._rewind_new_simple(
         e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
-    _emulator_set_default_joypad_callback(e, this.joypadBufferPtr);
+    this.module._emulator_set_default_joypad_callback(e, this.joypadBufferPtr);
   }
 
   destroy() {
-    _rewind_delete(this.bufferPtr);
-    _joypad_delete(this.joypadBufferPtr);
+    this.module._rewind_delete(this.bufferPtr);
+    this.module._joypad_delete(this.joypadBufferPtr);
   }
 
   get oldestTicks() {
-    return _rewind_get_oldest_ticks_f64(this.bufferPtr);
+    return this.module._rewind_get_oldest_ticks_f64(this.bufferPtr);
   }
 
   get newestTicks() {
-    return _rewind_get_newest_ticks_f64(this.bufferPtr);
+    return this.module._rewind_get_newest_ticks_f64(this.bufferPtr);
   }
 
   pushBuffer() {
     if (!this.isRewinding) {
-      _rewind_append(this.bufferPtr, this.e);
+      this.module._rewind_append(this.bufferPtr, this.e);
     }
   }
 
@@ -678,18 +705,21 @@ class Rewind {
 
   beginRewind() {
     if (this.isRewinding) return;
-    this.statePtr = _rewind_begin(this.e, this.bufferPtr, this.joypadBufferPtr);
+    this.statePtr =
+        this.module._rewind_begin(this.e, this.bufferPtr, this.joypadBufferPtr);
   }
 
   rewindToTicks(ticks) {
     if (!this.isRewinding) return;
-    return _rewind_to_ticks_wrapper(this.statePtr, ticks) === RESULT_OK;
+    return this.module._rewind_to_ticks_wrapper(this.statePtr, ticks) ===
+        RESULT_OK;
   }
 
   endRewind() {
     if (!this.isRewinding) return;
-    _emulator_set_default_joypad_callback(this.e, this.joypadBufferPtr);
-    _rewind_end(this.statePtr);
+    this.module._emulator_set_default_joypad_callback(
+        this.e, this.joypadBufferPtr);
+    this.module._rewind_end(this.statePtr);
     this.statePtr = 0;
   }
 }
