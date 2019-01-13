@@ -2950,6 +2950,13 @@ static void ppu_mode3_synchronize(Emulator* e) {
       }
     }
 
+    /* LCDC bit 0 works differently on cgb; when it's cleared OBJ will always
+     * have priority over bg and window. */
+    if (IS_CGB && !LCDC.bg_display) {
+      memset(&bg_is_zero, TRUE, sizeof(bg_is_zero));
+      memset(&bg_priority, FALSE, sizeof(bg_priority));
+    }
+
     if (display_obj) {
       u8 obj_height = s_obj_size_to_height[LCDC.obj_size];
       int n;
