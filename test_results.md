@@ -9,6 +9,7 @@
 | dmg\_sound | :ok: |
 | halt\_bug | :ok: |
 | instr\_timing | :ok: |
+| interrupt\_time | :ok: |
 | mem\_timing | :ok: |
 | oam\_bug | :x: |
 
