@@ -21,6 +21,7 @@ const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 const REWIND_FACTOR = 1.5;
 const REWIND_UPDATE_MS = 16;
+const BUILTIN_PALETTES = 83;  // See builtin-palettes.def.
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
@@ -60,7 +61,8 @@ let data = {
     show: true,
     selected: 0,
     list: []
-  }
+  },
+  pal: 0
 };
 
 let vm = new Vue({
@@ -133,6 +135,14 @@ let vm = new Vue({
     },
   },
   methods: {
+    palDown: function() { this.setPal(this.pal - 1); },
+    palUp: function() { this.setPal(this.pal + 1); },
+    setPal: function(pal) {
+      if (pal < 0) { pal = BUILTIN_PALETTES - 1; }
+      if (pal >= BUILTIN_PALETTES) { pal = 0; }
+      this.pal = pal;
+      if (emulator) { emulator.setBuiltinPalette(this.pal); }
+    },
     updateTicks: function() {
       this.ticks = emulator.ticks;
     },
@@ -159,6 +169,7 @@ let vm = new Vue({
       this.files.show = false;
       this.loadedFile = file;
       Emulator.start(await binjgbPromise, romBuffer, extRamBuffer);
+      emulator.setBuiltinPalette(this.pal);
     },
     deleteFile: async function(file) {
       const db = await dbPromise;
@@ -347,6 +358,10 @@ class Emulator {
       this.requestAnimationFrame();
       this.audio.resume();
     }
+  }
+
+  setBuiltinPalette(pal) {
+    this.module._emulator_set_builtin_palette(this.e, pal);
   }
 
   get isRewinding() {
