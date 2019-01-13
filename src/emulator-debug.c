@@ -748,11 +748,9 @@ TileMapSelect emulator_get_tile_map_select(Emulator* e, LayerType layer_type) {
 Palette emulator_get_palette(Emulator* e, PaletteType type) {
   switch (type) {
     case PALETTE_TYPE_BGP:
-      return PPU.bgp.palette;
     case PALETTE_TYPE_OBP0:
-      return PPU.obp[0].palette;
     case PALETTE_TYPE_OBP1:
-      return PPU.obp[1].palette;
+      return PPU.pal[type - PALETTE_TYPE_BGP].palette;
     default: {
       Palette palette;
       palette.color[0] = COLOR_WHITE;
@@ -765,7 +763,7 @@ Palette emulator_get_palette(Emulator* e, PaletteType type) {
 }
 
 PaletteRGBA emulator_get_palette_rgba(Emulator* e, PaletteType type) {
-  return palette_to_palette_rgba(emulator_get_palette(e, type));
+  return palette_to_palette_rgba(e, type, emulator_get_palette(e, type));
 }
 
 PaletteRGBA emulator_get_cgb_palette_rgba(Emulator* e, CgbPaletteType type,
@@ -869,16 +867,12 @@ Bool obj_is_visible(const Obj* obj) {
          obj_y < SCREEN_HEIGHT + OBJ_Y_OFFSET - 1;
 }
 
-RGBA color_to_rgba(Color color) {
-  assert(color >= COLOR_WHITE && color <= COLOR_BLACK);
-  return s_color_to_rgba[color];
-}
-
-PaletteRGBA palette_to_palette_rgba(Palette palette) {
+PaletteRGBA palette_to_palette_rgba(Emulator* e, PaletteType type,
+                                    Palette palette) {
   PaletteRGBA result;
   int i;
   for (i = 0; i < PALETTE_COLOR_COUNT; ++i) {
-    result.color[i] = s_color_to_rgba[palette.color[i]];
+    result.color[i] = e->color_to_rgba[type].color[palette.color[i]];
   }
   return result;
 }

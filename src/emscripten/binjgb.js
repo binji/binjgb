@@ -8,7 +8,7 @@ var Binjgb = (async function() {
   // Must match values defined in generated binjgb.js
   const TABLE_SIZE = 34;
   const TOTAL_MEMORY = 16777216;
-  const STATIC_BUMP = 13296;
+  const STATIC_BUMP = 17264;
   const TOTAL_STACK = 5242880;
 
   const pageSize = 65536;

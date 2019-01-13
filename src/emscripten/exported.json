@@ -5,6 +5,8 @@
 "_emulator_read_ext_ram",
 "_emulator_run_until_f64",
 "_emulator_set_default_joypad_callback",
+"_emulator_set_builtin_palette",
+"_emulator_set_bw_palette_simple",
 "_emulator_set_rewind_joypad_callback",
 "_emulator_was_ext_ram_updated",
 "_emulator_write_ext_ram",

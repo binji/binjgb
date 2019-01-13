@@ -65,6 +65,7 @@ static f32 s_audio_volume = 0.5f;
 static Bool s_rewinding;
 static Ticks s_rewind_start;
 static u32 s_random_seed = 0xcabba6e5;
+static u32 s_builtin_palette;
 static Bool s_force_dmg;
 
 static Overlay s_overlay;
@@ -300,6 +301,7 @@ static void usage(int argc, char** argv) {
       "  -j,--read-joypad FILE   read joypad input from FILE\n"
       "  -J,--write-joypad FILE  write joypad input to FILE\n"
       "  -s,--seed SEED          random seed used for initializing RAM\n"
+      "  -P,--palette PAL        use a builtin palette for DMG\n"
       "     --force-dmg          force running as a DMG (original gameboy)\n",
       argv[0]);
 }
@@ -310,6 +312,7 @@ void parse_arguments(int argc, char** argv) {
     {'j', "read-joypad", 1},
     {'J', "write-joypad", 1},
     {'s', "seed", 1},
+    {'P', "palette", 1},
     {0, "force-dmg", 0},
   };
 
@@ -350,6 +353,10 @@ void parse_arguments(int argc, char** argv) {
 
           case 's':
             s_random_seed = atoi(result.value);
+            break;
+
+          case 'P':
+            s_builtin_palette = atoi(result.value);
             break;
 
           default:
@@ -400,6 +407,7 @@ int main(int argc, char** argv) {
   emulator_init.audio_frequency = AUDIO_FREQUENCY;
   emulator_init.audio_frames = AUDIO_FRAMES;
   emulator_init.random_seed = s_random_seed;
+  emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);

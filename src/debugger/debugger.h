@@ -31,7 +31,7 @@ class Debugger {
 
   bool Init(const char* filename, int audio_frequency, int audio_frames,
             int font_scale, bool paused_at_start, u32 random_seed,
-            bool force_dmg);
+            u32 builtin_palette, bool force_dmg);
   void Run();
 
  private:
@@ -209,6 +209,7 @@ class Debugger {
 
     int scale = 3;
     int palette_type = PALETTE_TYPE_BGP;
+    int color_set = PALETTE_TYPE_BGP;
     Palette custom_palette = {
         {COLOR_WHITE, COLOR_LIGHT_GRAY, COLOR_DARK_GRAY, COLOR_BLACK}};
     int cgb_palette_type = CGB_PALETTE_TYPE_BGCP;

@@ -34,6 +34,7 @@ static Bool s_profile;
 static u32 s_profile_limit = 30;
 static const char* s_rom_filename;
 static u32 s_random_seed = 0xcabba6e5;
+static u32 s_builtin_palette;
 static Bool s_force_dmg;
 
 
@@ -73,6 +74,7 @@ void usage(int argc, char** argv) {
       "     --profile         print execution count of each opcode\n"
       "     --profile-limit   max opcodes to print\n"
       "  -s,--seed SEED       random seed used for initializing RAM\n"
+      "  -P,--palette PAL     use a builtin palette for DMG\n"
       "     --force-dmg       force running as a DMG (original gameboy)\n",
       argv[0],
       DEFAULT_FRAMES);
@@ -105,6 +107,7 @@ void parse_options(int argc, char**argv) {
     {0, "profile-limit", 1},
     {0, "profile", 0},
     {'s', "seed", 1},
+    {'P', "palette", 1},
     {0, "force-dmg", 0},
   };
 
@@ -176,6 +179,10 @@ void parse_options(int argc, char**argv) {
 
           case 's':
             s_random_seed = atoi(result.value);
+            break;
+
+          case 'P':
+            s_builtin_palette = atoi(result.value);
             break;
 
           default:
@@ -382,6 +389,7 @@ int main(int argc, char** argv) {
   emulator_init.audio_frequency = AUDIO_FREQUENCY;
   emulator_init.audio_frames = AUDIO_FRAMES;
   emulator_init.random_seed = s_random_seed;
+  emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);

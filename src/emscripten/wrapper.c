@@ -67,6 +67,13 @@ void emulator_set_default_joypad_callback(Emulator* e,
   emulator_set_joypad_callback(e, default_joypad_callback, joypad_buffer);
 }
 
+void emulator_set_bw_palette_simple(Emulator* e, u32 type, u32 white,
+                                    u32 light_gray, u32 dark_gray, u32 black) {
+  assert(type < PALETTE_TYPE_COUNT);
+  PaletteRGBA palette = {{white, light_gray, dark_gray, black}};
+  emulator_set_bw_palette(e, type, &palette);
+}
+
 RewindBuffer* rewind_new_simple(Emulator* e, int frames_per_base_state,
                                 size_t buffer_capacity) {
   RewindInit init;

@@ -56,6 +56,13 @@ typedef enum Color {
   COLOR_BLACK = 3,
 } Color;
 
+typedef enum PaletteType {
+  PALETTE_TYPE_BGP,
+  PALETTE_TYPE_OBP0,
+  PALETTE_TYPE_OBP1,
+  PALETTE_TYPE_COUNT,
+} PaletteType;
+
 typedef enum {
   TILE_DATA_8800_97FF = 0,
   TILE_DATA_8000_8FFF = 1,
@@ -127,6 +134,7 @@ typedef struct EmulatorInit {
   int audio_frequency;
   int audio_frames;
   u32 random_seed;
+  u32 builtin_palette;
   Bool force_dmg;
 } EmulatorInit;
 
@@ -162,6 +170,9 @@ AudioBuffer* emulator_get_audio_buffer(Emulator*);
 Ticks emulator_get_ticks(Emulator*);
 u32 emulator_get_ppu_frame(Emulator*);
 u32 audio_buffer_get_frames(AudioBuffer*);
+void emulator_set_builtin_palette(Emulator*, u32 index);
+void emulator_set_bw_palette(Emulator*, PaletteType, const PaletteRGBA*);
+void emulator_set_all_bw_palettes(Emulator*, const PaletteRGBA*);
 
 void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
                             u32* ms);

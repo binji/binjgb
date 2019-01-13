@@ -43,12 +43,6 @@ typedef enum SetLogLevelError {
   SET_LOG_LEVEL_ERROR_UNKNOWN_LOG_SYSTEM = 2,
 } SetLogLevelError;
 
-typedef enum PaletteType {
-  PALETTE_TYPE_BGP,
-  PALETTE_TYPE_OBP0,
-  PALETTE_TYPE_OBP1,
-} PaletteType;
-
 typedef enum CgbPaletteType {
   CGB_PALETTE_TYPE_BGCP,
   CGB_PALETTE_TYPE_OBCP,
@@ -164,8 +158,7 @@ ObjSize emulator_get_obj_size(Emulator*);
 Obj emulator_get_obj(Emulator*, int index);
 Bool obj_is_visible(const Obj* obj);
 
-RGBA color_to_rgba(Color color);
-PaletteRGBA palette_to_palette_rgba(Palette palette);
+PaletteRGBA palette_to_palette_rgba(Emulator* e, PaletteType, Palette);
 
 int opcode_bytes(u8 opcode);
 

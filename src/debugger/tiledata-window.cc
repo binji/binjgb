@@ -47,13 +47,17 @@ void Debugger::TiledataWindow::Tick() {
           }
         }
 
+        static const char* color_set_names[] = {"BGP", "OBP0", "OBP1"};
+        ImGui::Combo("Color Set", &color_set, color_set_names);
+
         static const char* color_names[] = {"White", "Light Gray", "Dark Gray",
                                             "Black"};
         ImGui::Combo("Color 0", &custom_palette.color[0], color_names);
         ImGui::Combo("Color 1", &custom_palette.color[1], color_names);
         ImGui::Combo("Color 2", &custom_palette.color[2], color_names);
         ImGui::Combo("Color 3", &custom_palette.color[3], color_names);
-        palette_rgba = palette_to_palette_rgba(custom_palette);
+        palette_rgba = palette_to_palette_rgba(d->e, (PaletteType)color_set,
+                                               custom_palette);
       } else {
         palette_rgba =
             emulator_get_palette_rgba(d->e, (PaletteType)palette_type);

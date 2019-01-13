@@ -218,6 +218,10 @@
               @click="canvas.scale = scale">
             {{scale}}x
           </button>
+          <span v-if="loaded">pal:{{pal}}</span>
+          <button
+            v-show="loaded" @click="palDown">-</button><button
+            v-show="loaded" @click="palUp">+</button>
           <button
               v-show="loaded"
               v-bind:disabled="files.show"
