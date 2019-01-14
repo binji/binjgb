@@ -750,7 +750,7 @@ Palette emulator_get_palette(Emulator* e, PaletteType type) {
     case PALETTE_TYPE_BGP:
     case PALETTE_TYPE_OBP0:
     case PALETTE_TYPE_OBP1:
-      return PPU.pal[type - PALETTE_TYPE_BGP].palette;
+      return PPU.pal[type - PALETTE_TYPE_BGP];
     default: {
       Palette palette;
       palette.color[0] = COLOR_WHITE;

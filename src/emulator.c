@@ -556,11 +556,6 @@ typedef struct {
 } Stat;
 
 typedef struct {
-  Palette palette;
-  PaletteRGBA rgba;
-} BWPalette;
-
-typedef struct {
   PaletteRGBA palettes[8];
   u8 data[64];
   u8 index;
@@ -578,7 +573,7 @@ typedef struct {
   u8 lyc;                           /* Line Y Compare */
   u8 wy;                            /* Window Y */
   u8 wx;                            /* Window X */
-  BWPalette pal[PALETTE_TYPE_COUNT]; /* BGP, OBP0, OBP1 Palettes */
+  Palette pal[PALETTE_TYPE_COUNT];  /* BGP, OBP0, OBP1 Palettes */
   ColorPalettes bgcp;               /* BG Color Palettes */
   ColorPalettes obcp;               /* OBJ Color Palettes */
   PPUState state;
@@ -672,7 +667,10 @@ struct Emulator {
   FrameBuffer frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallbackInfo joypad_info;
+  /* color_to_rgba stores mappings from 4 DMG colors to RGBA colors. pal is a
+   * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
+  PaletteRGBA pal[PALETTE_TYPE_COUNT];
 };
 
 
@@ -1671,11 +1669,11 @@ static u8 read_io(Emulator* e, MaskedAddress addr) {
     case IO_BGP_ADDR:
     case IO_OBP0_ADDR:
     case IO_OBP1_ADDR: {
-      BWPalette* pal = &PPU.pal[addr - IO_BGP_ADDR];
-      return PACK(pal->palette.color[3], PALETTE_COLOR3) |
-             PACK(pal->palette.color[2], PALETTE_COLOR2) |
-             PACK(pal->palette.color[1], PALETTE_COLOR1) |
-             PACK(pal->palette.color[0], PALETTE_COLOR0);
+      Palette* pal = &PPU.pal[addr - IO_BGP_ADDR];
+      return PACK(pal->color[3], PALETTE_COLOR3) |
+             PACK(pal->color[2], PALETTE_COLOR2) |
+             PACK(pal->color[1], PALETTE_COLOR1) |
+             PACK(pal->color[0], PALETTE_COLOR0);
     }
     case IO_WY_ADDR:
       return PPU.wy;
@@ -2082,10 +2080,10 @@ static void check_joyp_intr(Emulator* e) {
 }
 
 static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
-  BWPalette* pal = &PPU.pal[type];
   int i;
   for (i = 0; i < 4; ++i) {
-    pal->rgba.color[i] = e->color_to_rgba[type].color[pal->palette.color[i]];
+    e->pal[type].color[i] =
+        e->color_to_rgba[type].color[PPU.pal[type].color[i]];
   }
 }
 
@@ -2268,12 +2266,12 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_OBP0_ADDR:
     case IO_OBP1_ADDR: {
       PaletteType type = addr - IO_BGP_ADDR;
-      BWPalette* bwpal = &PPU.pal[type];
+      Palette* pal = &PPU.pal[type];
       ppu_mode3_synchronize(e);
-      bwpal->palette.color[3] = UNPACK(value, PALETTE_COLOR3);
-      bwpal->palette.color[2] = UNPACK(value, PALETTE_COLOR2);
-      bwpal->palette.color[1] = UNPACK(value, PALETTE_COLOR1);
-      bwpal->palette.color[0] = UNPACK(value, PALETTE_COLOR0);
+      pal->color[3] = UNPACK(value, PALETTE_COLOR3);
+      pal->color[2] = UNPACK(value, PALETTE_COLOR2);
+      pal->color[1] = UNPACK(value, PALETTE_COLOR1);
+      pal->color[0] = UNPACK(value, PALETTE_COLOR0);
       update_bw_palette_rgba(e, type);
       break;
     }
@@ -2867,7 +2865,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
 
   /* Cache map_addr info. */
   u16 map_addr = 0;
-  RGBA* pal = NULL;
+  PaletteRGBA* pal = NULL;
   u8 lo = 0, hi = 0;
 
   Bool priority = FALSE;
@@ -2900,7 +2898,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
           }
           if (IS_CGB) {
             u8 attr = VRAM.data[0x2000 + map_addr];
-            pal = PPU.bgcp.palettes[attr & 0x7].color;
+            pal = &PPU.bgcp.palettes[attr & 0x7];
             if (attr & 0x08) { tile_index += 0x200; }
             if (attr & 0x40) { my7 = 7 - my7; }
             priority = (attr & 0x80) != 0;
@@ -2912,7 +2910,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
               hi = reverse_bits_u8(hi);
             }
           } else {
-            pal = PPU.pal[PALETTE_TYPE_BGP].rgba.color;
+            pal = &e->pal[PALETTE_TYPE_BGP];
             priority = FALSE;
             u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
             lo = VRAM.data[tile_addr];
@@ -2923,7 +2921,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
           hi <<= shift;
         }
         u8 palette_index = ((hi >> 6) & 2) | (lo >> 7);
-        pixel[i] = pal[palette_index];
+        pixel[i] = pal->color[palette_index];
         bg_is_zero[i] = palette_index == 0;
         bg_priority[i] = priority;
       }
@@ -2970,7 +2968,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
           pal = &PPU.obcp.palettes[o->cgb_palette & 0x7];
           if (o->bank) { tile_index += 0x200; }
         } else {
-          pal = &PPU.pal[o->palette + 1].rgba;
+          pal = &e->pal[o->palette + 1];
         }
         u16 tile_addr = (tile_index * TILE_HEIGHT + (oy & 7)) * TILE_ROW_BYTES;
         u8 lo = VRAM.data[tile_addr];
