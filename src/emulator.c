@@ -585,7 +585,6 @@ typedef struct {
   u8 render_x;    /* Currently rendering X coordinate. */
   u8 line_y;      /* The currently rendering line. Can be different than LY. */
   u8 win_y;       /* The window Y is only incremented when rendered. */
-  u8 frame_wy;    /* wy is cached per frame. */
   Obj line_obj[OBJ_PER_LINE_COUNT]; /* Cached from OAM during mode2. */
   u8 line_obj_count;     /* Number of sprites to draw on this line. */
   Bool rendering_window; /* TRUE when this line is rendering the window. */
@@ -2852,7 +2851,7 @@ static void ppu_mode3_synchronize(Emulator* e) {
   Bool rendering_window = PPU.rendering_window;
   int window_counter = rendering_window ? 0 : 255;
   if (!rendering_window && LCDC.window_display && !e->config.disable_window &&
-      PPU.wx <= WINDOW_MAX_X && y >= PPU.frame_wy) {
+      PPU.wx <= WINDOW_MAX_X && y >= PPU.wy) {
     window_counter = MAX(0, PPU.wx - (x + WINDOW_X_OFFSET));
   }
 
@@ -3098,7 +3097,6 @@ static void ppu_synchronize(Emulator* e) {
           PPU.state_ticks = CPU_TICK;
           PPU.line_start_ticks = ticks;
           PPU.line_y = 0;
-          PPU.frame_wy = PPU.wy;
           PPU.win_y = 0;
           STAT.mode2.trigger = TRUE;
           STAT.mode = PPU_MODE_HBLANK;
