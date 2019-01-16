@@ -2181,8 +2181,8 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       if (was_enabled ^ LCDC.display) {
         STAT.mode = PPU_MODE_HBLANK;
         PPU.ly = PPU.line_y = 0;
-        check_ly_eq_lyc(e, FALSE);
         if (LCDC.display) {
+          check_ly_eq_lyc(e, FALSE);
           HOOK0(enable_display_v);
           PPU.state = PPU_STATE_LCD_ON_MODE2;
           PPU.state_ticks = PPU_MODE2_TICKS;
