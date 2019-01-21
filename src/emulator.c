@@ -1934,61 +1934,56 @@ static Bool is_div_falling_edge(Emulator* e, u16 old_div_counter,
 static void increment_tima(Emulator*);
 
 static void timer_synchronize(Emulator* e) {
-  Ticks delta_ticks = TICKS - TIMER.sync_ticks;
-  if (delta_ticks == 0) {
-    return;
-  }
+  if (TICKS > TIMER.sync_ticks) {
+    Ticks delta_ticks = TICKS - TIMER.sync_ticks;
+    TIMER.sync_ticks = TICKS;
 
-  TIMER.sync_ticks = TICKS;
-
-  if (!TIMER.on) {
-    TIMER.div_counter += delta_ticks;
-    return;
-  }
-
-  Ticks cpu_tick = e->state.cpu_tick;
-  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
-    if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
-      INTR.if_ |= (INTR.new_if & IF_TIMER);
-      TIMER.tima = TIMER.tma;
-      TIMER.tima_state = TIMA_STATE_RESET;
-    } else if (TIMER.tima_state == TIMA_STATE_RESET) {
-      TIMER.tima_state = TIMA_STATE_NORMAL;
-    }
-    u16 old_div_counter = TIMER.div_counter;
-    TIMER.div_counter += CPU_TICK;
-    if (is_div_falling_edge(e, old_div_counter, TIMER.div_counter)) {
-      increment_tima(e);
+    if (TIMER.on) {
+      Ticks cpu_tick = e->state.cpu_tick;
+      for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
+        if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+          INTR.if_ |= (INTR.new_if & IF_TIMER);
+          TIMER.tima = TIMER.tma;
+          TIMER.tima_state = TIMA_STATE_RESET;
+        } else if (TIMER.tima_state == TIMA_STATE_RESET) {
+          TIMER.tima_state = TIMA_STATE_NORMAL;
+        }
+        u16 old_div_counter = TIMER.div_counter;
+        TIMER.div_counter += CPU_TICK;
+        if (is_div_falling_edge(e, old_div_counter, TIMER.div_counter)) {
+          increment_tima(e);
+        }
+      }
+    } else {
+      TIMER.div_counter += delta_ticks;
     }
   }
 }
 
 static void calculate_next_timer_intr(Emulator* e) {
-  if (!TIMER.on) {
-    TIMER.next_intr_ticks = INVALID_TICKS;
-    calculate_next_intr(e);
-    return;
-  }
-
-  Ticks ticks = TIMER.sync_ticks;
-  Ticks cpu_tick = e->state.cpu_tick;
-  u16 div_counter = TIMER.div_counter;
-  u8 tima = TIMER.tima;
-  if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
-    tima = TIMER.tma;
-    div_counter += CPU_TICK;
-    ticks += cpu_tick;
-  }
-
-  while (1) {
-    u16 old_div_counter = div_counter;
-    div_counter += CPU_TICK;
-    if (is_div_falling_edge(e, old_div_counter, div_counter) && ++tima == 0) {
-      break;
+  if (TIMER.on) {
+    Ticks ticks = TIMER.sync_ticks;
+    Ticks cpu_tick = e->state.cpu_tick;
+    u16 div_counter = TIMER.div_counter;
+    u8 tima = TIMER.tima;
+    if (TIMER.tima_state == TIMA_STATE_OVERFLOW) {
+      tima = TIMER.tma;
+      div_counter += CPU_TICK;
+      ticks += cpu_tick;
     }
-    ticks += cpu_tick;
+
+    while (1) {
+      u16 old_div_counter = div_counter;
+      div_counter += CPU_TICK;
+      if (is_div_falling_edge(e, old_div_counter, div_counter) && ++tima == 0) {
+        break;
+      }
+      ticks += cpu_tick;
+    }
+    TIMER.next_intr_ticks = ticks;
+  } else {
+    TIMER.next_intr_ticks = INVALID_TICKS;
   }
-  TIMER.next_intr_ticks = ticks;
   calculate_next_intr(e);
 }
 
@@ -3002,155 +2997,154 @@ static void ppu_mode3_synchronize(Emulator* e) {
 static void ppu_synchronize(Emulator* e) {
   assert(IS_ALIGNED(PPU.sync_ticks, CPU_TICK));
   Ticks aligned_ticks = ALIGN_DOWN(TICKS, CPU_TICK);
-  Ticks delta_ticks = aligned_ticks - PPU.sync_ticks;
-  if (delta_ticks == 0) {
-    return;
-  }
+  if (aligned_ticks > PPU.sync_ticks) {
+    Ticks delta_ticks = aligned_ticks - PPU.sync_ticks;
 
-  if (LCDC.display) {
-    for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
-      INTR.if_ |= (INTR.new_if & (IF_VBLANK | IF_STAT));
-      STAT.mode2.trigger = FALSE;
-      STAT.y_compare.trigger = FALSE;
-      STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
-      PPU.last_ly = PPU.ly;
+    if (LCDC.display) {
+      for (; delta_ticks > 0; delta_ticks -= CPU_TICK) {
+        INTR.if_ |= (INTR.new_if & (IF_VBLANK | IF_STAT));
+        STAT.mode2.trigger = FALSE;
+        STAT.y_compare.trigger = FALSE;
+        STAT.ly_eq_lyc = STAT.new_ly_eq_lyc;
+        PPU.last_ly = PPU.ly;
 
-      PPU.state_ticks -= CPU_TICK;
-      if (LIKELY(PPU.state_ticks != 0)) {
-        continue;
-      }
+        PPU.state_ticks -= CPU_TICK;
+        if (LIKELY(PPU.state_ticks != 0)) {
+          continue;
+        }
 
-      Ticks ticks = aligned_ticks - delta_ticks;
+        Ticks ticks = aligned_ticks - delta_ticks;
 
-      switch (PPU.state) {
-        case PPU_STATE_HBLANK:
-        case PPU_STATE_VBLANK_PLUS_4:
-          PPU.line_y++;
-          PPU.ly++;
-          PPU.line_start_ticks = ticks;
-          check_ly_eq_lyc(e, FALSE);
-          PPU.state_ticks = CPU_TICK;
+        switch (PPU.state) {
+          case PPU_STATE_HBLANK:
+          case PPU_STATE_VBLANK_PLUS_4:
+            PPU.line_y++;
+            PPU.ly++;
+            PPU.line_start_ticks = ticks;
+            check_ly_eq_lyc(e, FALSE);
+            PPU.state_ticks = CPU_TICK;
 
-          if (PPU.state == PPU_STATE_HBLANK) {
-            STAT.mode2.trigger = TRUE;
-            if (PPU.ly == SCREEN_HEIGHT) {
-              PPU.state = PPU_STATE_VBLANK;
-              STAT.trigger_mode = PPU_MODE_VBLANK;
-              PPU.frame++;
-              INTR.new_if |= IF_VBLANK;
-              if (LIKELY(PPU.display_delay_frames == 0)) {
-                e->state.event |= EMULATOR_EVENT_NEW_FRAME;
+            if (PPU.state == PPU_STATE_HBLANK) {
+              STAT.mode2.trigger = TRUE;
+              if (PPU.ly == SCREEN_HEIGHT) {
+                PPU.state = PPU_STATE_VBLANK;
+                STAT.trigger_mode = PPU_MODE_VBLANK;
+                PPU.frame++;
+                INTR.new_if |= IF_VBLANK;
+                if (LIKELY(PPU.display_delay_frames == 0)) {
+                  e->state.event |= EMULATOR_EVENT_NEW_FRAME;
+                } else {
+                  PPU.display_delay_frames--;
+                }
               } else {
-                PPU.display_delay_frames--;
+                PPU.state = PPU_STATE_HBLANK_PLUS_4;
+                STAT.trigger_mode = PPU_MODE_MODE2;
+                if (PPU.rendering_window) {
+                  PPU.win_y++;
+                }
+                if (UNLIKELY(HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
+                             (HDMA.blocks & 0x80) == 0)) {
+                  HDMA.state = DMA_ACTIVE;
+                }
               }
             } else {
-              PPU.state = PPU_STATE_HBLANK_PLUS_4;
-              STAT.trigger_mode = PPU_MODE_MODE2;
-              if (PPU.rendering_window) {
-                PPU.win_y++;
-              }
-              if (UNLIKELY(HDMA.mode == HDMA_TRANSFER_MODE_HDMA &&
-                           (HDMA.blocks & 0x80) == 0)) {
-                HDMA.state = DMA_ACTIVE;
+              assert(PPU.state == PPU_STATE_VBLANK_PLUS_4);
+              if (PPU.ly == SCREEN_HEIGHT_WITH_VBLANK - 1) {
+                PPU.state = PPU_STATE_VBLANK_LY_0;
+              } else {
+                PPU.state_ticks = PPU_LINE_TICKS;
               }
             }
-          } else {
-            assert(PPU.state == PPU_STATE_VBLANK_PLUS_4);
-            if (PPU.ly == SCREEN_HEIGHT_WITH_VBLANK - 1) {
-              PPU.state = PPU_STATE_VBLANK_LY_0;
+            check_stat(e);
+            break;
+
+          case PPU_STATE_HBLANK_PLUS_4:
+            PPU.state = PPU_STATE_MODE2;
+            PPU.state_ticks = PPU_MODE2_TICKS;
+            STAT.mode = PPU_MODE_MODE2;
+            do_ppu_mode2(e);
+            break;
+
+          case PPU_STATE_VBLANK:
+            PPU.state = PPU_STATE_VBLANK_PLUS_4;
+            PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK;
+            STAT.mode = PPU_MODE_VBLANK;
+            check_stat(e);
+            break;
+
+          case PPU_STATE_VBLANK_LY_0:
+            PPU.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
+            PPU.state_ticks = CPU_TICK;
+            PPU.ly = 0;
+            break;
+
+          case PPU_STATE_VBLANK_LY_0_PLUS_4:
+            PPU.state = PPU_STATE_VBLANK_LINE_Y_0;
+            PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK - CPU_TICK;
+            check_ly_eq_lyc(e, FALSE);
+            check_stat(e);
+            break;
+
+          case PPU_STATE_VBLANK_LINE_Y_0:
+            PPU.state = PPU_STATE_HBLANK_PLUS_4;
+            PPU.state_ticks = CPU_TICK;
+            PPU.line_start_ticks = ticks;
+            PPU.line_y = 0;
+            PPU.win_y = 0;
+            STAT.mode2.trigger = TRUE;
+            STAT.mode = PPU_MODE_HBLANK;
+            STAT.trigger_mode = PPU_MODE_MODE2;
+            check_stat(e);
+            break;
+
+          case PPU_STATE_LCD_ON_MODE2:
+          case PPU_STATE_MODE2:
+            PPU.state_ticks = mode3_tick_count(e);
+            if (PPU.state == PPU_STATE_LCD_ON_MODE2 ||
+                (PPU.state_ticks & 3) != 0) {
+              PPU.state = PPU_STATE_MODE3;
             } else {
-              PPU.state_ticks = PPU_LINE_TICKS;
+              PPU.state = PPU_STATE_MODE3_EARLY_TRIGGER;
+              PPU.state_ticks--;
             }
-          }
-          check_stat(e);
-          break;
+            PPU.state_ticks &= ~3;
+            STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
+            PPU.mode3_render_ticks = ticks;
+            PPU.render_x = 0;
+            PPU.rendering_window = FALSE;
+            check_stat(e);
+            break;
 
-        case PPU_STATE_HBLANK_PLUS_4:
-          PPU.state = PPU_STATE_MODE2;
-          PPU.state_ticks = PPU_MODE2_TICKS;
-          STAT.mode = PPU_MODE_MODE2;
-          do_ppu_mode2(e);
-          break;
+          case PPU_STATE_MODE3_EARLY_TRIGGER:
+            PPU.state = PPU_STATE_MODE3_COMMON;
+            PPU.state_ticks = CPU_TICK;
+            STAT.trigger_mode = PPU_MODE_HBLANK;
+            check_stat(e);
+            break;
 
-        case PPU_STATE_VBLANK:
-          PPU.state = PPU_STATE_VBLANK_PLUS_4;
-          PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK;
-          STAT.mode = PPU_MODE_VBLANK;
-          check_stat(e);
-          break;
+          case PPU_STATE_MODE3:
+            STAT.trigger_mode = PPU_MODE_HBLANK;
+            /* fallthrough */
 
-        case PPU_STATE_VBLANK_LY_0:
-          PPU.state = PPU_STATE_VBLANK_LY_0_PLUS_4;
-          PPU.state_ticks = CPU_TICK;
-          PPU.ly = 0;
-          break;
+          case PPU_STATE_MODE3_COMMON:
+            ppu_mode3_synchronize(e);
+            PPU.state = PPU_STATE_HBLANK;
+            PPU.state_ticks = PPU_LINE_TICKS + PPU.line_start_ticks - ticks;
+            STAT.mode = PPU_MODE_HBLANK;
+            check_stat(e);
+            break;
 
-        case PPU_STATE_VBLANK_LY_0_PLUS_4:
-          PPU.state = PPU_STATE_VBLANK_LINE_Y_0;
-          PPU.state_ticks = PPU_LINE_TICKS - CPU_TICK - CPU_TICK;
-          check_ly_eq_lyc(e, FALSE);
-          check_stat(e);
-          break;
+          case PPU_STATE_COUNT:
+            assert(0);
+            break;
+        }
 
-        case PPU_STATE_VBLANK_LINE_Y_0:
-          PPU.state = PPU_STATE_HBLANK_PLUS_4;
-          PPU.state_ticks = CPU_TICK;
-          PPU.line_start_ticks = ticks;
-          PPU.line_y = 0;
-          PPU.win_y = 0;
-          STAT.mode2.trigger = TRUE;
-          STAT.mode = PPU_MODE_HBLANK;
-          STAT.trigger_mode = PPU_MODE_MODE2;
-          check_stat(e);
-          break;
-
-        case PPU_STATE_LCD_ON_MODE2:
-        case PPU_STATE_MODE2:
-          PPU.state_ticks = mode3_tick_count(e);
-          if (PPU.state == PPU_STATE_LCD_ON_MODE2 ||
-              (PPU.state_ticks & 3) != 0) {
-            PPU.state = PPU_STATE_MODE3;
-          } else {
-            PPU.state = PPU_STATE_MODE3_EARLY_TRIGGER;
-            PPU.state_ticks--;
-          }
-          PPU.state_ticks &= ~3;
-          STAT.mode = STAT.trigger_mode = PPU_MODE_MODE3;
-          PPU.mode3_render_ticks = ticks;
-          PPU.render_x = 0;
-          PPU.rendering_window = FALSE;
-          check_stat(e);
-          break;
-
-        case PPU_STATE_MODE3_EARLY_TRIGGER:
-          PPU.state = PPU_STATE_MODE3_COMMON;
-          PPU.state_ticks = CPU_TICK;
-          STAT.trigger_mode = PPU_MODE_HBLANK;
-          check_stat(e);
-          break;
-
-        case PPU_STATE_MODE3:
-          STAT.trigger_mode = PPU_MODE_HBLANK;
-          /* fallthrough */
-
-        case PPU_STATE_MODE3_COMMON:
-          ppu_mode3_synchronize(e);
-          PPU.state = PPU_STATE_HBLANK;
-          PPU.state_ticks = PPU_LINE_TICKS + PPU.line_start_ticks - ticks;
-          STAT.mode = PPU_MODE_HBLANK;
-          check_stat(e);
-          break;
-
-        case PPU_STATE_COUNT:
-          assert(0);
-          break;
+        PPU.sync_ticks = ticks + CPU_TICK;
+        calculate_next_ppu_intr(e);
       }
-
-      PPU.sync_ticks = ticks + CPU_TICK;
-      calculate_next_ppu_intr(e);
     }
+    PPU.sync_ticks = aligned_ticks;
   }
-  PPU.sync_ticks = aligned_ticks;
 }
 
 static void calculate_next_ppu_intr(Emulator* e) {
@@ -3389,7 +3383,7 @@ static void intr_synchronize(Emulator* e) {
 }
 
 static void apu_synchronize(Emulator* e) {
-  if (APU.sync_ticks != TICKS) {
+  if (TICKS > APU.sync_ticks) {
     u32 ticks = TICKS - APU.sync_ticks;
     if (APU.enabled) {
       apu_update(e, ticks);
@@ -3404,36 +3398,33 @@ static void apu_synchronize(Emulator* e) {
 }
 
 static void dma_synchronize(Emulator* e) {
-  if (LIKELY(DMA.state == DMA_INACTIVE)) {
-    return;
-  }
+  if (UNLIKELY(DMA.state != DMA_INACTIVE)) {
+    if (TICKS > DMA.sync_ticks) {
+      Ticks delta_ticks = TICKS - DMA.sync_ticks;
+      DMA.sync_ticks = TICKS;
 
-  Ticks delta_ticks = TICKS - DMA.sync_ticks;
-  if (delta_ticks == 0) {
-    return;
-  }
+      Ticks cpu_tick = e->state.cpu_tick;
+      for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
+        if (DMA.tick_count < DMA_DELAY_TICKS) {
+          DMA.tick_count += CPU_TICK;
+          if (DMA.tick_count >= DMA_DELAY_TICKS) {
+            DMA.tick_count = DMA_DELAY_TICKS;
+            DMA.state = DMA_ACTIVE;
+          }
+          continue;
+        }
 
-  DMA.sync_ticks = TICKS;
-
-  Ticks cpu_tick = e->state.cpu_tick;
-  for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
-    if (DMA.tick_count < DMA_DELAY_TICKS) {
-      DMA.tick_count += CPU_TICK;
-      if (DMA.tick_count >= DMA_DELAY_TICKS) {
-        DMA.tick_count = DMA_DELAY_TICKS;
-        DMA.state = DMA_ACTIVE;
+        u8 addr_offset = (DMA.tick_count - DMA_DELAY_TICKS) >> 2;
+        assert(addr_offset < OAM_TRANSFER_SIZE);
+        u8 value =
+            read_u8_pair(e, map_address(DMA.source + addr_offset), FALSE);
+        write_oam_no_mode_check(e, addr_offset, value);
+        DMA.tick_count += CPU_TICK;
+        if (VALUE_WRAPPED(DMA.tick_count, DMA_TICKS)) {
+          DMA.state = DMA_INACTIVE;
+          break;
+        }
       }
-      continue;
-    }
-
-    u8 addr_offset = (DMA.tick_count - DMA_DELAY_TICKS) >> 2;
-    assert(addr_offset < OAM_TRANSFER_SIZE);
-    u8 value = read_u8_pair(e, map_address(DMA.source + addr_offset), FALSE);
-    write_oam_no_mode_check(e, addr_offset, value);
-    DMA.tick_count += CPU_TICK;
-    if (VALUE_WRAPPED(DMA.tick_count, DMA_TICKS)) {
-      DMA.state = DMA_INACTIVE;
-      break;
     }
   }
 }
@@ -3479,33 +3470,33 @@ static void calculate_next_serial_intr(Emulator* e) {
 }
 
 static void serial_synchronize(Emulator* e) {
-  Ticks delta_ticks = TICKS - SERIAL.sync_ticks;
-  if (delta_ticks == 0) {
-    return;
-  }
+  if (TICKS > SERIAL.sync_ticks) {
+    Ticks delta_ticks = TICKS - SERIAL.sync_ticks;
 
-  if (UNLIKELY(SERIAL.transferring && SERIAL.clock == SERIAL_CLOCK_INTERNAL)) {
-    Ticks cpu_tick = e->state.cpu_tick;
-    for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
-      SERIAL.tick_count += cpu_tick;
-      if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
-        /* Since we're never connected to another device, always shift in
-         * 0xff. */
-        SERIAL.sb = (SERIAL.sb << 1) | 1;
-        SERIAL.transferred_bits++;
-        if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
-          SERIAL.transferring = 0;
-          INTR.new_if |= IF_SERIAL;
-          SERIAL.sync_ticks = TICKS - delta_ticks;
-          calculate_next_serial_intr(e);
+    if (UNLIKELY(SERIAL.transferring &&
+                 SERIAL.clock == SERIAL_CLOCK_INTERNAL)) {
+      Ticks cpu_tick = e->state.cpu_tick;
+      for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
+        SERIAL.tick_count += cpu_tick;
+        if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
+          /* Since we're never connected to another device, always shift in
+           * 0xff. */
+          SERIAL.sb = (SERIAL.sb << 1) | 1;
+          SERIAL.transferred_bits++;
+          if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
+            SERIAL.transferring = 0;
+            INTR.new_if |= IF_SERIAL;
+            SERIAL.sync_ticks = TICKS - delta_ticks;
+            calculate_next_serial_intr(e);
+          }
+        } else if (UNLIKELY(SERIAL.tick_count == 0 &&
+                            SERIAL.transferred_bits == 0)) {
+          INTR.if_ |= (INTR.new_if & IF_SERIAL);
         }
-      } else if (UNLIKELY(SERIAL.tick_count == 0 &&
-                          SERIAL.transferred_bits == 0)) {
-        INTR.if_ |= (INTR.new_if & IF_SERIAL);
       }
     }
+    SERIAL.sync_ticks = TICKS;
   }
-  SERIAL.sync_ticks = TICKS;
 }
 
 static void tick(Emulator* e) {
