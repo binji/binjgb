@@ -74,6 +74,7 @@ typedef struct Host {
   RewindState rewind_state;
   JoypadPlayback joypad_playback;
   Ticks last_ticks;
+  Bool key_state[HOST_KEYCODE_COUNT];
 } Host;
 
 static Emulator* host_get_emulator(Host* host) {
@@ -156,6 +157,9 @@ Bool host_poll_events(Host* host) {
       case SDL_KEYDOWN:
       case SDL_KEYUP: {
         HostKeycode keycode = scancode_to_keycode(event.key.keysym.scancode);
+        if (!host_ui_capture_keyboard(host->ui)) {
+          host->key_state[keycode] = event.type == SDL_KEYDOWN;
+        }
         if (event.type == SDL_KEYDOWN) {
           HOOK(key_down, keycode);
         } else {
@@ -238,17 +242,14 @@ void host_render_audio(Host* host) {
 
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* host = user_data;
-  if (!host_ui_capture_keyboard(host->ui)) {
-    const u8* state = SDL_GetKeyboardState(NULL);
-    joyp->up = state[SDL_SCANCODE_UP];
-    joyp->down = state[SDL_SCANCODE_DOWN];
-    joyp->left = state[SDL_SCANCODE_LEFT];
-    joyp->right = state[SDL_SCANCODE_RIGHT];
-    joyp->B = state[SDL_SCANCODE_Z];
-    joyp->A = state[SDL_SCANCODE_X];
-    joyp->start = state[SDL_SCANCODE_RETURN];
-    joyp->select = state[SDL_SCANCODE_TAB];
-  }
+  joyp->up = host->key_state[HOST_KEYCODE_UP];
+  joyp->down = host->key_state[HOST_KEYCODE_DOWN];
+  joyp->left = host->key_state[HOST_KEYCODE_LEFT];
+  joyp->right = host->key_state[HOST_KEYCODE_RIGHT];
+  joyp->B = host->key_state[HOST_KEYCODE_Z];
+  joyp->A = host->key_state[HOST_KEYCODE_X];
+  joyp->start = host->key_state[HOST_KEYCODE_RETURN];
+  joyp->select = host->key_state[HOST_KEYCODE_TAB];
 
   /* Prefer controller input, if any */
   if (host->controller) {

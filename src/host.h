@@ -96,6 +96,7 @@ typedef enum HostKeycode {
 #define HOST_KEYCODE_ENUM(NAME) HOST_KEYCODE_##NAME,
   FOREACH_HOST_KEYCODE(HOST_KEYCODE_ENUM)
 #undef HOST_KEYCODE_ENUM
+  HOST_KEYCODE_COUNT,
 } HostKeycode;
 
 struct Emulator;
