@@ -14,7 +14,7 @@ const char Debugger::s_memory_window_name[] = "Memory";
 
 Debugger::MemoryWindow::MemoryWindow(Debugger* d) : Window(d) {
   memory_editor.UserData = this;
-  memory_editor.ReadFn = [](u8*, size_t addr, void* user_data) {
+  memory_editor.ReadFn = [](const u8*, size_t addr, void* user_data) {
     MemoryWindow* this_ = static_cast<MemoryWindow*>(user_data);
     return emulator_read_u8_raw(this_->d->e, this_->memory_editor_base + addr);
   };
