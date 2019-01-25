@@ -62,6 +62,7 @@ let data = {
     selected: 0,
     list: []
   },
+  volume: 0.5,
   pal: 0
 };
 
@@ -529,14 +530,15 @@ class Audio {
   pushBuffer() {
     const nowSec = Audio.ctx.currentTime;
     const nowPlusLatency = nowSec + AUDIO_LATENCY_SEC;
+    const volume = vm.volume;
     this.startSec = (this.startSec || nowPlusLatency);
     if (this.startSec >= nowSec) {
       const buffer = Audio.ctx.createBuffer(2, AUDIO_FRAMES, this.sampleRate);
       const channel0 = buffer.getChannelData(0);
       const channel1 = buffer.getChannelData(1);
       for (let i = 0; i < AUDIO_FRAMES; i++) {
-        channel0[i] = this.buffer[2 * i] / 127.5 - 1;
-        channel1[i] = this.buffer[2 * i + 1] / 127.5 - 1;
+        channel0[i] = this.buffer[2 * i] * volume / 255;
+        channel1[i] = this.buffer[2 * i + 1] * volume / 255;
       }
       const bufferSource = Audio.ctx.createBufferSource();
       bufferSource.buffer = buffer;

@@ -33,7 +33,7 @@ typedef f32 HostAudioSample;
 #define AUDIO_SPEC_CHANNELS 2
 #define AUDIO_SPEC_SAMPLE_SIZE sizeof(HostAudioSample)
 #define AUDIO_FRAME_SIZE (AUDIO_SPEC_SAMPLE_SIZE * AUDIO_SPEC_CHANNELS)
-#define AUDIO_CONVERT_SAMPLE_FROM_U8(X, fvol) ((fvol) * (X) * (1 / 256.0f))
+#define AUDIO_CONVERT_SAMPLE_FROM_U8(X, fvol) ((fvol) * (X) * (1 / 255.0f))
 #define AUDIO_TARGET_QUEUED_SIZE (2 * host->audio.spec.size)
 #define AUDIO_MAX_QUEUED_SIZE (5 * host->audio.spec.size)
 
