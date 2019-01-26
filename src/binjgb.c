@@ -176,6 +176,13 @@ static void toggle_audio_channel(int channel) {
                   emu_config.disable_sound[APU_CHANNEL4] ? '_' : '4');
 }
 
+static void inc_palette(int delta) {
+  s_builtin_palette = (s_builtin_palette + delta + BUILTIN_PALETTE_COUNT) %
+                      BUILTIN_PALETTE_COUNT;
+  emulator_set_builtin_palette(e, s_builtin_palette);
+  set_status_text("Palette: %d", s_builtin_palette);
+}
+
 static void toggle_layer(Layer layer) {
   EmulatorConfig emu_config = emulator_get_config(e);
   switch (layer) {
@@ -281,6 +288,8 @@ static void key_down(HostHookContext* ctx, HostKeycode code) {
     case HOST_KEYCODE_MINUS: inc_audio_volume(-0.05f); break;
     case HOST_KEYCODE_EQUALS: inc_audio_volume(+0.05f); break;
     case HOST_KEYCODE_BACKSPACE: begin_rewind(); break;
+    case HOST_KEYCODE_LEFTBRACKET: inc_palette(-1); break;
+    case HOST_KEYCODE_RIGHTBRACKET: inc_palette(1); break;
     default: break;
   }
 }

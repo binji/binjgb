@@ -30,6 +30,8 @@ extern "C" {
 #define OBJ_X_OFFSET 8
 #define OBJ_Y_OFFSET 16
 
+#define BUILTIN_PALETTE_COUNT 83
+
 typedef struct Emulator Emulator;
 
 enum {
