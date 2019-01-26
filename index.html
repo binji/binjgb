@@ -122,6 +122,10 @@
     .top-line {
       border-top: 1px solid gray;
     }
+    #volume {
+      height: 1em;
+      width: 75px;
+    }
     .bar-wrap {
       width: 100%;
       padding: 8px 0;
@@ -222,11 +226,14 @@
           <button
             v-show="loaded" @click="palDown">-</button><button
             v-show="loaded" @click="palUp">+</button>
+          <span v-if="loaded">
+            vol:<input id="volume" type="range" min="0" max="1" step="0.01"
+                  v-model:value="volume">
+          </span>
           <button
               v-show="loaded"
               v-bind:disabled="files.show"
               @click="togglePause">{{pauseLabel}}</button>
-          <span>{{loadedFileName}}</span>
         </div>
         <div class="right">
           <span>{{fps.toFixed(1)}}</span> FPS
