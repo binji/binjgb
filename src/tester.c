@@ -13,7 +13,12 @@
 #include <sys/time.h>
 #endif
 
+#if TESTER_DEBUGGER
 #include "emulator-debug.h"
+#else
+#include "emulator.h"
+#endif
+
 #include "joypad.h"
 #include "options.h"
 
@@ -63,23 +68,29 @@ void usage(int argc, char** argv) {
   PRINT_ERROR(
       "usage: %s [options] <in.gb>\n"
       "  -h,--help            help\n"
+#if TESTER_DEBUGGER
       "  -t,--trace           trace each instruction\n"
       "  -l,--log S=N         set log level for system S to N\n"
+#endif
       "  -j,--joypad FILE     read joypad input from FILE\n"
       "  -f,--frames N        run for N frames (default: %u)\n"
       "  -o,--output FILE     output PPM file to FILE\n"
       "  -a,--animate         output an image every frame\n"
+#if TESTER_DEBUGGER
       "     --print-ops       print execution count of each opcode\n"
       "     --print-ops-limit max opcodes to print\n"
       "     --profile         print execution count of each opcode\n"
       "     --profile-limit   max opcodes to print\n"
+#endif
       "  -s,--seed SEED       random seed used for initializing RAM\n"
       "  -P,--palette PAL     use a builtin palette for DMG\n"
       "     --force-dmg       force running as a DMG (original gameboy)\n",
       argv[0],
       DEFAULT_FRAMES);
 
+#if TESTER_DEBUGGER
   emulator_print_log_systems();
+#endif
 }
 
 static f64 get_time_sec(void) {
@@ -96,16 +107,20 @@ static f64 get_time_sec(void) {
 void parse_options(int argc, char**argv) {
   static const Option options[] = {
     {'h', "help", 0},
+#if TESTER_DEBUGGER
     {'t', "trace", 0},
     {'l', "log", 1},
+#endif
     {'j', "joypad", 1},
     {'f', "frames", 1},
     {'o', "output", 1},
     {'a', "animate", 0},
+#if TESTER_DEBUGGER
     {0, "print-ops-limit", 1},
     {0, "print-ops", 0},
     {0, "profile-limit", 1},
     {0, "profile", 0},
+#endif
     {'s', "seed", 1},
     {'P', "palette", 1},
     {0, "force-dmg", 0},
@@ -138,6 +153,7 @@ void parse_options(int argc, char**argv) {
           case 'h':
             goto error;
 
+#if TESTER_DEBUGGER
           case 't':
             emulator_set_trace(TRUE);
             break;
@@ -160,6 +176,7 @@ void parse_options(int argc, char**argv) {
               }
             }
             break;
+#endif
 
           case 'j':
             s_joypad_filename = result.value;
@@ -186,6 +203,7 @@ void parse_options(int argc, char**argv) {
             break;
 
           default:
+#if TESTER_DEBUGGER
             if (strcmp(result.option->long_name, "print-ops") == 0) {
               s_print_ops = TRUE;
               emulator_set_opcode_count_enabled(TRUE);
@@ -203,6 +221,9 @@ void parse_options(int argc, char**argv) {
               if (s_profile_limit >= MAX_PROFILE_LIMIT) {
                 s_profile_limit = MAX_PROFILE_LIMIT;
               }
+#else
+            if (FALSE) {
+#endif
             } else if (strcmp(result.option->long_name, "force-dmg") == 0) {
               s_force_dmg = TRUE;
             } else {
@@ -236,6 +257,7 @@ error:
   exit(1);
 }
 
+#if TESTER_DEBUGGER
 typedef struct {
   u32 value;
   u32 count;
@@ -372,6 +394,7 @@ void print_profile(Emulator* e) {
   }
   xfree(pairs);
 }
+#endif
 
 int main(int argc, char** argv) {
   int result = 1;
@@ -403,8 +426,10 @@ int main(int argc, char** argv) {
     emulator_set_joypad_playback_callback(e, joypad_buffer, &joypad_playback);
   }
 
+#if TESTER_DEBUGGER
   /* Disable rom usage collecting since it's slow and not useful here. */
   emulator_set_rom_usage_enabled(FALSE);
+#endif
 
   u32 total_ticks = (u32)(s_frames * PPU_FRAME_TICKS);
   u32 until_ticks = emulator_get_ticks(e) + total_ticks;
@@ -434,7 +459,12 @@ int main(int argc, char** argv) {
       until_ticks += PPU_FRAME_TICKS;
     }
     if (event & EMULATOR_EVENT_INVALID_OPCODE) {
-      printf("!! hit invalid opcode, pc=%04x\n", emulator_get_registers(e).PC);
+      printf("!! hit invalid opcode, pc=");
+#if TESTER_DEBUGGER
+      printf("%04x\n", emulator_get_registers(e).PC);
+#else
+      printf("???\n");
+#endif
       break;
     }
   }
@@ -448,6 +478,7 @@ int main(int argc, char** argv) {
     CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
   }
 
+#if TESTER_DEBUGGER
   if (s_print_ops) {
     print_ops();
   }
@@ -455,6 +486,7 @@ int main(int argc, char** argv) {
   if (s_profile) {
     print_profile(e);
   }
+#endif
 
   result = 0;
 error:

@@ -117,12 +117,24 @@ if (NOT EMSCRIPTEN)
     src/memory.c
     src/common.c
     src/options.c
-    src/emulator-debug.c
+    src/emulator.c
     src/joypad.c
     src/tester.c
   )
   install(TARGETS binjgb-tester DESTINATION bin)
   target_copy_to_bin(binjgb-tester)
+
+  add_executable(binjgb-tester-debug
+    src/memory.c
+    src/common.c
+    src/options.c
+    src/emulator-debug.c
+    src/joypad.c
+    src/tester.c
+  )
+  target_compile_definitions(binjgb-tester-debug PUBLIC TESTER_DEBUGGER)
+  install(TARGETS binjgb-tester-debug DESTINATION bin)
+  target_copy_to_bin(binjgb-tester-debug)
 else (EMSCRIPTEN)
   add_executable(binjgb
     src/memory.c
