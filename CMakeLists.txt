@@ -23,11 +23,6 @@ else ()
   if (WERROR)
     add_definitions(-Werror)
   endif ()
-  if (CMAKE_COMPILER_IS_GNUCXX AND
-      CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
-    # TODO(binji): These warnings should only be disabled for imgui.
-    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -Wno-stringop-truncation)
-  endif ()
 endif ()
 
 function (target_copy_to_bin name)
@@ -92,8 +87,15 @@ if (NOT EMSCRIPTEN)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD 11)
     set_property(TARGET binjgb-debugger PROPERTY CXX_STANDARD_REQUIRED ON)
 
-    if (${CMAKE_C_COMPILER_ID} STREQUAL "GNU")
-      # Disable warnings in stb_truetype.h.
+    if (CMAKE_COMPILER_IS_GNUCXX)
+      if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
+        set(IMGUI_EXTRA_FLAGS "-Wno-stringop-truncation")
+      endif ()
+      set_source_files_properties(
+        third_party/imgui/imgui.cpp
+        PROPERTIES
+        COMPILE_FLAGS "${IMGUI_EXTRA_FLAGS} -Wno-extra -Wno-unused-but-set-variable"
+      )
       set_source_files_properties(
         third_party/imgui/imgui_draw.cpp
         PROPERTIES
