@@ -3531,26 +3531,6 @@ static void set_af_reg(Emulator* e, u16 af) {
   REG.F.C = UNPACK(af, CPU_FLAG_C);
 }
 
-static u8 s_opcode_bytes[] = {
-    /*       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f */
-    /* 00 */ 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 1, 1, 1, 1, 2, 1,
-    /* 10 */ 1, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    /* 20 */ 2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    /* 30 */ 2, 3, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1,
-    /* 40 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* 50 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* 60 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* 70 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* 80 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* 90 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* a0 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* b0 */ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    /* c0 */ 1, 1, 3, 3, 3, 1, 2, 1, 1, 1, 3, 2, 3, 3, 2, 1,
-    /* d0 */ 1, 1, 3, 1, 3, 1, 2, 1, 1, 1, 3, 1, 3, 1, 2, 1,
-    /* e0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
-    /* f0 */ 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 3, 1, 1, 1, 2, 1,
-};
-
 #define TICK tick(e)
 #define RA REG.A
 #define RSP REG.SP
@@ -3566,8 +3546,8 @@ static u8 s_opcode_bytes[] = {
 #define READ16(X) read_u16_tick(e, X)
 #define WRITE8(X, V) write_u8_tick(e, X, V)
 #define WRITE16(X, V) write_u16_tick(e, X, V)
-#define READ_N READ8(REG.PC + 1)
-#define READ_NN READ16(REG.PC + 1)
+#define READ_N (new_pc += 1, READ8(REG.PC))
+#define READ_NN (new_pc += 2, READ16(REG.PC))
 #define READMR(MR) READ8(REG.MR)
 #define WRITEMR(MR, V) WRITE8(REG.MR, V)
 #define BASIC_OP_R(R, OP) u = REG.R; OP; REG.R = u
@@ -3910,7 +3890,7 @@ static void execute_instruction(Emulator* e) {
 #define LD_R_OPS(code, R) REG_OPS_N(code, LD_R, R)
 
   HOOK(exec_op_ai, REG.PC, opcode);
-  new_pc = REG.PC + s_opcode_bytes[opcode];
+  new_pc = ++REG.PC;
 
   switch (opcode) {
     case 0x00: break;
@@ -4012,7 +3992,8 @@ static void execute_instruction(Emulator* e) {
     case 0xc9: RET; break;
     case 0xca: JP_F_NN(FZ); break;
     case 0xcb: {
-      u8 cb = read_u8_tick(e, REG.PC + 1);
+      new_pc += 1;
+      u8 cb = read_u8_tick(e, REG.PC);
       HOOK(exec_cb_op_i, cb);
       switch (cb) {
         REG_OPS(0x00, RLC)
