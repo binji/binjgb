@@ -13,7 +13,7 @@
 #include <sys/time.h>
 #endif
 
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
 #include "emulator-debug.h"
 #else
 #include "emulator.h"
@@ -65,10 +65,10 @@ Result write_frame_ppm(Emulator* e, const char* filename) {
 }
 
 void usage(int argc, char** argv) {
-  PRINT_ERROR(
+  static const char usage[] =
       "usage: %s [options] <in.gb>\n"
       "  -h,--help            help\n"
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
       "  -t,--trace           trace each instruction\n"
       "  -l,--log S=N         set log level for system S to N\n"
 #endif
@@ -76,7 +76,7 @@ void usage(int argc, char** argv) {
       "  -f,--frames N        run for N frames (default: %u)\n"
       "  -o,--output FILE     output PPM file to FILE\n"
       "  -a,--animate         output an image every frame\n"
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
       "     --print-ops       print execution count of each opcode\n"
       "     --print-ops-limit max opcodes to print\n"
       "     --profile         print execution count of each opcode\n"
@@ -84,11 +84,11 @@ void usage(int argc, char** argv) {
 #endif
       "  -s,--seed SEED       random seed used for initializing RAM\n"
       "  -P,--palette PAL     use a builtin palette for DMG\n"
-      "     --force-dmg       force running as a DMG (original gameboy)\n",
-      argv[0],
-      DEFAULT_FRAMES);
+      "     --force-dmg       force running as a DMG (original gameboy)\n";
 
-#if TESTER_DEBUGGER
+  PRINT_ERROR(usage, argv[0], DEFAULT_FRAMES);
+
+#ifdef TESTER_DEBUGGER
   emulator_print_log_systems();
 #endif
 }
@@ -107,7 +107,7 @@ static f64 get_time_sec(void) {
 void parse_options(int argc, char**argv) {
   static const Option options[] = {
     {'h', "help", 0},
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
     {'t', "trace", 0},
     {'l', "log", 1},
 #endif
@@ -115,7 +115,7 @@ void parse_options(int argc, char**argv) {
     {'f', "frames", 1},
     {'o', "output", 1},
     {'a', "animate", 0},
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
     {0, "print-ops-limit", 1},
     {0, "print-ops", 0},
     {0, "profile-limit", 1},
@@ -153,7 +153,7 @@ void parse_options(int argc, char**argv) {
           case 'h':
             goto error;
 
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
           case 't':
             emulator_set_trace(TRUE);
             break;
@@ -203,7 +203,7 @@ void parse_options(int argc, char**argv) {
             break;
 
           default:
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
             if (strcmp(result.option->long_name, "print-ops") == 0) {
               s_print_ops = TRUE;
               emulator_set_opcode_count_enabled(TRUE);
@@ -257,7 +257,7 @@ error:
   exit(1);
 }
 
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
 typedef struct {
   u32 value;
   u32 count;
@@ -426,7 +426,7 @@ int main(int argc, char** argv) {
     emulator_set_joypad_playback_callback(e, joypad_buffer, &joypad_playback);
   }
 
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
   /* Disable rom usage collecting since it's slow and not useful here. */
   emulator_set_rom_usage_enabled(FALSE);
 #endif
@@ -460,7 +460,7 @@ int main(int argc, char** argv) {
     }
     if (event & EMULATOR_EVENT_INVALID_OPCODE) {
       printf("!! hit invalid opcode, pc=");
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
       printf("%04x\n", emulator_get_registers(e).PC);
 #else
       printf("???\n");
@@ -478,7 +478,7 @@ int main(int argc, char** argv) {
     CHECK(SUCCESS(write_frame_ppm(e, s_output_ppm)));
   }
 
-#if TESTER_DEBUGGER
+#ifdef TESTER_DEBUGGER
   if (s_print_ops) {
     print_ops();
   }
