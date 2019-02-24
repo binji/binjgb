@@ -161,7 +161,7 @@ static const char* s_opcode_mnemonic[256] = {
   NULL, "call nc,$%04hx", "push de", "sub a,%hhu", "rst $10", "ret c", "reti",
   "jp c,$%04hx", NULL, "call c,$%04hx", NULL, "sbc a,%hhu", "rst $18",
   "ldh [$ff%02hhx],a", "pop hl", "ld [$ff00+c],a", NULL, NULL, "push hl",
-  "and a,%hhu", "rst $20", "add sp,%hhd", "jp hl", "ld [$%04hx],a", NULL, NULL,
+  "and a,%hhu", "rst $20", "add sp,%+hhd", "jp hl", "ld [$%04hx],a", NULL, NULL,
   NULL, "xor a,%hhu", "rst $28", "ldh a,[$ff%02hhx]", "pop af",
   "ld a,[$ff00+c]", "di", NULL, "push af", "or a,%hhu", "rst $30",
   "ld hl,sp%+hhd", "ld sp,hl", "ld a,[$%04hx]", "ei", NULL, NULL, "cp a,%hhu",
