@@ -71,7 +71,7 @@ let vm = new Vue({
   data: data,
   created: function() {
     setInterval(() => {
-      this.fps = emulator ? emulator.fps : 60;
+      this.fps = emulator ? emulator.formatFPS() : "60.0";
     }, 500);
     setInterval(() => {
       if (this.extRamUpdated) {
@@ -419,6 +419,12 @@ class Emulator {
 
   get ticks() {
     return this.module._emulator_get_ticks_f64(this.e);
+  }
+
+  formatFPS() {
+    const wholeDigits = Math.floor(Math.log10(this.fps)) + 1;
+    const precision = 3 - wholeDigits;
+    return this.fps.toFixed(precision > 0 ? precision : 0);
   }
 
   runUntil(ticks) {
