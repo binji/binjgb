@@ -82,7 +82,7 @@ When building on Windows, you'll probably have to set the SDL2 directory:
 ```
 > mkdir build
 > cd build
-> cmake .. -G "Visual Studio 14 2015" -DSDL2_ROOT_DIR="C:\path\to\SDL\"
+> cmake .. -G "Visual Studio 15 2017" -DSDL2_ROOT_DIR="C:\path\to\SDL\"
 ```
 
 Then load this solution into Visual Studio and build it. Make sure to build the
