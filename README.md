@@ -50,6 +50,20 @@ A simple GB/GBC emulator.
 ![Tile Data](/images/tiledata-window.png)
 ![Breakpoints](/images/breakpoint.png)
 
+## Cloning
+
+Use a recursive clone, to include the submodules:
+
+```
+$ git clone --recursive https://github.com/binji/binjgb
+```
+
+If you've already cloned without initializing submodules, you can run this:
+
+```
+$ git submodule update --init
+```
+
 ## Building
 
 Requires [CMake](https://cmake.org) and
