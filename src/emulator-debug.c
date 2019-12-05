@@ -298,7 +298,7 @@ void emulator_get_opcode_mnemonic(u16 opcode, char* buffer, size_t size) {
 }
 
 static int disassemble_instr(u8 data[3], char* buffer, size_t size) {
-  char temp[100];
+  char temp[80];
   u8 opcode = data[0];
   u8 num_bytes = s_opcode_bytes[opcode];
   switch (num_bytes) {

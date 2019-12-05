@@ -89,18 +89,17 @@ if (NOT EMSCRIPTEN)
 
     if (CMAKE_COMPILER_IS_GNUCXX)
       if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8)
-        set(IMGUI_EXTRA_FLAGS "-Wno-stringop-truncation")
+        set(IMGUI_EXTRA_FLAGS "-Wno-stringop-truncation -Wno-class-memaccess")
       endif ()
       set_source_files_properties(
         third_party/imgui/imgui.cpp
-        PROPERTIES
-        COMPILE_FLAGS "${IMGUI_EXTRA_FLAGS} -Wno-extra -Wno-unused-but-set-variable"
-      )
-      set_source_files_properties(
         third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_widgets.cpp
         PROPERTIES
-        COMPILE_FLAGS "-Wno-maybe-uninitialized"
+        COMPILE_FLAGS "${IMGUI_EXTRA_FLAGS} -Wno-extra -Wno-unused-but-set-variable  -Wno-maybe-uninitialized"
       )
+      # Turn off warnings as errors, imgui has too many.
+      add_definitions(-Wno-error)
     endif ()
 
     target_include_directories(binjgb-debugger PUBLIC
