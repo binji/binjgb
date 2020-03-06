@@ -40,6 +40,12 @@ class VM {
       minTicks: 0,
       maxTicks: 0,
     };
+    setInterval(() => {
+      if (this.extRamUpdated) {
+        this.updateExtRam();
+        this.extRamUpdated = false;
+      }
+    }, 1000);
   }
 
   get paused() { return this.paused_; }
@@ -61,6 +67,12 @@ class VM {
   togglePause() {
     this.paused = !this.paused;
   }
+
+  updateExtRam() {
+    if (!emulator) return;
+    const extram = emulator.getExtRam();
+    localStorage.setItem('extram', JSON.stringify(Array.from(extram)));
+  }
 };
 
 const vm = new VM();
@@ -69,7 +81,8 @@ const vm = new VM();
 (async function go() {
   let response = await fetch('cpu_instrs.gb');
   let romBuffer = await response.arrayBuffer();
-  Emulator.start(await binjgbPromise, romBuffer, null);
+  const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
+  Emulator.start(await binjgbPromise, romBuffer, extRam);
   emulator.setBuiltinPalette(vm.pal);
 })();
 
