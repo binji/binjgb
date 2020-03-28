@@ -25,6 +25,9 @@
     canvas {
       width: 480px;
       height: 432px;
+      /* Make sure border doesn't shrink the content size, since we want the
+         pixels to scale properly. */
+      box-sizing: content-box;
       border: 1px solid gray;
       grid-column: 1;
       grid-row: 1;
