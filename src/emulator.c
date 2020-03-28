@@ -397,6 +397,7 @@ typedef struct {
   JoypadButtons buttons;
   JoypadSelect joypad_select;
   u8 last_p10_p13;
+  Ticks last_callback; /* The last time joypad callback was called. */
 } Joypad;
 
 typedef enum {
@@ -788,6 +789,7 @@ struct Emulator {
 #define DMA_TICKS 648
 #define DMA_DELAY_TICKS 8
 #define SERIAL_TICKS (CPU_TICKS_PER_SECOND / 8192)
+#define JOYP_INTERRUPT_WAIT_TICKS 10000 /* Arbitrary. */
 
 /* Video */
 #define TILE_WIDTH 8
@@ -1599,12 +1601,18 @@ static u8 read_joyp_p10_p13(Emulator* e) {
   return ~result;
 }
 
+static void call_joyp_callback(Emulator* e, Bool wait) {
+  if (e->joypad_info.callback &&
+      (!wait || TICKS - JOYP.last_callback >= JOYP_INTERRUPT_WAIT_TICKS)) {
+    e->joypad_info.callback(&JOYP.buttons, e->joypad_info.user_data);
+    JOYP.last_callback = TICKS;
+  }
+}
+
 static u8 read_io(Emulator* e, MaskedAddress addr) {
   switch (addr) {
     case IO_JOYP_ADDR:
-      if (e->joypad_info.callback) {
-        e->joypad_info.callback(&JOYP.buttons, e->joypad_info.user_data);
-      }
+      call_joyp_callback(e, FALSE);
       return JOYP_UNUSED | PACK(JOYP.joypad_select, JOYP_JOYPAD_SELECT) |
              (read_joyp_p10_p13(e) & JOYP_RESULT_MASK);
     case IO_SB_ADDR:
@@ -2057,13 +2065,14 @@ static void check_ly_eq_lyc(Emulator* e, Bool write) {
 }
 
 static void check_joyp_intr(Emulator* e) {
+  call_joyp_callback(e, TRUE);
   u8 p10_p13 = read_joyp_p10_p13(e);
   /* joyp interrupt only triggers on p10-p13 going from high to low (i.e. not
    * pressed to pressed). */
   if ((p10_p13 ^ JOYP.last_p10_p13) & ~p10_p13) {
     INTR.new_if |= IF_JOYPAD;
-    JOYP.last_p10_p13 = p10_p13;
   }
+  JOYP.last_p10_p13 = p10_p13;
 }
 
 static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
