@@ -6,10 +6,10 @@
  */
 var Binjgb = (async function() {
   // Must match values defined in generated binjgb.js
-  const TABLE_SIZE = 34;
+  const TABLE_SIZE = 23;
   const TOTAL_MEMORY = 16777216;
-  const STATIC_BUMP = 17264;
-  const TOTAL_STACK = 5242880;
+  const DYNAMICTOP_PTR = 16080;
+  const DYNAMIC_BASE = 5259120;
 
   const pageSize = 65536;
   const totalPages = TOTAL_MEMORY / pageSize;
@@ -20,46 +20,24 @@ var Binjgb = (async function() {
   const u8a = new Uint8Array(buffer);
   const u32a = new Uint32Array(buffer);
 
-  const GLOBAL_BASE = 1024;
-  const STATIC_BASE = GLOBAL_BASE;
-  let STATICTOP = STATIC_BASE + STATIC_BUMP;
-  const alignMemory = size => { return size + 15 & -16; };
-  const staticAlloc = size => {
-    const ret = STATICTOP;
-    STATICTOP = alignMemory(STATICTOP + size);
-    return ret;
-  };
-
-  const DYNAMICTOP_PTR = staticAlloc(4);
-  const STACK_BASE = alignMemory(STATICTOP);
-  const STACKTOP = STACK_BASE;
-  const STACK_MAX = alignMemory(STACK_BASE + TOTAL_STACK);
-  const DYNAMIC_BASE = alignMemory(STACK_MAX);
   u32a[DYNAMICTOP_PTR >> 2] = DYNAMIC_BASE;
 
   const abort = what => { throw `abort(${what}).`; };
   const abortOnCannotGrowMemory = () => { abort('Cannot enlarge memory.'); };
-  const enlargeMemory = abortOnCannotGrowMemory;
-  const getTotalMemory = () => { return TOTAL_MEMORY; };
-  const ___setErrNo = (v) => { return v; };
-  const ___syscall140 = (which, varargs) => { return 0; };
+  const fd_close = fd => { return 0; };
+  const fd_seek = (fd, offLow, offHigh, whence, newOff) => { return 0; };
+
   const streams = {
     1: {buffer: [], out: console.log.bind(console)},
     2: {buffer: [], out: console.error.bind(console)},
   };
   const decoder = new TextDecoder('utf8');
-  const ___syscall146 = (which, varargs) => {
-    const get = () => { varargs += 4; return u32a[varargs - 4 >> 2]; };
-    const {buffer, out} = streams[get()];
-    const flush = () => {
-      out(decoder.decode(new Uint8Array(buffer)));
-      buffer.length = 0;
-    };
-    const iov = get();
-    const iovcnt = get();
+  const fd_write = (fd, iov, iovcnt, pnum) => {
+    const {buffer, out} = streams[fd];
     const printChar = c => {
       if (c === 0 || c === 10) {
-        flush();
+        out(decoder.decode(new Uint8Array(buffer)));
+        buffer.length = 0;
       } else {
         buffer.push(c);
       }
@@ -73,52 +51,38 @@ var Binjgb = (async function() {
       }
       ret += len;
     }
-    return ret;
+    HEAP32[pnum >> 2] = ret;
+    return 0;
   };
-  const ___syscall54 = (which, varargs) => { return 0; };
-  const ___syscall6 = (which, varargs) => { return 0; };
-  const _emscripten_memcpy_big = (dest, src, num) => {
+  const emscripten_resize_heap = size => { abortOnCannotGrowMemory(size); }
+  const emscripten_memcpy_big = (dest, src, num) => {
     u8a.set(u8a.subarray(src, src + num), dest);
     return dest;
   };
-  const _exit = status => {};
-  const __table_base = 0;
+  const exit = status => {};
   const table = new WebAssembly.Table(
       {initial: TABLE_SIZE, maximum: TABLE_SIZE, element: 'anyfunc'});
+  const setTempRet0 = () => {};
 
+  const funcs = {
+    emscripten_memcpy_big,
+    emscripten_resize_heap,
+    exit,
+    fd_close,
+    fd_seek,
+    fd_write,
+    memory,
+    setTempRet0,
+    table,
+  };
   const importObject = {
-    env: {
-      abort,
-      enlargeMemory,
-      getTotalMemory,
-      abortOnCannotGrowMemory,
-      ___setErrNo,
-      ___syscall140,
-      ___syscall146,
-      ___syscall54,
-      ___syscall6,
-      _emscripten_memcpy_big,
-      _exit,
-      __table_base,
-      DYNAMICTOP_PTR,
-      STACKTOP,
-      STACK_MAX,
-      memory,
-      table,
-    }
+    env: funcs,
+    wasi_snapshot_preview1: funcs,
   };
 
   const response = fetch(wasmFile);
-  if (WebAssembly.instantiateStreaming) {
-    try {
-      var {instance} =
-          await WebAssembly.instantiateStreaming(response, importObject);
-    } catch (_) {}
-  }
-  if (!instance) {
-    var {instance} = await WebAssembly.instantiate(
-        await(await response).arrayBuffer(), importObject);
-  }
+  var {instance} = await WebAssembly.instantiate(
+      await (await response).arrayBuffer(), importObject);
 
   const ret = {};
   for (let name in instance.exports) {

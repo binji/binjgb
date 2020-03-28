@@ -108,10 +108,10 @@ class Emulator {
 
   constructor(module, romBuffer, extRamBuffer) {
     this.module = module;
-    this.romDataPtr = this.module._malloc(romBuffer.byteLength);
+    this.romDataPtr = this.module.malloc(romBuffer.byteLength);
     makeWasmBuffer(this.module, this.romDataPtr, romBuffer.byteLength)
         .set(new Uint8Array(romBuffer));
-    this.e = this.module._emulator_new_simple(
+    this.e = this.module.emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
         AUDIO_FRAMES);
     if (this.e == 0) {
@@ -139,17 +139,17 @@ class Emulator {
     this.cancelAnimationFrame();
     clearInterval(this.rewindIntervalId);
     this.rewind.destroy();
-    this.module._emulator_delete(this.e);
-    this.module._free(this.romDataPtr);
+    this.module.emulator_delete(this.e);
+    this.module.free(this.romDataPtr);
   }
 
   withNewFileData(cb) {
-    const fileDataPtr = this.module._ext_ram_file_data_new(this.e);
+    const fileDataPtr = this.module.ext_ram_file_data_new(this.e);
     const buffer = makeWasmBuffer(
-        this.module, this.module._get_file_data_ptr(fileDataPtr),
-        this.module._get_file_data_size(fileDataPtr));
+        this.module, this.module.get_file_data_ptr(fileDataPtr),
+        this.module.get_file_data_size(fileDataPtr));
     const result = cb(fileDataPtr, buffer);
-    this.module._file_data_delete(fileDataPtr);
+    this.module.file_data_delete(fileDataPtr);
     return result;
   }
 
@@ -157,14 +157,14 @@ class Emulator {
     this.withNewFileData((fileDataPtr, buffer) => {
       if (buffer.byteLength === extRamBuffer.byteLength) {
         buffer.set(new Uint8Array(extRamBuffer));
-        this.module._emulator_read_ext_ram(this.e, fileDataPtr);
+        this.module.emulator_read_ext_ram(this.e, fileDataPtr);
       }
     });
   }
 
   getExtRam() {
     return this.withNewFileData((fileDataPtr, buffer) => {
-      this.module._emulator_write_ext_ram(this.e, fileDataPtr);
+      this.module.emulator_write_ext_ram(this.e, fileDataPtr);
       return new Uint8Array(buffer);
     });
   }
@@ -190,7 +190,7 @@ class Emulator {
   }
 
   setBuiltinPalette(pal) {
-    this.module._emulator_set_builtin_palette(this.e, pal);
+    this.module.emulator_set_builtin_palette(this.e, pal);
   }
 
   get isRewinding() {
@@ -246,12 +246,12 @@ class Emulator {
   }
 
   get ticks() {
-    return this.module._emulator_get_ticks_f64(this.e);
+    return this.module.emulator_get_ticks_f64(this.e);
   }
 
   runUntil(ticks) {
     while (true) {
-      const event = this.module._emulator_run_until_f64(this.e, ticks);
+      const event = this.module.emulator_run_until_f64(this.e, ticks);
       if (event & EVENT_NEW_FRAME) {
         this.rewind.pushBuffer();
         this.video.uploadTexture();
@@ -263,7 +263,7 @@ class Emulator {
         break;
       }
     }
-    if (this.module._emulator_was_ext_ram_updated(this.e)) {
+    if (this.module.emulator_was_ext_ram_updated(this.e)) {
       vm.extRamUpdated = true;
     }
   }
@@ -289,14 +289,14 @@ class Emulator {
 
   bindKeys() {
     this.keyFuncs = {
-      'ArrowDown': this.module._set_joyp_down.bind(null, this.e),
-      'ArrowLeft': this.module._set_joyp_left.bind(null, this.e),
-      'ArrowRight': this.module._set_joyp_right.bind(null, this.e),
-      'ArrowUp': this.module._set_joyp_up.bind(null, this.e),
-      'KeyZ': this.module._set_joyp_B.bind(null, this.e),
-      'KeyX': this.module._set_joyp_A.bind(null, this.e),
-      'Enter': this.module._set_joyp_start.bind(null, this.e),
-      'Tab': this.module._set_joyp_select.bind(null, this.e),
+      'ArrowDown': this.module.set_joyp_down.bind(null, this.e),
+      'ArrowLeft': this.module.set_joyp_left.bind(null, this.e),
+      'ArrowRight': this.module.set_joyp_right.bind(null, this.e),
+      'ArrowUp': this.module.set_joyp_up.bind(null, this.e),
+      'KeyZ': this.module.set_joyp_B.bind(null, this.e),
+      'KeyX': this.module.set_joyp_A.bind(null, this.e),
+      'Enter': this.module.set_joyp_start.bind(null, this.e),
+      'Tab': this.module.set_joyp_select.bind(null, this.e),
       'Backspace': this.keyRewind.bind(this),
       'Space': this.keyPause.bind(this),
     };
@@ -347,8 +347,8 @@ class Audio {
   constructor(module, e) {
     this.module = module;
     this.buffer = makeWasmBuffer(
-        this.module, this.module._get_audio_buffer_ptr(e),
-        this.module._get_audio_buffer_capacity(e));
+        this.module, this.module.get_audio_buffer_ptr(e),
+        this.module.get_audio_buffer_capacity(e));
     this.startSec = 0;
     this.resume();
   }
@@ -403,8 +403,8 @@ class Video {
       this.renderer = new Canvas2DRenderer(el);
     }
     this.buffer = makeWasmBuffer(
-        this.module, this.module._get_frame_buffer_ptr(e),
-        this.module._get_frame_buffer_size(e));
+        this.module, this.module.get_frame_buffer_ptr(e),
+        this.module.get_frame_buffer_size(e));
   }
 
   uploadTexture() {
@@ -518,29 +518,29 @@ class Rewind {
   constructor(module, e) {
     this.module = module;
     this.e = e;
-    this.joypadBufferPtr = this.module._joypad_new();
+    this.joypadBufferPtr = this.module.joypad_new();
     this.statePtr = 0;
-    this.bufferPtr = this.module._rewind_new_simple(
+    this.bufferPtr = this.module.rewind_new_simple(
         e, REWIND_FRAMES_PER_BASE_STATE, REWIND_BUFFER_CAPACITY);
-    this.module._emulator_set_default_joypad_callback(e, this.joypadBufferPtr);
+    this.module.emulator_set_default_joypad_callback(e, this.joypadBufferPtr);
   }
 
   destroy() {
-    this.module._rewind_delete(this.bufferPtr);
-    this.module._joypad_delete(this.joypadBufferPtr);
+    this.module.rewind_delete(this.bufferPtr);
+    this.module.joypad_delete(this.joypadBufferPtr);
   }
 
   get oldestTicks() {
-    return this.module._rewind_get_oldest_ticks_f64(this.bufferPtr);
+    return this.module.rewind_get_oldest_ticks_f64(this.bufferPtr);
   }
 
   get newestTicks() {
-    return this.module._rewind_get_newest_ticks_f64(this.bufferPtr);
+    return this.module.rewind_get_newest_ticks_f64(this.bufferPtr);
   }
 
   pushBuffer() {
     if (!this.isRewinding) {
-      this.module._rewind_append(this.bufferPtr, this.e);
+      this.module.rewind_append(this.bufferPtr, this.e);
     }
   }
 
@@ -551,20 +551,20 @@ class Rewind {
   beginRewind() {
     if (this.isRewinding) return;
     this.statePtr =
-        this.module._rewind_begin(this.e, this.bufferPtr, this.joypadBufferPtr);
+        this.module.rewind_begin(this.e, this.bufferPtr, this.joypadBufferPtr);
   }
 
   rewindToTicks(ticks) {
     if (!this.isRewinding) return;
-    return this.module._rewind_to_ticks_wrapper(this.statePtr, ticks) ===
+    return this.module.rewind_to_ticks_wrapper(this.statePtr, ticks) ===
         RESULT_OK;
   }
 
   endRewind() {
     if (!this.isRewinding) return;
-    this.module._emulator_set_default_joypad_callback(
+    this.module.emulator_set_default_joypad_callback(
         this.e, this.joypadBufferPtr);
-    this.module._rewind_end(this.statePtr);
+    this.module.rewind_end(this.statePtr);
     this.statePtr = 0;
   }
 }
