@@ -93,6 +93,7 @@ static Result host_init_video(Host* host) {
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
 
   host->gl_context = SDL_GL_CreateContext(host->window);
+  SDL_GL_SetSwapInterval(1);
   GLint major;
   SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
   CHECK_MSG(major >= 2, "Unable to create GL context at version 2.\n");
