@@ -20,7 +20,6 @@ OUT_ANIM_DIR = os.path.join(common.OUT_DIR, 'anim')
 OUT_SCREENSHOT_DIR = os.path.join(common.OUT_DIR, 'screenshot')
 DEFAULT_ANIM_FRAMES = 2400
 DEFAULT_SCREENSHOT_FRAMES = 300
-CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'super_mario_land.input')
 
 
 def ChangeExt(path, new_ext):
@@ -60,11 +59,11 @@ def Run(rom, options):
       if options.screenshot:
         default_img = ChangeDir(OUT_SCREENSHOT_DIR, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_SCREENSHOT_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE)
+                         controller_input=options.input)
       else:
         default_img = ChangeDir(tempdir, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_ANIM_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE, animate=True)
+                         controller_input=options.input, animate=True)
         ConvertPPMstoMP4(tempdir, default_img)
     except common.Error as e:
       print(str(e))
@@ -77,6 +76,7 @@ def Run(rom, options):
 
 def main(args):
   parser = argparse.ArgumentParser()
+  parser.add_argument('--input', help='controller input file')
   parser.add_argument('-l', '--list', action='store_true',
                       help='list matching ROMs')
   parser.add_argument('-j', '--num-processes',
