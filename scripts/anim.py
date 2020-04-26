@@ -20,7 +20,7 @@ OUT_ANIM_DIR = os.path.join(common.OUT_DIR, 'anim')
 OUT_SCREENSHOT_DIR = os.path.join(common.OUT_DIR, 'screenshot')
 DEFAULT_ANIM_FRAMES = 2400
 DEFAULT_SCREENSHOT_FRAMES = 300
-CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'input_move_right.txt')
+CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'super_mario_land.input')
 
 
 def ChangeExt(path, new_ext):
