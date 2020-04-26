@@ -41,13 +41,23 @@ def GitUpdate(repo, dirname, sha):
     Run('git', 'clone', repo, dirname)
   Run('git', 'checkout', sha, cwd=dirname)
 
+def NMakeFound():
+  for path in os.environ["PATH"].split(os.pathsep):
+    nmake = os.path.join(path, 'nmake.exe')
+    if os.path.isfile(nmake):
+      return True
+  return False
 
 def BuildWlaGb():
   GitUpdate(WLA_DX_GIT_REPO, WLA_DX_DIR, WLA_DX_GIT_SHA)
   if not os.path.exists(WLA_DX_BUILD_DIR):
     os.makedirs(WLA_DX_BUILD_DIR)
-  Run('cmake', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
-  Run('make', cwd=WLA_DX_BUILD_DIR)
+  if NMakeFound():
+    Run('cmake', '-G', 'NMake Makefiles', '-DCMAKE_BUILD_TYPE=Release', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
+    Run('nmake', cwd=WLA_DX_BUILD_DIR)
+  else:
+    Run('cmake', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
+    Run('make', cwd=WLA_DX_BUILD_DIR)
   # Test that wla-gb was build OK.
   Run(os.path.join(WLA_DX_BIN_DIR, 'wla-gb'))
 
