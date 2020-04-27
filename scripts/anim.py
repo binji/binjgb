@@ -60,11 +60,13 @@ def Run(rom, options):
       if options.screenshot:
         default_img = ChangeDir(OUT_SCREENSHOT_DIR, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_SCREENSHOT_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE)
+                         controller_input=CONTROLLER_INPUT_FILE,
+                         exe=options.exe)
       else:
         default_img = ChangeDir(tempdir, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_ANIM_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE, animate=True)
+                         controller_input=CONTROLLER_INPUT_FILE, animate=True,
+                         exe=options.exe)
         ConvertPPMstoMP4(tempdir, default_img)
     except common.Error as e:
       print(str(e))
@@ -77,6 +79,7 @@ def Run(rom, options):
 
 def main(args):
   parser = argparse.ArgumentParser()
+  parser.add_argument('-e', '--exe', help='path to tester')
   parser.add_argument('-l', '--list', action='store_true',
                       help='list matching ROMs')
   parser.add_argument('-j', '--num-processes',
