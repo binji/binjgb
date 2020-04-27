@@ -52,7 +52,7 @@ def BuildWlaGb():
   GitUpdate(WLA_DX_GIT_REPO, WLA_DX_DIR, WLA_DX_GIT_SHA)
   if not os.path.exists(WLA_DX_BUILD_DIR):
     os.makedirs(WLA_DX_BUILD_DIR)
-  if NMakeFound():
+  if (sys.platform == 'win32') and NMakeFound():
     Run('cmake', '-G', 'NMake Makefiles', '-DCMAKE_BUILD_TYPE=Release', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
     Run('nmake', cwd=WLA_DX_BUILD_DIR)
   else:
