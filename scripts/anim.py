@@ -32,7 +32,8 @@ def ChangeDir(new_dir, path):
 
 def MakeDir(dir_name):
   try:
-    os.makedirs(dir_name)
+    if not os.path.isdir(dir_name):
+      os.makedirs(dir_name)
   except OSError as e:
     print(e)
 
