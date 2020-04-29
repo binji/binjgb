@@ -52,7 +52,7 @@ def RunTester(rom, frames=None, out_ppm=None, animate=False,
   if frames:
     cmd.extend(['-f', str(frames)])
   if controller_input:
-    cmd.extend(['-i', controller_input])
+    cmd.extend(['-j', controller_input])
   if out_ppm:
     cmd.extend(['-o', out_ppm])
   if animate:

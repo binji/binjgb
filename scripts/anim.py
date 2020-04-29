@@ -20,7 +20,6 @@ OUT_ANIM_DIR = os.path.join(common.OUT_DIR, 'anim')
 OUT_SCREENSHOT_DIR = os.path.join(common.OUT_DIR, 'screenshot')
 DEFAULT_ANIM_FRAMES = 2400
 DEFAULT_SCREENSHOT_FRAMES = 300
-CONTROLLER_INPUT_FILE = os.path.join(common.SCRIPT_DIR, 'input_move_right.txt')
 
 
 def ChangeExt(path, new_ext):
@@ -33,7 +32,8 @@ def ChangeDir(new_dir, path):
 
 def MakeDir(dir_name):
   try:
-    os.makedirs(dir_name)
+    if not os.path.isdir(dir_name):
+      os.makedirs(dir_name)
   except OSError as e:
     print(e)
 
@@ -60,12 +60,12 @@ def Run(rom, options):
       if options.screenshot:
         default_img = ChangeDir(OUT_SCREENSHOT_DIR, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_SCREENSHOT_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE,
+                         controller_input=options.input,
                          exe=options.exe)
       else:
         default_img = ChangeDir(tempdir, ChangeExt(rom, '.ppm'))
         common.RunTester(rom, DEFAULT_ANIM_FRAMES, default_img,
-                         controller_input=CONTROLLER_INPUT_FILE, animate=True,
+                         controller_input=options.input, animate=True,
                          exe=options.exe)
         ConvertPPMstoMP4(tempdir, default_img)
     except common.Error as e:
@@ -80,6 +80,7 @@ def Run(rom, options):
 def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('-e', '--exe', help='path to tester')
+  parser.add_argument('--input', help='controller input file')
   parser.add_argument('-l', '--list', action='store_true',
                       help='list matching ROMs')
   parser.add_argument('-j', '--num-processes',
