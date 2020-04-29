@@ -27,7 +27,6 @@
 #define STATUS_TEXT_TIMEOUT 120 /* Frames */
 
 // TODO: make these configurable?
-#define RENDER_SCALE 4
 #define AUDIO_FREQUENCY 44100
 #define AUDIO_FRAMES 2048 /* ~46ms of latency at 44.1kHz */
 #define REWIND_FRAMES_PER_BASE_STATE 45
@@ -67,6 +66,7 @@ static Ticks s_rewind_start;
 static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
+static u32 s_render_scale = 4;
 
 static Overlay s_overlay;
 static StatusText s_status_text;
@@ -311,6 +311,7 @@ static void usage(int argc, char** argv) {
       "  -J,--write-joypad FILE  write joypad input to FILE\n"
       "  -s,--seed SEED          random seed used for initializing RAM\n"
       "  -P,--palette PAL        use a builtin palette for DMG\n"
+      "  -x,--scale SCALE        render scale\n"
       "     --force-dmg          force running as a DMG (original gameboy)\n",
       argv[0]);
 }
@@ -322,6 +323,7 @@ void parse_arguments(int argc, char** argv) {
     {'J', "write-joypad", 1},
     {'s', "seed", 1},
     {'P', "palette", 1},
+    {'x', "scale", 1},
     {0, "force-dmg", 0},
   };
 
@@ -366,6 +368,10 @@ void parse_arguments(int argc, char** argv) {
 
           case 'P':
             s_builtin_palette = atoi(result.value);
+            break;
+
+          case 'x':
+            s_render_scale = atoi(result.value);
             break;
 
           default:
@@ -425,7 +431,7 @@ int main(int argc, char** argv) {
   ZERO_MEMORY(host_init);
   host_init.hooks.key_down = key_down;
   host_init.hooks.key_up = key_up;
-  host_init.render_scale = RENDER_SCALE;
+  host_init.render_scale = s_render_scale;
   host_init.audio_frequency = AUDIO_FREQUENCY;
   host_init.audio_frames = AUDIO_FRAMES;
   host_init.audio_volume = s_audio_volume;
