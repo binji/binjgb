@@ -8,6 +8,10 @@
 
 #include <assert.h>
 
+#define V(name, type) type name;
+FOREACH_GLEXT_PROC(V)
+#undef V
+
 #define CHECK_LOG(var, kind, status_enum, kind_str)      \
   do {                                                   \
     GLint status;                                        \

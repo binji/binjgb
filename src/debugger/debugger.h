@@ -9,6 +9,7 @@
 #define BINJGB_DEBUGGER_H__
 
 #include <array>
+#include <string>
 
 #include "imgui.h"
 #include "imgui_memory_editor.h"

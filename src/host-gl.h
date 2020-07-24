@@ -41,7 +41,7 @@ extern "C" {
   V(glUseProgram, PFNGLUSEPROGRAMPROC)                           \
   V(glVertexAttribPointer, PFNGLVERTEXATTRIBPOINTERPROC)
 
-#define V(name, type) type name;
+#define V(name, type) extern type name;
 FOREACH_GLEXT_PROC(V)
 #undef V
 
