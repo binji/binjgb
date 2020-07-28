@@ -4522,8 +4522,8 @@ u16 emulator_get_HL(Emulator* e) {
   return REG.HL;
 }
 
-u16 emulator_get_F(Emulator* e) {
-  return 0;
+u8 emulator_get_F(Emulator* e) {
+  return PACK(REG.F.Z, CPU_FLAG_Z) | PACK(REG.F.N, CPU_FLAG_N) | PACK(REG.F.H, CPU_FLAG_H) | PACK(REG.F.C, CPU_FLAG_C);
 }
 
 u16 emulator_get_SP(Emulator* e) {
