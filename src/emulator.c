@@ -1081,7 +1081,7 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
     logo_checksum = (logo_checksum << 1) ^ data[i];
   }
-  CHECK(logo_checksum == 0xe06c8834);
+  if (offset != 0) CHECK(logo_checksum == 0xe06c8834);
   cart_info->offset = offset;
   cart_info->data = data;
   cart_info->rom_size = data[ROM_SIZE_ADDR];
@@ -4500,4 +4500,36 @@ void emulator_set_builtin_palette(Emulator* e, u32 index) {
   emulator_set_bw_palette(e, 0, &pals[index][0]);
   emulator_set_bw_palette(e, 1, &pals[index][1]);
   emulator_set_bw_palette(e, 2, &pals[index][2]);
+}
+
+u16 emulator_get_PC(Emulator* e) {
+  return REG.PC;
+}
+
+u8 emulator_get_A(Emulator* e) {
+  return REG.A;
+}
+
+u16 emulator_get_BC(Emulator* e) {
+  return REG.BC;
+}
+
+u16 emulator_get_DE(Emulator* e) {
+  return REG.DE;
+}
+
+u16 emulator_get_HL(Emulator* e) {
+  return REG.HL;
+}
+
+u16 emulator_get_F(Emulator* e) {
+  return 0;
+}
+
+u16 emulator_get_SP(Emulator* e) {
+  return REG.SP;
+}
+
+void emulator_set_PC(Emulator* e, u16 pc) {
+  REG.PC = pc;
 }

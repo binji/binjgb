@@ -35,4 +35,12 @@
 "_set_joyp_right",
 "_set_joyp_select",
 "_set_joyp_start",
-"_set_joyp_up"]
+"_set_joyp_up",
+"_emulator_get_PC",
+"_emulator_get_SP",
+"_emulator_get_A",
+"_emulator_get_BC",
+"_emulator_get_DE",
+"_emulator_get_HL",
+"_emulator_get_F",
+"_emulator_set_PC"]
