@@ -8,6 +8,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if RGBDS_LIVE
+#include <emscripten.h>
+#endif
 
 #include "emulator.h"
 
@@ -709,6 +712,9 @@ struct Emulator {
   PaletteRGBA sgb_pal[4];
   CgbColorCurve cgb_color_curve;
   ApuLog apu_log;
+#ifdef RGBDS_LIVE
+  Bool breakpoint[0x10000];
+#endif
 };
 
 
@@ -1122,6 +1128,9 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
     logo_checksum = (logo_checksum << 1) ^ data[i];
   }
+#if RGBDS_LIVE
+  if (offset == 0) { require_logo_checksum = FALSE; }
+#endif
   CHECK(!require_logo_checksum || logo_checksum == 0xe06c8834);
   cart_info->offset = offset;
   cart_info->data = data;
@@ -2583,6 +2592,9 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_SB_ADDR:
       serial_synchronize(e);
       SERIAL.sb = value;
+#if RGBDS_LIVE
+      EM_ASM({emulator.serialCallback($0);}, value);
+#endif
       break;
     case IO_SC_ADDR:
       serial_synchronize(e);
@@ -4621,6 +4633,11 @@ static void emulator_step_internal(Emulator* e) {
       return;
     }
     execute_instruction(e);
+#ifdef RGBDS_LIVE
+    if (e->breakpoint[REG.PC]) {
+      e->state.event |= EMULATOR_EVENT_BREAKPOINT;
+    }
+#endif
   } else {
     tick(e);
     hdma_copy_byte(e);
@@ -5064,3 +5081,168 @@ ApuLog* emulator_get_apu_log(Emulator* e) {
 void emulator_reset_apu_log(Emulator* e) {
   e->apu_log.write_count = 0;
 }
+
+u16 emulator_get_PC(Emulator* e) {
+  return REG.PC;
+}
+
+u8 emulator_get_A(Emulator* e) {
+  return REG.A;
+}
+
+u16 emulator_get_BC(Emulator* e) {
+  return REG.BC;
+}
+
+u16 emulator_get_DE(Emulator* e) {
+  return REG.DE;
+}
+
+u16 emulator_get_HL(Emulator* e) {
+  return REG.HL;
+}
+
+u8 emulator_get_F(Emulator* e) {
+  return PACK(REG.F.Z, CPU_FLAG_Z) | PACK(REG.F.N, CPU_FLAG_N) |
+         PACK(REG.F.H, CPU_FLAG_H) | PACK(REG.F.C, CPU_FLAG_C);
+}
+
+u16 emulator_get_SP(Emulator* e) {
+  return REG.SP;
+}
+
+void emulator_set_PC(Emulator* e, u16 pc) {
+  REG.PC = pc;
+}
+
+u8* emulator_get_wram_ptr(Emulator* e) {
+  return WRAM.data;
+}
+
+u8* emulator_get_hram_ptr(Emulator* e) {
+  return HRAM;
+}
+
+u8 emulator_read_mem(Emulator* e, u16 addr) {
+  return read_u8_raw(e, addr);
+}
+
+void emulator_write_mem(Emulator* e, u16 addr, u8 data) {
+  write_u8_raw(e, addr, data);
+}
+
+#ifdef RGBDS_LIVE
+void emulator_set_breakpoint(Emulator* e, Address addr) {
+  e->breakpoint[addr] = TRUE;
+}
+
+void emulator_clear_breakpoints(Emulator* e) {
+  ZERO_MEMORY(e->breakpoint);
+}
+
+void emulator_render_vram(Emulator* e, u32* buffer) {
+  memset(buffer, 0, sizeof(u32) * 256 * 256);
+  for (int ty = 0; ty < 24; ty++) {
+    for (int bank = 0; bank < 2; bank++) {
+      for (int tx = 0; tx < 16; tx++) {
+        for (int row = 0; row < 8; row++) {
+          int n = tx * 16 + ty * 16 * 16 + row * 2 + (bank << 13);
+          u8 a = VRAM.data[n];
+          u8 b = VRAM.data[n + 1];
+          for (int x = 0; x < 8; x++) {
+            u32 color = 0xFFC2F0C4;
+            u8 bit = (0x80 >> x);
+            if ((a & bit) && (b & bit)) {
+              color = 0xFF001B2D;
+            } else if (a & bit) {
+              color = 0xFFA8B95A;
+            } else if (b & bit) {
+              color = 0xFF6E601E;
+            } else if (x == 7 || row == 7) {
+              color = 0xFFB2E0B4;
+            }
+            buffer[(tx * 8 + x + bank * 128) + (ty * 8 + row) * 256] = color;
+          }
+        }
+      }
+    }
+  }
+  if (IS_CGB) {
+    for (int idx = 0; idx < 8; idx++) {
+      for (int col = 0; col < PALETTE_COLOR_COUNT; col++) {
+        for (int x = 0; x < 8; x++) {
+          for (int y = 0; y < 8; y++) {
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256] =
+                PPU.bgcp.palettes[idx].color[col];
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256 + 128] =
+                PPU.obcp.palettes[idx].color[col];
+          }
+        }
+      }
+    }
+  } else {
+    for (int type = 0; type < PALETTE_TYPE_COUNT; type++) {
+      for (int col = 0; col < PALETTE_COLOR_COUNT; col++) {
+        for (int x = 0; x < 8; x++) {
+          for (int y = 0; y < 8; y++) {
+            buffer[x + type * 8 + (200 + col * 8 + y) * 256] =
+                e->pal[type].color[col];
+          }
+        }
+      }
+    }
+  }
+}
+
+void emulator_render_background(Emulator* e, u32* buffer, int type) {
+  memset(buffer, 0, sizeof(u32) * 256 * 256);
+  int bank = 0;
+  int tile_map = (type & 1) ? 0x400 : 0;
+  for (int ty = 0; ty < 32; ty++) {
+    for (int tx = 0; tx < 32; tx++) {
+      for (int row = 0; row < 8; row++) {
+        int tile = VRAM.data[0x1800 + tile_map + tx + ty * 32];
+        // TODO: LCDC bit 4
+        int n = tile * 16 + row * 2;
+        u8 a = VRAM.data[n];
+        u8 b = VRAM.data[n + 1];
+        for (int x = 0; x < 8; x++) {
+          u32 color = 0xFFC2F0C4;
+          u8 bit = (0x80 >> x);
+          if ((a & bit) && (b & bit)) {
+            color = 0xFF001B2D;
+          } else if (a & bit) {
+            color = 0xFFA8B95A;
+          } else if (b & bit) {
+            color = 0xFF6E601E;
+          } else if (x == 7 || row == 7) {
+            color = 0xFFB2E0B4;
+          }
+          buffer[(tx * 8 + x) + (ty * 8 + row) * 256] = color;
+        }
+      }
+    }
+  }
+  for (int x = 0; x < SCREEN_WIDTH; x++) {
+    buffer[((PPU.scx + x) % 256) + (PPU.scy * 256)] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + x) % 256) +
+           ((PPU.scy + SCREEN_HEIGHT - 1) % 256) * 256] &= 0xFF7F7F7F;
+  }
+  for (int y = 0; y < SCREEN_HEIGHT; y++) {
+    buffer[PPU.scx + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + SCREEN_WIDTH) % 256) + ((PPU.scy + y) % 256) * 256] &=
+        0xFF7F7F7F;
+  }
+}
+
+#else  // !RGBDS_LIVE
+
+void emulator_set_breakpoint(Emulator* e, Address addr) {}
+
+void emulator_clear_breakpoints(Emulator* e) {}
+
+void emulator_render_vram(Emulator* e, u32* buffer) {}
+
+void emulator_render_background(Emulator* e, u32* buffer, int type) {}
+
+#endif

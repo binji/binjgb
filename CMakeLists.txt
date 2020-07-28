@@ -8,6 +8,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
 option(WERROR "Build with warnings as errors" OFF)
 option(WASM "Build for WebAssembly" OFF)
+option(RGBDS_LIVE "Build for rgbds-live (Wasm only)" OFF)
 
 if (MSVC)
   add_definitions(-W3 -D_CRT_SECURE_NO_WARNINGS)
@@ -145,6 +146,10 @@ else (EMSCRIPTEN)
     src/emscripten/wrapper.c)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)
   target_include_directories(binjgb PUBLIC ${PROJECT_SOURCE_DIR}/src)
+
+  if (RGBDS_LIVE)
+    target_compile_definitions(binjgb PUBLIC RGBDS_LIVE)
+  endif ()
 
   set(LINK_FLAGS
     --memory-init-file 0
