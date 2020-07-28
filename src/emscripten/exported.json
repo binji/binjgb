@@ -43,4 +43,8 @@
 "_emulator_get_DE",
 "_emulator_get_HL",
 "_emulator_get_F",
-"_emulator_set_PC"]
+"_emulator_set_PC",
+"_emulator_set_breakpoint",
+"_emulator_clear_breakpoints",
+"_emulator_render_vram",
+"_emulator_render_background"]

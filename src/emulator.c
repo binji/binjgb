@@ -664,6 +664,7 @@ struct Emulator {
    * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
+  Bool breakpoint[0x10000];
 };
 
 
@@ -4094,6 +4095,9 @@ static void emulator_step_internal(Emulator* e) {
       return;
     }
     execute_instruction(e);
+    if (e->breakpoint[REG.PC]) {
+        e->state.event |= EMULATOR_EVENT_BREAKPOINT;
+    }
   } else {
     tick(e);
     hdma_copy_byte(e);
@@ -4532,4 +4536,90 @@ u16 emulator_get_SP(Emulator* e) {
 
 void emulator_set_PC(Emulator* e, u16 pc) {
   REG.PC = pc;
+}
+
+void emulator_set_breakpoint(Emulator* e, u16 pc) {
+  e->breakpoint[pc] = TRUE;
+}
+
+void emulator_clear_breakpoints(Emulator* e) {
+  for(int n=0; n<0x10000; n++)
+    e->breakpoint[n] = FALSE;
+}
+
+void emulator_render_vram(Emulator* e, u32* buffer) {
+  memset(buffer, 0, 4 * 256 * 256);
+  for(int ty=0; ty<24; ty++)
+  {
+    for(int bank=0; bank<2; bank++)
+    {
+      for(int tx=0; tx<16; tx++)
+      {
+        for(int row=0; row<8; row++)
+        {
+          int n = tx * 16 + ty * 16 * 16 + row * 2 + (bank << 13);
+          u8 a = VRAM.data[n];
+          u8 b = VRAM.data[n+1];
+          for(int x=0; x<8; x++)
+          {
+            u32 color = 0xFFC2F0C4;
+            u8 bit = (0x80 >> x);
+            if ((a & bit) && (b & bit))
+              color = 0xFF001B2D;
+            else if (a & bit)
+              color = 0xFFA8B95A;
+            else if (b & bit)
+              color = 0xFF6E601E;
+            else if (x == 7 || row == 7)
+              color = 0xFFB2E0B4;
+            buffer[(tx * 8 + x + bank * 128) + (ty * 8 + row) * 256] = color;
+          }
+        }
+      }
+    }
+  }
+}
+
+void emulator_render_background(Emulator* e, u32* buffer, int type) {
+  memset(buffer, 0, 4 * 256 * 256);
+  int bank = 0;
+  int tile_map = (type & 1) ? 0x400 : 0;
+  for(int ty=0; ty<32; ty++)
+  {
+    for(int tx=0; tx<32; tx++)
+    {
+      for(int row=0; row<8; row++)
+      {
+        int tile = VRAM.data[0x1800 + tile_map + tx + ty * 32];
+        //TODO: LCDC bit 4
+        int n = tile * 16 + row * 2;
+        u8 a = VRAM.data[n];
+        u8 b = VRAM.data[n+1];
+        for(int x=0; x<8; x++)
+        {
+          u32 color = 0xFFC2F0C4;
+          u8 bit = (0x80 >> x);
+          if ((a & bit) && (b & bit))
+            color = 0xFF001B2D;
+          else if (a & bit)
+            color = 0xFFA8B95A;
+          else if (b & bit)
+            color = 0xFF6E601E;
+          else if (x == 7 || row == 7)
+            color = 0xFFB2E0B4;
+          buffer[(tx * 8 + x) + (ty * 8 + row) * 256] = color;
+        }
+      }
+    }
+  }
+  for(int x=0;x<160; x++)
+  {
+    buffer[((PPU.scx + x) % 256) + (PPU.scy * 256)] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + x) % 256) + ((PPU.scy + 143) % 256) * 256] &= 0xFF7F7F7F;
+  }
+  for(int y=0;y<144; y++)
+  {
+    buffer[PPU.scx + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + 160) % 256) + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
+  }
 }
