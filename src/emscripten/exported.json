@@ -47,4 +47,6 @@
 "_emulator_set_breakpoint",
 "_emulator_clear_breakpoints",
 "_emulator_render_vram",
-"_emulator_render_background"]
+"_emulator_render_background",
+"_emulator_get_wram_ptr",
+"_emulator_get_hram_ptr"]

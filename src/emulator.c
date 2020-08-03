@@ -4623,3 +4623,11 @@ void emulator_render_background(Emulator* e, u32* buffer, int type) {
     buffer[((PPU.scx + 160) % 256) + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
   }
 }
+
+u8* emulator_get_wram_ptr(Emulator* e) {
+  return WRAM.data;
+}
+
+u8* emulator_get_hram_ptr(Emulator* e) {
+  return HRAM;
+}
