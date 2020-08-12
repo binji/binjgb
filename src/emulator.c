@@ -4631,3 +4631,8 @@ u8* emulator_get_wram_ptr(Emulator* e) {
 u8* emulator_get_hram_ptr(Emulator* e) {
   return HRAM;
 }
+
+u8 emulator_read_mem(Emulator* e, u16 addr)
+{
+    return read_u8_raw(e, addr);
+}
