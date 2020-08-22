@@ -4578,6 +4578,39 @@ void emulator_render_vram(Emulator* e, u32* buffer) {
       }
     }
   }
+  if(IS_CGB)
+  {
+    for(int idx=0; idx<8; idx++)
+    {
+      for(int col=0; col<PALETTE_COLOR_COUNT; col++)
+      {
+        for(int x=0; x<8; x++)
+        {
+          for(int y=0; y<8; y++)
+          {
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256] = PPU.bgcp.palettes[idx].color[col];
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256 + 128] = PPU.obcp.palettes[idx].color[col];
+          }
+        }
+      }
+    }
+  }
+  else
+  {
+    for(int type=0; type<PALETTE_TYPE_COUNT; type++)
+    {
+      for(int col=0; col<PALETTE_COLOR_COUNT; col++)
+      {
+        for(int x=0; x<8; x++)
+        {
+          for(int y=0; y<8; y++)
+          {
+            buffer[x + type * 8 + (200 + col * 8 + y) * 256] = e->pal[type].color[col];
+          }
+        }
+      }
+    }
+  }
 }
 
 void emulator_render_background(Emulator* e, u32* buffer, int type) {
