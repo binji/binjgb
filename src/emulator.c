@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <emscripten.h>
 
 #include "emulator.h"
 
@@ -2094,6 +2095,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_SB_ADDR:
       serial_synchronize(e);
       SERIAL.sb = value;
+      EM_ASM({emulator.serialCallback($0);}, value);
       break;
     case IO_SC_ADDR:
       serial_synchronize(e);
