@@ -225,6 +225,10 @@
               @click="canvas.scale = scale">
             {{scale}}x
           </button>
+          <button
+              v-show="loaded"
+              @click="toggleFullscreen">fullscreen
+          </button>
           <span v-if="loaded">pal:{{pal}}</span>
           <button
             v-show="loaded" @click="palDown">-</button><button

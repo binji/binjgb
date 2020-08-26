@@ -136,6 +136,7 @@ let vm = new Vue({
     },
   },
   methods: {
+    toggleFullscreen: function() { $('canvas').requestFullscreen(); },
     palDown: function() { this.setPal(this.pal - 1); },
     palUp: function() { this.setPal(this.pal + 1); },
     setPal: function(pal) {
