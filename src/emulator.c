@@ -4672,7 +4672,7 @@ u8 emulator_read_mem(Emulator* e, u16 addr)
     return read_u8_raw(e, addr);
 }
 
-u8 emulator_write_mem(Emulator* e, u16 addr, u8 data)
+void emulator_write_mem(Emulator* e, u16 addr, u8 data)
 {
-    return write_u8_raw(e, addr);
+    write_u8_raw(e, addr, data);
 }
