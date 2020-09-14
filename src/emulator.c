@@ -1234,23 +1234,16 @@ static void mbc1m_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
-  switch (addr >> 13) {
-    case 0: /* 0000-1fff */
-      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) == 0) {
-        MMAP_STATE.ext_ram_enabled =
-            (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+  if (addr < 0x4000) {
+    if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
+      u16 rom1_bank = value & MBC2_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+      if (rom1_bank == 0) {
+        rom1_bank++;
       }
-      break;
-    case 1: { /* 2000-3fff */
-      u16 rom1_bank;
-      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
-        rom1_bank = value & MBC2_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
-        if (rom1_bank == 0) {
-          rom1_bank++;
-        }
-        set_rom_bank(e, 1, rom1_bank);
-      }
-      break;
+      set_rom_bank(e, 1, rom1_bank);
+    } else {
+      MMAP_STATE.ext_ram_enabled =
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
     }
   }
 }
