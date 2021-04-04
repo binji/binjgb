@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+
+    - name: install packages (linux)
+      run: sudo apt-get install ninja-build libsdl2-dev
+      if: matrix.os == 'ubuntu-latest'
+
+    - name: install packages (osx)
+      run: brew install ninja SDL2
+      if: matrix.os == 'macos-latest'
+
+    - name: mkdir
+      run: mkdir -p out
+
+    - name: cmake
+      run: cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out/install
+      working-directory: out
+      if: matrix.os != 'windows-latest'
+
+    - name: cmake (windows)
+      run: cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out/install
+      working-directory: out
+      if: matrix.os == 'windows-latest'
+
+    - name: build
+      run: cmake --build out --config Release --target install
+
+    - name: strip
+      run: find out/install/ -type f -perm -u=x -exec strip -x {} +
+      if: matrix.os != 'windows-latest'
+
+    - name: archive
+      id: archive
+      run: |
+        OSNAME=$(echo ${{ matrix.os }} | sed 's/-latest//')
+        VERSION=${{ github.event.release.tag_name }}
+        PKGNAME="binjgb--$OSNAME"
+        TARBALL=$PKGNAME.tar.gz
+        mv out/install binjgb-$VERSION
+        tar -czf $TARBALL binjgb-$VERSION
+        echo "::set-output name=tarball::$TARBALL"
+
+    - name: upload tarball
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./${{ steps.archive.outputs.tarball }}
+        asset_name: ${{ steps.archive.outputs.tarball }}
+        asset_content_type: application/gzip
+
