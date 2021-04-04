@@ -41,4 +41,4 @@ jobs:
     - name: tests
       run: |
         python scripts/build_tests.py
-        python scripts/tester.py -vv --exe bin/bingjb-tester
+        python scripts/tester.py -vv --exe bin/binjgb-tester
