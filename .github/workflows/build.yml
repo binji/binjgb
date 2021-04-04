@@ -20,6 +20,8 @@ jobs:
       with:
         python-version: '3.x'
     - uses: actions/checkout@v1
+      with:
+        submodules: true
     - name: install packages (linux)
       run: sudo apt-get install ninja-build libsdl2-dev
       if: matrix.os == 'ubuntu-latest'
