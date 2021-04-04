@@ -51,7 +51,7 @@ jobs:
       run: |
         OSNAME=$(echo ${{ matrix.os }} | sed 's/-latest//')
         VERSION=${{ github.event.release.tag_name }}
-        PKGNAME="binjgb--$OSNAME"
+        PKGNAME="binjgb-$OSNAME"
         TARBALL=$PKGNAME.tar.gz
         mv out/install binjgb-$VERSION
         tar -czf $TARBALL binjgb-$VERSION
