@@ -20,6 +20,12 @@ jobs:
       with:
         python-version: '3.x'
     - uses: actions/checkout@v1
+    - name: install ninja (linux)
+      run: sudo apt-get install ninja-build
+      if: matrix.os == 'ubuntu-latest'
+    - name: install ninja (osx)
+      run: brew install ninja
+      if: matrix.os == 'macos-latest'
     - name: mkdir
       run: mkdir -p out
     - name: cmake
