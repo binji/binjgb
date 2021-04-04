@@ -45,3 +45,31 @@ jobs:
         python scripts/build_tests.py
         python scripts/tester.py -vv --exe bin/binjgb-tester
       if: matrix.os != 'windows-latest'
+
+  build-wasm:
+    name: build-wasm
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: install packages
+      run: sudo apt-get install ninja-build
+    - name: emsdk install
+      run: |
+        mkdir $HOME/emsdk
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git $HOME/emsdk
+        $HOME/emsdk/emsdk update-tags
+        $HOME/emsdk/emsdk install tot
+        $HOME/emsdk/emsdk activate tot
+    - name: update path
+      run:  echo "PATH=$PATH:$HOME/emsdk" >> $GITHUB_ENV
+    - name: mkdir
+      run: mkdir -p out
+    - name: cmake
+      run: cmake .. -G Ninja -DCMAKE_TOOLCHAIN_FILE=$HOME/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_BUILD_TYPE=Release -DWASM=true
+      working-directory: out
+    - name: build
+      run: |
+        source $HOME/emsdk/emsdk_env.sh
+        cmake --build out
