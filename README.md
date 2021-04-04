@@ -1,4 +1,4 @@
-[![Travis](https://travis-ci.org/binji/binjgb.svg?branch=master)](https://travis-ci.org/binji/binjgb) [![AppVeyor](https://ci.appveyor.com/api/projects/status/github/binji/binjgb?branch=master&svg=true)](https://ci.appveyor.com/project/binji/binjgb/branch/master)
+[![Github CI Status](https://github.com/binji/binjgb/workflows/CI/badge.svg)](https://github.com/binji/binjgb)
 
 # binjgb
 
