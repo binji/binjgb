@@ -51,7 +51,7 @@ jobs:
       if: matrix.os != 'windows-latest'
 
     - name: cmake (windows)
-      run: cmake -S . -B out -DSDL2_ROOT_DIR=SDL2-2.0.14
+      run: cmake -S . -B out "-DSDL2_ROOT_DIR=SDL2-2.0.14"
       if: matrix.os == 'windows-latest'
 
     - name: build

@@ -51,7 +51,7 @@ jobs:
       if: matrix.os != 'windows-latest'
 
     - name: cmake (windows)
-      run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release -DSDL2_ROOT_DIR=SDL2-2.0.14 -DCMAKE_INSTALL_PREFIX=out/install
+      run: cmake -S . -B out -DCMAKE_BUILD_TYPE=Release "-DSDL2_ROOT_DIR=SDL2-2.0.14" -DCMAKE_INSTALL_PREFIX=out/install
       if: matrix.os == 'windows-latest'
 
     - name: build
