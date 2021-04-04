@@ -27,9 +27,13 @@ jobs:
       run: sudo apt-get install ninja-build libsdl2-dev
       if: matrix.os == 'ubuntu-latest'
 
-    - name: install packages (osx)
+    - name: install packages (macos)
       run: brew install ninja SDL2
       if: matrix.os == 'macos-latest'
+
+    - name: mkdir bin
+      run: mkdir -p bin
+      if: matrix.os == 'windows-latest'
 
     - name: download sdl2 (windows)
       uses: albin-johansson/download-sdl2@v1
@@ -37,11 +41,12 @@ jobs:
         version: 2.0.14
         sources_destination: .
         binaries_destination: bin
+      if: matrix.os == 'windows-latest'
 
-    - name: mkdir
+    - name: mkdir out
       run: mkdir -p out
 
-    - name: cmake
+    - name: cmake (linux + macos)
       run: cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=out/install
       if: matrix.os != 'windows-latest'
 
