@@ -20,11 +20,11 @@ jobs:
       with:
         python-version: '3.x'
     - uses: actions/checkout@v1
-    - name: install ninja (linux)
-      run: sudo apt-get install ninja-build
+    - name: install packages (linux)
+      run: sudo apt-get install ninja-build libsdl2-dev
       if: matrix.os == 'ubuntu-latest'
-    - name: install ninja (osx)
-      run: brew install ninja
+    - name: install packages (osx)
+      run: brew install ninja SDL2
       if: matrix.os == 'macos-latest'
     - name: mkdir
       run: mkdir -p out
@@ -42,3 +42,4 @@ jobs:
       run: |
         python scripts/build_tests.py
         python scripts/tester.py -vv --exe bin/binjgb-tester
+      if: matrix.os != 'windows-latest'
