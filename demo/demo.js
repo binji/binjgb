@@ -522,7 +522,6 @@ class Emulator {
 }
 
 class Gamepad {
-
   constructor(module, e) {
     this.module = module;
     this.e = e;
@@ -530,7 +529,6 @@ class Gamepad {
 
   // Load a key map for gamepad-to-gameboy buttons
   bindKeys(strMapping) {
-
     this.GAMEPAD_KEYMAP_STANDARD = [
       {gb_key: "b",      gp_button: 0,  type: "button", gp_bind:this.module.set_joyp_B.bind(null, this.e)      },
       {gb_key: "a",      gp_button: 1,  type: "button", gp_bind:this.module.set_joyp_A.bind(null, this.e)      },
@@ -540,7 +538,7 @@ class Gamepad {
       {gb_key: "down",   gp_button: 13, type: "button", gp_bind:this.module.set_joyp_down.bind(null, this.e)   },
       {gb_key: "left",   gp_button: 14, type: "button", gp_bind:this.module.set_joyp_left.bind(null, this.e)   },
       {gb_key: "right",  gp_button: 15, type: "button", gp_bind:this.module.set_joyp_right.bind(null, this.e)  }
-      ];
+    ];
 
     this.GAMEPAD_KEYMAP_DEFAULT = [
       {gb_key: "a",      gp_button: 0, type: "button", gp_bind:this.module.set_joyp_A.bind(null, this.e) },
@@ -551,7 +549,7 @@ class Gamepad {
       {gb_key: "down",   gp_button: 3, type: "axis",   gp_bind:this.module.set_joyp_down.bind(null, this.e) },
       {gb_key: "left",   gp_button: 0, type: "axis",   gp_bind:this.module.set_joyp_left.bind(null, this.e) },
       {gb_key: "right",  gp_button: 1, type: "axis",   gp_bind:this.module.set_joyp_right.bind(null, this.e) }
-      ];
+    ];
 
     // Try to use the w3c "standard" gamepad mapping if available
     // (Chrome/V8 seems to do that better than Firefox)
@@ -559,36 +557,39 @@ class Gamepad {
     // Otherwise use a default mapping that assigns
     // A/B/Select/Start to the first four buttons,
     // and U/D/L/R to the first two axes.
-    if (strMapping === GAMEPAD_KEYMAP_STANDARD_STR)
+    if (strMapping === GAMEPAD_KEYMAP_STANDARD_STR) {
       this.gp.keybinds = this.GAMEPAD_KEYMAP_STANDARD;
-    else
+    } else {
       this.gp.keybinds = this.GAMEPAD_KEYMAP_DEFAULT;
+    }
   }
 
-
   cacheValues(gamepad) {
-
     // Read Buttons
-    for(let k=0; k<gamepad.buttons.length; k++) {
-    // .value is for analog, .pressed is for boolean buttons
-    this.gp.buttons.cur[k] = (gamepad.buttons[k].value > 0 ||
-      gamepad.buttons[k].pressed == true);
+    for (let k = 0; k < gamepad.buttons.length; k++) {
+      // .value is for analog, .pressed is for boolean buttons
+      this.gp.buttons.cur[k] =
+          (gamepad.buttons[k].value > 0 || gamepad.buttons[k].pressed == true);
 
-    // Update state changed if not on first input pass
-    if (this.gp.buttons.last !== undefined)
-      this.gp.buttons.changed[k] = (this.gp.buttons.cur[k] != this.gp.buttons.last[k]);
+      // Update state changed if not on first input pass
+      if (this.gp.buttons.last !== undefined) {
+        this.gp.buttons.changed[k] =
+            (this.gp.buttons.cur[k] != this.gp.buttons.last[k]);
+      }
     }
 
     // Read Axes
-    for(let k=0; k<gamepad.axes.length; k++) {
+    for (let k = 0; k < gamepad.axes.length; k++) {
       // Decode each dpad axis into two buttons, one for each direction
-      this.gp.axes.cur[(k*2)  ] = (gamepad.axes[k] < 0);
-      this.gp.axes.cur[(k*2)+1] = (gamepad.axes[k] > 0);
+      this.gp.axes.cur[(k * 2)] = (gamepad.axes[k] < 0);
+      this.gp.axes.cur[(k * 2) + 1] = (gamepad.axes[k] > 0);
 
       // Update state changed if not on first input pass
       if (this.gp.axes.last !== undefined) {
-        this.gp.axes.changed[(k*2)  ] = (this.gp.axes.cur[(k*2)  ] != this.gp.axes.last[(k*2)  ]);
-        this.gp.axes.changed[(k*2)+1] = (this.gp.axes.cur[(k*2)+1] != this.gp.axes.last[(k*2)+1]);
+        this.gp.axes.changed[(k * 2)] =
+            (this.gp.axes.cur[(k * 2)] != this.gp.axes.last[(k * 2)]);
+        this.gp.axes.changed[(k * 2) + 1] =
+            (this.gp.axes.cur[(k * 2) + 1] != this.gp.axes.last[(k * 2) + 1]);
       }
     }
 
@@ -597,73 +598,67 @@ class Gamepad {
     this.gp.buttons.last = this.gp.buttons.cur.slice(0);
   }
 
-
   handleButton(keyBind) {
-
-    var buttonCache;
+    let buttonCache;
 
     // Select button / axis cache based on key bind type
-    if (keyBind.type === "button")
+    if (keyBind.type === "button") {
       buttonCache = this.gp.buttons;
-    else if (keyBind.type === "axis")
+    } else if (keyBind.type === "axis") {
       buttonCache = this.gp.axes;
+    }
 
     // Make sure the button exists in the cache array
     if (keyBind.gp_button < buttonCache.changed.length) {
-
-    // Send the button state if it's changed
-    if (buttonCache.changed[keyBind.gp_button])
-      if (buttonCache.cur[keyBind.gp_button])
-        // Gamepad Button Down
-        keyBind.gp_bind(true);
-      else
-        // Gamepad Button Up
-        keyBind.gp_bind(false);
+      // Send the button state if it's changed
+      if (buttonCache.changed[keyBind.gp_button]) {
+        if (buttonCache.cur[keyBind.gp_button]) {
+          // Gamepad Button Down
+          keyBind.gp_bind(true);
+        } else {
+          // Gamepad Button Up
+          keyBind.gp_bind(false);
+        }
+      }
     }
   }
 
-
   getCurrent() {
-
     // Chrome requires retrieving a new gamepad object
     // every time button state is queried (the existing object
     // will have stale button state). Just do that for all browsers
-    var gamepad = navigator.getGamepads()[this.gp.apiID];
+    let gamepad = navigator.getGamepads()[this.gp.apiID];
 
-    if (gamepad)
-      if (gamepad.connected)
+    if (gamepad) {
+      if (gamepad.connected) {
         return gamepad;
+      }
+    }
 
     return undefined;
   }
 
-
   update() {
-
-    var gamepad = this.getCurrent();
+    let gamepad = this.getCurrent();
 
     if (gamepad !== undefined) {
+      // Cache gamepad input values
+      this.cacheValues(gamepad);
 
-    // Cache gamepad input values
-    this.cacheValues(gamepad);
-
-    // Loop through buttons and send changes if needed
-    for (let i=0; i<this.gp.keybinds.length; i++)
-      this.handleButton(this.gp.keybinds[i]);
-    }
-    else {
+      // Loop through buttons and send changes if needed
+      for (let i = 0; i < this.gp.keybinds.length; i++) {
+        this.handleButton(this.gp.keybinds[i]);
+      }
+    } else {
       // Gamepad is no longer present, disconnect
       this.releaseGamepad();
     }
   }
 
-
   startGamepad(gamepad) {
-
     // Make sure it has enough buttons and axes
     if ((gamepad.mapping === GAMEPAD_KEYMAP_STANDARD_STR) ||
-      ((gamepad.axes.length >= 2) && (gamepad.buttons.length >= 4))) {
-
+        ((gamepad.axes.length >= 2) && (gamepad.buttons.length >= 4))) {
       // Save API index for polling (required by Chrome/V8)
       this.gp.apiID = gamepad.index;
 
@@ -671,16 +666,16 @@ class Gamepad {
       this.bindKeys(gamepad.mapping);
 
       // Start polling the gamepad for input
-      this.gp.timerID = setInterval( () => this.update(), GAMEPAD_POLLING_INTERVAL);
+      this.gp.timerID =
+          setInterval(() => this.update(), GAMEPAD_POLLING_INTERVAL);
     }
   }
 
-
   releaseGamepad() {
-
     // Stop polling the gamepad for input
-    if (this.gp.timerID !== undefined)
+    if (this.gp.timerID !== undefined) {
       clearInterval(this.gp.timerID);
+    }
 
     // Clear previous button history and controller info
     this.gp.axes.last = undefined;
@@ -690,51 +685,43 @@ class Gamepad {
     this.gp.apiID = undefined;
   }
 
-
   // If a gamepad was already connected on this page
   // and released, it won't fire another connect event.
   // So try to find any that might be present
   checkAlreadyConnected() {
     let gamepads = navigator.getGamepads();
 
-    // If any gamepads are already attached to the page, 
+    // If any gamepads are already attached to the page,
     // use the first one that is connected
-    for(let idx = 0; idx < gamepads.length; idx++)
-      if ((gamepads[idx] !== undefined) && (gamepads[idx] !== null))
-        if (gamepads[idx].connected === true)
+    for (let idx = 0; idx < gamepads.length; idx++) {
+      if ((gamepads[idx] !== undefined) && (gamepads[idx] !== null)) {
+        if (gamepads[idx].connected === true) {
           this.startGamepad(gamepads[idx]);
+        }
+      }
+    }
   }
-
 
   // Event handler for when a gamepad is connected
   eventConnected(event) {
-    this.startGamepad( navigator.getGamepads()[event.gamepad.index] );
+    this.startGamepad(navigator.getGamepads()[event.gamepad.index]);
   }
-
 
   // Event handler for when a gamepad is disconnected
   eventDisconnected(event) {
     this.releaseGamepad();
   }
 
-
   // Register event connection handlers for gamepads
-  init()
-  {
+  init() {
     // gamepad related vars
     this.gp = {
       apiID: undefined,
       timerID: undefined,
       keybinds: undefined,
-      axes: {
-        last: undefined,
-        cur: [],
-        changed: [] },
-      buttons: {
-        last: undefined,
-        cur: [],
-        changed: [] }
-      };
+      axes: {last: undefined, cur: [], changed: []},
+      buttons: {last: undefined, cur: [], changed: []}
+    };
 
     // Check for previously attached gamepads that might
     // not emit a gamepadconnected() event
@@ -744,19 +731,19 @@ class Gamepad {
     this.boundGamepadDisconnected = this.eventDisconnected.bind(this);
 
     // When a gamepad connects, start polling it for input
-    window.addEventListener("gamepadconnected", this.boundGamepadConnected);
+    window.addEventListener('gamepadconnected', this.boundGamepadConnected);
 
     // When a gamepad disconnects, shut down polling for input
-    window.addEventListener("gamepaddisconnected", this.boundGamepadDisconnected);
+    window.addEventListener(
+        'gamepaddisconnected', this.boundGamepadDisconnected);
   }
 
-
   // Release event connection handlers and settings
-  shutdown()
-  {
+  shutdown() {
     this.releaseGamepad();
     window.removeEventListener('gamepadconnected', this.boundGamepadConnected);
-    window.removeEventListener('gamepaddisconnected', this.boundGamepadDisconnected);
+    window.removeEventListener(
+        'gamepaddisconnected', this.boundGamepadDisconnected);
   }
 }
 
