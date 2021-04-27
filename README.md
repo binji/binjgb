@@ -114,6 +114,10 @@ Put a symlink to Emscripten in the `emscripten` directory, then run make.
 $ ln -s ${PATH_TO_EMSCRIPTEN} emscripten
 $ make wasm
 ```
+Or set Makefile variables via command line:
+```
+$ make wasm EMSCRIPTEN_CMAKE="/path/to/Emscripten.cmake"
+```
 
 ### Changing the Build Configuration
 
