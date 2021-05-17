@@ -59,5 +59,6 @@
 "_emulator_get_wram_ptr",
 "_emulator_get_hram_ptr",
 "_emulator_read_mem",
-"_emulator_write_mem"
+"_emulator_write_mem",
+"_set_audio_channel_mute"
 ]

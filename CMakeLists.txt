@@ -9,6 +9,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 option(WERROR "Build with warnings as errors" OFF)
 option(WASM "Build for WebAssembly" OFF)
 option(RGBDS_LIVE "Build for rgbds-live (Wasm only)" OFF)
+option(GBSTUDIO "Build for GB Studio (Wasm only. Sets rgbds-live.)" OFF)
 
 if (MSVC)
   add_definitions(-W3 -D_CRT_SECURE_NO_WARNINGS)
@@ -150,6 +151,11 @@ else (EMSCRIPTEN)
 
   if (RGBDS_LIVE)
     target_compile_definitions(binjgb PUBLIC RGBDS_LIVE)
+  endif ()
+
+  if (GBSTUDIO)
+    # If GBSTUDIO is set, set RGBDS_LIVE too
+    target_compile_definitions(binjgb PUBLIC GBSTUDIO RGBDS_LIVE)
   endif ()
 
   set(LINK_FLAGS
