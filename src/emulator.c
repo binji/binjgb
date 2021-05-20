@@ -259,6 +259,11 @@ typedef enum {
   JOYPAD_SELECT_BUTTONS = 1,
   JOYPAD_SELECT_DPAD = 2,
   JOYPAD_SELECT_NONE = 3,
+
+  JOYPAD_SGB_BOTH_LOW = 0,
+  JOYPAD_SGB_P15_LOW = 1,
+  JOYPAD_SGB_P14_LOW = 2,
+  JOYPAD_SGB_BOTH_HIGH = 3,
 } JoypadSelect;
 
 typedef enum {
@@ -399,6 +404,16 @@ typedef struct {
   u8 last_p10_p13;
   Ticks last_callback; /* The last time joypad callback was called. */
 } Joypad;
+
+typedef struct {
+  u8 data[16 * 7];
+  u8 bits_read;
+  u8 current_packet;
+  u8 packet_count;
+  u8 current_player;
+  u8 player_mask;
+  Bool player_incremented;
+} SGB;
 
 typedef enum {
   CPU_STATE_NORMAL = 0,
@@ -630,6 +645,7 @@ typedef struct {
   Interrupt interrupt;
   Obj oam[OBJ_COUNT];
   Joypad joyp;
+  SGB sgb;
   Serial serial;
   Infrared infrared;
   Timer timer;
@@ -684,6 +700,7 @@ struct Emulator {
 #define INTR (e->state.interrupt)
 #define IS_CGB (e->state.is_cgb)
 #define JOYP (e->state.joyp)
+#define SGB (e->state.sgb)
 #define LCDC (PPU.lcdc)
 #define MMAP_STATE (e->state.memory_map_state)
 #define NOISE (APU.noise)
@@ -1564,6 +1581,11 @@ static u8 read_oam(Emulator* e, MaskedAddress addr) {
 }
 
 static u8 read_joyp_p10_p13(Emulator* e) {
+  if (JOYP.joypad_select == JOYPAD_SELECT_NONE) {
+    return ~(SGB.current_player & 3);
+  }
+  if (SGB.current_player != 0) { return ~0; }  // Ignore other controllers.
+
   u8 result = 0;
   if (JOYP.joypad_select == JOYPAD_SELECT_BUTTONS ||
       JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
@@ -2076,11 +2098,84 @@ static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
   }
 }
 
+static void do_sgb(Emulator* e) {
+  if ((JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW ||
+       JOYP.joypad_select == JOYPAD_SGB_P15_LOW) &&
+      !SGB.player_incremented) {
+    SGB.player_incremented = TRUE;
+  }
+
+  switch (JOYP.joypad_select) {
+    case JOYPAD_SGB_BOTH_LOW:
+      SGB.bits_read = 0;
+      if (++SGB.current_packet >= SGB.packet_count) {
+        SGB.current_packet = 0;
+        SGB.packet_count = 0;
+        ZERO_MEMORY(SGB.data);
+      }
+      break;
+    case JOYPAD_SGB_P15_LOW:
+      if (SGB.bits_read < 128) {
+        int curbyte = (SGB.current_packet << 4) | (SGB.bits_read >> 3);
+        u8 curbit = SGB.bits_read & 7;
+        SGB.data[curbyte] |= 1 << curbit;
+        SGB.bits_read++;
+      }
+      break;
+    case JOYPAD_SGB_P14_LOW:
+      if (SGB.bits_read < 129) {
+        SGB.bits_read++;
+      }
+      break;
+    case JOYPAD_SGB_BOTH_HIGH:
+      if (SGB.player_incremented) {
+        SGB.current_player = (SGB.current_player + 1) & SGB.player_mask;
+      }
+      SGB.player_incremented = FALSE;
+      return;
+  }
+
+  if (SGB.bits_read == 128) {
+    int start = 0;
+    int end = 16;
+    if (SGB.current_packet == 0) {
+      static const char* s_names[0x20] = {
+          "PAL01",    "PAL23",    "PAL03",   "PAL12",    "ATTR_BLK", "ATTR_LIN",
+          "ATTR_DIV", "ATTR_CHR", "SOUND",   "SOU_TRN",  "PAL_SET",  "PAL_TRN",
+          "ATRC_EN",  "TEST_EN",  "ICON_EN", "DATA_SND", "DATA_TRN", "MLT_REQ",
+          "JUMP",     "CHR_TRN",  "PCT_TRN", "ATTR_TRN", "ATTR_SET", "MASK_EN",
+          "OBJ_TRN",  "??",       "??",      "??",       "??",       "??",
+          "??",       "??",
+      };
+      int code = SGB.data[0] >> 3;
+      start = 1;
+      switch (code) {
+        case 0x11: { // MLT_REQ
+          SGB.player_mask = SGB.data[1] & 3;
+          break;
+        }
+        case 0x1e: case 0x1f:
+          return;  // Invalid
+      }
+      SGB.packet_count = SGB.data[0] & 7;
+      printf(">>> got SGB start packet:$%02x (%s) len=%u  ", code,
+             s_names[code & 0x1f], SGB.packet_count);
+    } else {
+      printf(">>> got SGB packet %u:  ", SGB.current_packet);
+    }
+    for (int i = start; i < 16; ++i) {
+      printf(" $%02x", SGB.data[i]);
+    }
+    printf("\n");
+  }
+}
+
 static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
   HOOK(write_io_asb, addr, get_io_reg_string(addr), value);
   switch (addr) {
     case IO_JOYP_ADDR:
       JOYP.joypad_select = UNPACK(value, JOYP_JOYPAD_SELECT);
+      do_sgb(e);
       check_joyp_intr(e);
       break;
     case IO_SB_ADDR:
