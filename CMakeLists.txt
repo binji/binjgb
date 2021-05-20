@@ -152,6 +152,8 @@ else (EMSCRIPTEN)
     -s ENVIRONMENT=web
     -s FILESYSTEM=0
     -s EXIT_RUNTIME=0
+    -s MODULARIZE=1
+    -s EXPORT_NAME="Binjgb"
   )
   if (WASM)
     set(LINK_FLAGS ${LINK_FLAGS} -s WASM=1)
