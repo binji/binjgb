@@ -19,7 +19,7 @@ struct HostTexture;
 extern "C" {
 #endif
 
-struct HostUI* host_ui_new(struct SDL_Window*);
+struct HostUI* host_ui_new(struct SDL_Window*, int width, int height);
 void host_ui_delete(struct HostUI*);
 void host_ui_event(struct HostUI*, union SDL_Event*);
 void host_ui_begin_frame(struct HostUI*, struct HostTexture* fb_texture);

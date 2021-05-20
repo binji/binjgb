@@ -16,6 +16,8 @@ extern "C" {
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
+#define SGB_SCREEN_WIDTH 256
+#define SGB_SCREEN_HEIGHT 224
 
 #define CPU_TICKS_PER_SECOND 4194304
 #define APU_TICKS_PER_SECOND 2097152
@@ -49,7 +51,7 @@ typedef struct JoypadCallbackInfo {
   void* user_data;
 } JoypadCallbackInfo;
 
-typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
+typedef RGBA FrameBuffer[SGB_SCREEN_WIDTH * SGB_SCREEN_HEIGHT];
 
 typedef enum Color {
   COLOR_WHITE = 0,
@@ -145,6 +147,7 @@ typedef struct EmulatorInit {
   u32 random_seed;
   u32 builtin_palette;
   Bool force_dmg;
+  Bool use_sgb_border;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {
@@ -187,6 +190,8 @@ void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
                             u32* ms);
 
 Bool emulator_was_ext_ram_updated(Emulator*);
+int emulator_get_frame_buffer_width(Emulator*);
+int emulator_get_frame_buffer_height(Emulator*);
 
 void emulator_init_state_file_data(FileData*);
 void emulator_init_ext_ram_file_data(Emulator*, FileData*);

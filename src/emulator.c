@@ -680,6 +680,7 @@ struct Emulator {
    * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
+  Bool use_sgb_border;
 };
 
 
@@ -2945,7 +2946,14 @@ static void ppu_mode3_synchronize(Emulator* e) {
   u8 my = PPU.scy + y;
   u16 map_base = map_select_to_address(LCDC.bg_tile_map_select) |
                  ((my >> 3) * TILE_MAP_WIDTH);
-  RGBA* pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
+  RGBA* pixel;
+  if (e->use_sgb_border) {
+    int xborder = (SGB_SCREEN_WIDTH - SCREEN_WIDTH) / 2;
+    int yborder = (SGB_SCREEN_HEIGHT - SCREEN_HEIGHT) / 2;
+    pixel = &e->frame_buffer[(y + yborder) * SGB_SCREEN_WIDTH + (x + xborder)];
+  } else {
+    pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
+  }
 
   /* Cache map_addr info. */
   u16 map_addr = 0;
@@ -4338,6 +4346,8 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   write_io(e, IO_IE_ADDR, 0x0);
   HDMA.blocks = 0xff;
 
+  e->use_sgb_border = init->use_sgb_border;
+
   /* Set initial DMG palettes */
   emulator_set_builtin_palette(e, init->builtin_palette);
 
@@ -4434,6 +4444,14 @@ Bool emulator_was_ext_ram_updated(Emulator* e) {
   Bool result = e->state.ext_ram_updated;
   e->state.ext_ram_updated = FALSE;
   return result;
+}
+
+int emulator_get_frame_buffer_width(Emulator* e) {
+  return e->use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+}
+
+int emulator_get_frame_buffer_height(Emulator* e) {
+  return e->use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
 }
 
 void emulator_init_state_file_data(FileData* file_data) {

@@ -66,6 +66,7 @@ static Ticks s_rewind_start;
 static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
+static Bool s_use_sgb_border;
 static u32 s_render_scale = 4;
 
 static Overlay s_overlay;
@@ -312,7 +313,8 @@ static void usage(int argc, char** argv) {
       "  -s,--seed SEED          random seed used for initializing RAM\n"
       "  -P,--palette PAL        use a builtin palette for DMG\n"
       "  -x,--scale SCALE        render scale\n"
-      "     --force-dmg          force running as a DMG (original gameboy)\n",
+      "     --force-dmg          force running as a DMG (original gameboy)\n"
+      "     --sgb-border         draw the super gameboy border\n",
       argv[0]);
 }
 
@@ -325,6 +327,7 @@ void parse_arguments(int argc, char** argv) {
     {'P', "palette", 1},
     {'x', "scale", 1},
     {0, "force-dmg", 0},
+    {0, "sgb-border", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -377,6 +380,8 @@ void parse_arguments(int argc, char** argv) {
           default:
             if (strcmp(result.option->long_name, "force-dmg") == 0) {
               s_force_dmg = TRUE;
+            } else if (strcmp(result.option->long_name, "sgb-border") == 0) {
+              s_use_sgb_border = TRUE;
             } else {
               abort();
             }
@@ -424,6 +429,7 @@ int main(int argc, char** argv) {
   emulator_init.random_seed = s_random_seed;
   emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
+  emulator_init.use_sgb_border = s_use_sgb_border;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 

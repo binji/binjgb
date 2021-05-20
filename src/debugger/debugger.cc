@@ -114,7 +114,7 @@ Debugger::~Debugger() {
 
 bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
                     int font_scale, bool paused_at_start, u32 random_seed,
-                    u32 builtin_palette, bool force_dmg) {
+                    u32 builtin_palette, bool force_dmg, bool use_sgb_border) {
   FileData rom;
   if (!SUCCESS(file_read(filename, &rom))) {
     return false;
@@ -136,6 +136,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   emulator_init.random_seed = random_seed;
   emulator_init.builtin_palette = builtin_palette;
   emulator_init.force_dmg = force_dmg ? TRUE : FALSE;
+  emulator_init.use_sgb_border = use_sgb_border ? TRUE : FALSE;
   e = emulator_new(&emulator_init);
   if (e == nullptr) {
     return false;

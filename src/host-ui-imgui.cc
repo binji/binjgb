@@ -427,7 +427,7 @@ const char* HostUI::get_clipboard_text(void* user_data) {
   return SDL_GetClipboardText();
 }
 
-HostUI* host_ui_new(struct SDL_Window* window) {
+HostUI* host_ui_new(struct SDL_Window* window, int width, int height) {
   HostUI* ui = new HostUI(window);
   if (!SUCCESS(ui->init())) {
     delete ui;

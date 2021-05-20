@@ -23,14 +23,16 @@ typedef struct HostUI {
   GLint uSampler;
   GLint uUsePalette;
   GLint uPalette;
+  int width, height;
 } HostUI;
 
-static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
-  static Vertex s_vertex_buffer[4] = {
+static Result host_ui_init(struct HostUI* ui, SDL_Window* window, int width,
+                           int height) {
+  const Vertex vertex_buffer[4] = {
     {{-1, +1}, {0, 0}},
-    {{-1, -1}, {0, SCREEN_HEIGHT / 256.0f}},
-    {{+1, +1}, {SCREEN_WIDTH / 256.0f, 0}},
-    {{+1, -1}, {SCREEN_WIDTH / 256.0f, SCREEN_HEIGHT / 256.0f}},
+    {{-1, -1}, {0, height / 256.0f}},
+    {{+1, +1}, {width / 256.0f, 0}},
+    {{+1, -1}, {width / 256.0f, height / 256.0f}},
   };
 
   static const char* s_vertex_shader =
@@ -57,10 +59,12 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
       "}\n";
 
   ui->window = window;
+  ui->width = width;
+  ui->height = height;
 
   glGenBuffers(1, &ui->vbo);
   glBindBuffer(GL_ARRAY_BUFFER, ui->vbo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(s_vertex_buffer), s_vertex_buffer,
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer), vertex_buffer,
                GL_STATIC_DRAW);
 
   GLuint vs, fs;
@@ -86,9 +90,9 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   ON_ERROR_RETURN;
 }
 
-struct HostUI* host_ui_new(struct SDL_Window* window) {
+struct HostUI* host_ui_new(struct SDL_Window* window, int width, int height) {
   HostUI* ui = xcalloc(1, sizeof(HostUI));
-  CHECK(SUCCESS(host_ui_init(ui, window)));
+  CHECK(SUCCESS(host_ui_init(ui, window, width, height)));
   return ui;
 error:
   xfree(ui);
@@ -107,7 +111,7 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
     SDL_GL_GetDrawableSize(ui->window, &iw, &ih);
     f32 w = iw, h = ih;
     f32 aspect = w / h;
-    f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+    f32 want_aspect = (f32)ui->width / ui->height;
     f32 new_w = aspect < want_aspect ? w : h * want_aspect;
     f32 new_h = aspect < want_aspect ? w / want_aspect : h;
     f32 new_left = (w - new_w) * 0.5f;

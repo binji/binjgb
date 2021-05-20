@@ -82,13 +82,16 @@ static Emulator* host_get_emulator(Host* host) {
 }
 
 static Result host_init_video(Host* host) {
+  Emulator* e = host_get_emulator(host);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  int width = emulator_get_frame_buffer_width(e);
+  int height = emulator_get_frame_buffer_height(e);
+
   host->window = SDL_CreateWindow(
       "binjgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-      SCREEN_WIDTH * host->init.render_scale,
-      SCREEN_HEIGHT * host->init.render_scale,
+      width * host->init.render_scale, height * host->init.render_scale,
       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
 
@@ -99,9 +102,9 @@ static Result host_init_video(Host* host) {
   CHECK_MSG(major >= 2, "Unable to create GL context at version 2.\n");
   host_gl_init_procs();
 
-  host->ui = host_ui_new(host->window);
-  host->fb_texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT,
-                                         HOST_TEXTURE_FORMAT_RGBA);
+  host->ui = host_ui_new(host->window, width, height);
+  host->fb_texture =
+      host_create_texture(host, width, height, HOST_TEXTURE_FORMAT_RGBA);
   return OK;
 error:
   SDL_Quit();
@@ -333,8 +336,9 @@ error:
 static void host_handle_event(Host* host, EmulatorEvent event) {
   Emulator* e = host_get_emulator(host);
   if (event & EMULATOR_EVENT_NEW_FRAME) {
-    host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
-                        *emulator_get_frame_buffer(e));
+    host_upload_texture(
+        host, host->fb_texture, emulator_get_frame_buffer_width(e),
+        emulator_get_frame_buffer_height(e), *emulator_get_frame_buffer(e));
 
     append_rewind_state(host);
   }
