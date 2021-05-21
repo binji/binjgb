@@ -417,7 +417,7 @@ typedef struct {
   u8 pal_ram[4096];
   u8 attr_ram[4050];
   u8 attr_map[90];
-  RGBA screen_pal[4][4];
+  PaletteRGBA screen_pal[4];
   RGBA border_pal[4][16];
   SgbMask mask;
   u8 data[16 * 7];
@@ -695,6 +695,7 @@ struct Emulator {
    * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
+  PaletteRGBA sgb_pal[4];
   Bool use_sgb_border;
 };
 
@@ -2108,10 +2109,17 @@ static void check_joyp_intr(Emulator* e) {
 }
 
 static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
-  int i;
-  for (i = 0; i < 4; ++i) {
+  for (int i = 0; i < 4; ++i) {
     e->pal[type].color[i] =
         e->color_to_rgba[type].color[PPU.pal[type].color[i]];
+  }
+  if (type == PALETTE_TYPE_BGP) {
+    for (int pal = 0; pal < 4; ++pal) {
+      for (int i = 0; i < 4; ++i) {
+        e->sgb_pal[pal].color[i] =
+            SGB.screen_pal[pal].color[PPU.pal[PALETTE_TYPE_BGP].color[i]];
+      }
+    }
   }
 }
 
@@ -2125,26 +2133,64 @@ static RGBA unpack_cgb_color8(u8 lo, u8 hi) {
   return unpack_cgb_color((hi << 8) | lo);
 }
 
-static void unpack_sgb_palette(Emulator* e, int pal, u8 lo0, u8 hi0, u8 lo1,
+static void set_sgb_palette(Emulator* e, int pal, u8 lo0, u8 hi0, u8 lo1,
                                u8 hi1, u8 lo2, u8 hi2, u8 lo3, u8 hi3) {
-  SGB.screen_pal[pal][0] = unpack_cgb_color8(lo0, hi0);
-  SGB.screen_pal[pal][1] = unpack_cgb_color8(lo1, hi1);
-  SGB.screen_pal[pal][2] = unpack_cgb_color8(lo2, hi2);
-  SGB.screen_pal[pal][3] = unpack_cgb_color8(lo3, hi3);
+  for (int i = 0; i < 4; ++i) {
+    SGB.screen_pal[i].color[0] = unpack_cgb_color8(lo0, hi0);
+  }
+  SGB.screen_pal[pal].color[1] = unpack_cgb_color8(lo1, hi1);
+  SGB.screen_pal[pal].color[2] = unpack_cgb_color8(lo2, hi2);
+  SGB.screen_pal[pal].color[3] = unpack_cgb_color8(lo3, hi3);
+  if (pal == 0) {
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP0, &SGB.screen_pal[0]);
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP1, &SGB.screen_pal[0]);
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
 }
 
 static void unpack_sgb_palette_ram(Emulator* e, int pal, u8 idx_lo, u8 idx_hi) {
   u16 idx = (idx_hi << 8) | idx_lo;
-  u8* data = SGB.pal_ram + 8 * idx;
-  unpack_sgb_palette(e, pal, data[0], data[1], data[2], data[3], data[4],
-                     data[5], data[6], data[7]);
+  u8* data = SGB.pal_ram + 8 * (idx & 0x1ff);
+  set_sgb_palette(e, pal, data[0], data[1], data[2], data[3], data[4], data[5],
+                  data[6], data[7]);
+}
+
+static void clear_frame_buffer(Emulator* e, RGBA color) {
+  if (e->use_sgb_border) {
+    for (int y = SGB_SCREEN_TOP; y < SGB_SCREEN_BOTTOM; ++y) {
+      for (int x = SGB_SCREEN_LEFT; x < SGB_SCREEN_RIGHT; ++x) {
+        e->frame_buffer[y * SGB_SCREEN_WIDTH + x] = color;
+      }
+    }
+  } else {
+    for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
+      e->frame_buffer[i] = color;
+    }
+  }
+}
+
+static void update_sgb_mask(Emulator* e) {
+  RGBA color = RGBA_BLACK;
+  Bool should_clear = TRUE;
+  switch (SGB.mask) {
+    case SGB_MASK_CANCEL: should_clear = FALSE; break;
+    case SGB_MASK_FREEZE: should_clear = FALSE; break;
+    case SGB_MASK_BLACK:  color = RGBA_BLACK; break;
+    case SGB_MASK_COLOR0: color = SGB.screen_pal[0].color[0]; break;
+  }
+  if (should_clear) {
+    clear_frame_buffer(e, color);
+  }
 }
 
 static void set_sgb_attr(Emulator* e, u8 byte) {
-  // TODO: cancel mask
-  u8 file = SGB.data[9] & 0x3f;
+  u8 file = byte & 0x3f;
   if (file < 0x2D) {
     memcpy(SGB.attr_map, SGB.attr_ram + file * 90, sizeof(SGB.attr_map));
+  }
+  if (byte & 0x40) {
+    SGB.mask = SGB_MASK_CANCEL;
+    update_sgb_mask(e);
   }
 }
 
@@ -2213,19 +2259,25 @@ static void do_sgb(Emulator* e) {
           VRAM.data +
           (LCDC.bg_tile_data_select == TILE_DATA_8000_8FFF ? 0 : 0x800);
       switch (code) {
-        case 0x00: // PAL01
-          unpack_sgb_palette(e, 0, SGB.data[1], SGB.data[2], SGB.data[3],
-                             SGB.data[4], SGB.data[5], SGB.data[6], SGB.data[7],
-                             SGB.data[8]);
-          unpack_sgb_palette(e, 1, SGB.data[1], SGB.data[2], SGB.data[9],
-                             SGB.data[10], SGB.data[11], SGB.data[12],
-                             SGB.data[13], SGB.data[14]);
+        case 0x00:   // PAL01
+        case 0x01:   // PAL23
+        case 0x02:   // PAL03
+        case 0x03: { // PAL12
+          static struct { int pal0, pal1;
+          } s_pals[] = {{0, 1}, {2, 3}, {0, 3}, {1, 2}};
+          set_sgb_palette(e, s_pals[code].pal0, SGB.data[1], SGB.data[2],
+                          SGB.data[3], SGB.data[4], SGB.data[5], SGB.data[6],
+                          SGB.data[7], SGB.data[8]);
+          set_sgb_palette(e, s_pals[code].pal1, SGB.data[1], SGB.data[2],
+                          SGB.data[9], SGB.data[10], SGB.data[11], SGB.data[12],
+                          SGB.data[13], SGB.data[14]);
           break;
+        }
         case 0x0a: // PAL_SET
-          unpack_sgb_palette_ram(e, 0, SGB.data[1], SGB.data[2]);
-          unpack_sgb_palette_ram(e, 1, SGB.data[3], SGB.data[4]);
-          unpack_sgb_palette_ram(e, 2, SGB.data[5], SGB.data[6]);
           unpack_sgb_palette_ram(e, 3, SGB.data[7], SGB.data[8]);
+          unpack_sgb_palette_ram(e, 2, SGB.data[5], SGB.data[6]);
+          unpack_sgb_palette_ram(e, 1, SGB.data[3], SGB.data[4]);
+          unpack_sgb_palette_ram(e, 0, SGB.data[1], SGB.data[2]);
           if (SGB.data[9] & 0x80) {  // Use attr file
             set_sgb_attr(e, SGB.data[9] & 0x7f);
           }
@@ -2240,46 +2292,50 @@ static void do_sgb(Emulator* e) {
           memcpy(SGB.chr_ram + ((SGB.data[1] & 1) << 12), xfer_src, 4096);
           break;
         case 0x14: // PCT_TRN
-          for (int pal = 0; pal < 4; ++pal) {
-            for (int col = 0; col < 16; ++col) {
-              int idx = 0x800 + (pal * 16 + col) * 2;
-              u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
-              SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
-            }
-          }
-          RGBA* dst = e->frame_buffer;
-          for (int col = 0; col < 28; ++col) {
-            for (int row = 0; row < 32; ++row) {
-              int idx = (col * 32 + row) * 2;
-              u8 tile = xfer_src[idx];
-              u8 info = xfer_src[idx + 1];
-              u8 pal = (info >> 2) & 3;
-              u8* src = SGB.chr_ram + tile * 32;
-              int dsrc = 2;
-              if (info & 0x80) {
-                dsrc = -2;
-                src += 14;
-              }
-              for (int y = 0; y < 8; ++y, src += dsrc) {
-                u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
-                if (!(info & 0x40)) {
-                  p0 = reverse_bits_u8(p0);
-                  p1 = reverse_bits_u8(p1);
-                  p2 = reverse_bits_u8(p2);
-                  p3 = reverse_bits_u8(p3);
-                }
-                for (int x = 0; x < 8; ++x) {
-                  int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
-                               ((p1 & 1) << 1) | (p0 & 1);
-                  dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
-                      SGB.border_pal[pal][palidx];
-                  p0 >>= 1;
-                  p1 >>= 1;
-                  p2 >>= 1;
-                  p3 >>= 1;
-                }
+          if (e->use_sgb_border) {
+            for (int pal = 0; pal < 4; ++pal) {
+              for (int col = 0; col < 16; ++col) {
+                int idx = 0x800 + (pal * 16 + col) * 2;
+                u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
+                SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
               }
             }
+            RGBA* dst = e->frame_buffer;
+            for (int col = 0; col < 28; ++col) {
+              for (int row = 0; row < 32; ++row) {
+                int idx = (col * 32 + row) * 2;
+                u8 tile = xfer_src[idx];
+                u8 info = xfer_src[idx + 1];
+                u8 pal = (info >> 2) & 3;
+                u8* src = SGB.chr_ram + tile * 32;
+                int dsrc = 2;
+                if (info & 0x80) {
+                  dsrc = -2;
+                  src += 14;
+                }
+                for (int y = 0; y < 8; ++y, src += dsrc) {
+                  u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
+                  if (!(info & 0x40)) {
+                    p0 = reverse_bits_u8(p0);
+                    p1 = reverse_bits_u8(p1);
+                    p2 = reverse_bits_u8(p2);
+                    p3 = reverse_bits_u8(p3);
+                  }
+                  for (int x = 0; x < 8; ++x) {
+                    int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
+                                 ((p1 & 1) << 1) | (p0 & 1);
+                    dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
+                        SGB.border_pal[pal][palidx];
+                    p0 >>= 1;
+                    p1 >>= 1;
+                    p2 >>= 1;
+                    p3 >>= 1;
+                  }
+                }
+              }
+            }
+            // Update the mask in case we overwrote the center area.
+            update_sgb_mask(e);
           }
           break;
         case 0x15: // ATTR_TRN
@@ -2291,6 +2347,7 @@ static void do_sgb(Emulator* e) {
         case 0x17: // MASK_EN
           if (SGB.data[1] <= 3) {
             SGB.mask = (SgbMask)(SGB.data[1]);
+            update_sgb_mask(e);
           }
           break;
         case 0x1e: case 0x1f:
@@ -2417,16 +2474,10 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         } else {
           HOOK0(disable_display_v);
           /* Clear the framebuffer. */
-          if (e->use_sgb_border) {
-            for (int y = SGB_SCREEN_TOP; y < SGB_SCREEN_BOTTOM; ++y) {
-              for (int x = SGB_SCREEN_LEFT; x < SGB_SCREEN_RIGHT; ++x) {
-                e->frame_buffer[y * SGB_SCREEN_WIDTH + x] = RGBA_WHITE;
-              }
-            }
+          if (IS_SGB) {
+            update_sgb_mask(e);
           } else {
-            for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
-              e->frame_buffer[i] = RGBA_WHITE;
-            }
+            clear_frame_buffer(e, RGBA_WHITE);
           }
           e->state.event |= EMULATOR_EVENT_NEW_FRAME;
         }
@@ -3083,7 +3134,10 @@ static void ppu_mode3_synchronize(Emulator* e) {
   u16 map_base = map_select_to_address(LCDC.bg_tile_map_select) |
                  ((my >> 3) * TILE_MAP_WIDTH);
   RGBA* pixel;
-  if (e->use_sgb_border) {
+  if (SGB.mask != SGB_MASK_CANCEL) {
+    static RGBA s_dummy_frame_buffer_line[SCREEN_WIDTH];
+    pixel = s_dummy_frame_buffer_line;
+  } else if (e->use_sgb_border) {
     pixel = &e->frame_buffer[(y + SGB_SCREEN_TOP) * SGB_SCREEN_WIDTH +
                              (x + SGB_SCREEN_LEFT)];
   } else {
@@ -3137,7 +3191,13 @@ static void ppu_mode3_synchronize(Emulator* e) {
               hi = reverse_bits_u8(hi);
             }
           } else {
-            pal = &e->pal[PALETTE_TYPE_BGP];
+            if (IS_SGB) {
+              int idx = (y >> 3) * (SCREEN_WIDTH >> 3) + (x >> 3);
+              u8 palidx = (SGB.attr_map[idx >> 2] >> (2 * (3 - (idx & 3)))) & 3;
+              pal = &e->sgb_pal[palidx];
+            } else {
+              pal = &e->pal[PALETTE_TYPE_BGP];
+            }
             priority = FALSE;
             u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
             lo = VRAM.data[tile_addr];
@@ -4484,7 +4544,7 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
 
   e->use_sgb_border = init->use_sgb_border;
 
-  /* Set initial DMG palettes */
+  /* Set initial DMG/SGB palettes */
   emulator_set_builtin_palette(e, init->builtin_palette);
 
   /* Set initial CGB palettes to white. */
@@ -4742,4 +4802,8 @@ void emulator_set_builtin_palette(Emulator* e, u32 index) {
   emulator_set_bw_palette(e, 0, &pals[index][0]);
   emulator_set_bw_palette(e, 1, &pals[index][1]);
   emulator_set_bw_palette(e, 2, &pals[index][2]);
+  for (int i = 0; i < 4; ++i) {
+    SGB.screen_pal[i] = pals[index][0];
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
 }

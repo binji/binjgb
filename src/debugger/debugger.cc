@@ -179,6 +179,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   rom_usage_filename = replace_extension(filename, ROM_USAGE_EXTENSION);
 
   is_cgb = emulator_is_cgb(e);
+  is_sgb = emulator_is_sgb(e);
 
   return true;
 }

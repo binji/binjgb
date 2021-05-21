@@ -111,6 +111,7 @@ class Debugger {
   HostTexture* tile_data_texture;
 
   bool is_cgb = false;
+  bool is_sgb = false;
 
   f32 audio_volume = 0.5f;
 

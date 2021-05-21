@@ -102,6 +102,7 @@ LogLevel emulator_get_log_level(LogSystem);
 void emulator_print_log_systems();
 
 Bool emulator_is_cgb(Emulator*);
+Bool emulator_is_sgb(Emulator*);
 
 int emulator_get_rom_size(Emulator*);
 Bool emulator_get_rom_usage_enabled(void);
@@ -143,6 +144,7 @@ TileMapSelect emulator_get_tile_map_select(Emulator*, LayerType);
 Palette emulator_get_palette(Emulator*, PaletteType);
 PaletteRGBA emulator_get_palette_rgba(Emulator*, PaletteType);
 PaletteRGBA emulator_get_cgb_palette_rgba(Emulator*, CgbPaletteType, int index);
+PaletteRGBA emulator_get_sgb_palette_rgba(Emulator*, int index);
 void emulator_get_tile_data(Emulator*, TileData);
 void emulator_get_tile_map(Emulator*, TileMapSelect, TileMap);
 void emulator_get_tile_map_attr(Emulator*, TileMapSelect, TileMap);

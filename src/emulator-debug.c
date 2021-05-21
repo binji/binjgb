@@ -745,6 +745,7 @@ void emulator_print_log_systems(void) {
 }
 
 Bool emulator_is_cgb(Emulator* e) { return e->state.is_cgb; }
+Bool emulator_is_sgb(Emulator* e) { return e->state.is_sgb; }
 
 int emulator_get_rom_size(Emulator* e) {
   return s_rom_bank_count[e->cart_info->rom_size] << ROM_BANK_SHIFT;
@@ -795,6 +796,10 @@ PaletteRGBA emulator_get_cgb_palette_rgba(Emulator* e, CgbPaletteType type,
     case CGB_PALETTE_TYPE_BGCP: return e->state.ppu.bgcp.palettes[index];
     case CGB_PALETTE_TYPE_OBCP: return e->state.ppu.obcp.palettes[index];
   }
+}
+
+PaletteRGBA emulator_get_sgb_palette_rgba(Emulator* e, int index) {
+  return e->state.sgb.screen_pal[index];
 }
 
 void emulator_get_tile_data(Emulator* e, TileData out_tile_data) {

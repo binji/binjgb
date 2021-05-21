@@ -107,19 +107,30 @@ void TextRegBits(Emulator* e, u8 v, EnumArg<T> arg, Args... args) {
 
 struct SwatchArg {
   PaletteType pal;
-  int index;
+  int palette_index;
+  int color_index;
+  bool is_sgb;
 };
 
 SwatchArg Swatch(PaletteType pal, int index) {
-  return SwatchArg{pal, index};
+  return SwatchArg{pal, 0, index, false};
+}
+
+SwatchArg SgbSwatch(int palette_index, int color_index) {
+  return SwatchArg{PALETTE_TYPE_BGP, palette_index, color_index, true};
 }
 
 template <typename... Args>
 void TextRegBits(Emulator* e, u8 v, SwatchArg arg, Args... args) {
   ImGui::SameLine();
-  ImGui::Text("%d:", arg.index);
-  PaletteRGBA pal_rgba = emulator_get_palette_rgba(e, arg.pal);
-  u8 color = (v >> (arg.index * 2)) & 3;
+  ImGui::Text("%d:", arg.color_index);
+  PaletteRGBA pal_rgba;
+  if (arg.is_sgb) {
+    pal_rgba = emulator_get_sgb_palette_rgba(e, arg.palette_index);
+  } else {
+    pal_rgba = emulator_get_palette_rgba(e, arg.pal);
+  }
+  u8 color = (v >> (arg.color_index * 2)) & 3;
   RGBA color_rgba = pal_rgba.color[color];
   float sz = ImGui::GetTextLineHeight();
   ImGui::SameLine();
@@ -142,6 +153,19 @@ void TextReg(Emulator* e, Address addr, const char* name, Args... args) {
   ImGui::TextColored(kRegColor, "%02X ", v);
   TextRegBits(e, v, args...);
 }
+
+template <typename... Args>
+void TextSgbPal(Emulator* e, const char* name, Args... args) {
+  const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+
+  char buf[15];
+  u8 v = emulator_read_u8_raw(e, 0xff47);
+  snprintf(buf, sizeof(buf), "[%s]", name);
+  ImGui::Text("   %8s:   ", buf);
+  ImGui::SameLine();
+  TextRegBits(e, v, args...);
+}
+
 
 }  // namespace
 
@@ -213,6 +237,18 @@ void Debugger::IOWindow::Tick() {
 
     TextReg(d->e, 0xffff, "IE", Bit0(0x10, "JOYP "), Bit0(0x8, "SERIAL "),
             Bit0(0x4, "TIMER "), Bit0(0x2, "STAT "), Bit0(0x1, "VBLANK "));
+
+    if (d->is_sgb) {
+      ImGui::NewLine();
+      TextSgbPal(d->e, "SGB Pal 0", SgbSwatch(0, 0), SgbSwatch(0, 1),
+                 SgbSwatch(0, 2), SgbSwatch(0, 3));
+      TextSgbPal(d->e, "SGB Pal 1", SgbSwatch(1, 0), SgbSwatch(1, 1),
+                 SgbSwatch(1, 2), SgbSwatch(1, 3));
+      TextSgbPal(d->e, "SGB Pal 2", SgbSwatch(2, 0), SgbSwatch(2, 1),
+                 SgbSwatch(2, 2), SgbSwatch(2, 3));
+      TextSgbPal(d->e, "SGB Pal 3", SgbSwatch(3, 0), SgbSwatch(3, 1),
+                 SgbSwatch(3, 2), SgbSwatch(3, 3));
+    }
   }
   ImGui::End();
 }
