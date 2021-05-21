@@ -338,6 +338,13 @@ typedef enum {
   SPEED_DOUBLE = 1,
 } Speed;
 
+typedef enum {
+  SGB_MASK_CANCEL = 0,
+  SGB_MASK_FREEZE = 1,
+  SGB_MASK_BLACK = 2,
+  SGB_MASK_COLOR0 = 3,
+} SgbMask;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -406,6 +413,13 @@ typedef struct {
 } Joypad;
 
 typedef struct {
+  u8 chr_ram[8192];
+  u8 pal_ram[4096];
+  u8 attr_ram[4050];
+  u8 attr_map[90];
+  RGBA screen_pal[4][4];
+  RGBA border_pal[4][16];
+  SgbMask mask;
   u8 data[16 * 7];
   u8 bits_read;
   u8 current_packet;
@@ -659,6 +673,7 @@ typedef struct {
   Ticks cpu_tick;
   Ticks next_intr_ticks; /* For Timer, Serial, or PPU interrupts. */
   Bool is_cgb;
+  Bool is_sgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
 } EmulatorState;
@@ -700,6 +715,7 @@ struct Emulator {
 #define INFRARED (e->state.infrared)
 #define INTR (e->state.interrupt)
 #define IS_CGB (e->state.is_cgb)
+#define IS_SGB (e->state.is_sgb)
 #define JOYP (e->state.joyp)
 #define SGB (e->state.sgb)
 #define LCDC (PPU.lcdc)
@@ -2099,7 +2115,49 @@ static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
   }
 }
 
+static RGBA unpack_cgb_color(u16 color) {
+  return MAKE_RGBA(UNPACK(color, XCPD_RED_INTENSITY) << 3,
+                   UNPACK(color, XCPD_GREEN_INTENSITY) << 3,
+                   UNPACK(color, XCPD_BLUE_INTENSITY) << 3, 255);
+}
+
+static RGBA unpack_cgb_color8(u8 lo, u8 hi) {
+  return unpack_cgb_color((hi << 8) | lo);
+}
+
+static void unpack_sgb_palette(Emulator* e, int pal, u8 lo0, u8 hi0, u8 lo1,
+                               u8 hi1, u8 lo2, u8 hi2, u8 lo3, u8 hi3) {
+  SGB.screen_pal[pal][0] = unpack_cgb_color8(lo0, hi0);
+  SGB.screen_pal[pal][1] = unpack_cgb_color8(lo1, hi1);
+  SGB.screen_pal[pal][2] = unpack_cgb_color8(lo2, hi2);
+  SGB.screen_pal[pal][3] = unpack_cgb_color8(lo3, hi3);
+}
+
+static void unpack_sgb_palette_ram(Emulator* e, int pal, u8 idx_lo, u8 idx_hi) {
+  u16 idx = (idx_hi << 8) | idx_lo;
+  u8* data = SGB.pal_ram + 8 * idx;
+  unpack_sgb_palette(e, pal, data[0], data[1], data[2], data[3], data[4],
+                     data[5], data[6], data[7]);
+}
+
+static void set_sgb_attr(Emulator* e, u8 byte) {
+  // TODO: cancel mask
+  u8 file = SGB.data[9] & 0x3f;
+  if (file < 0x2D) {
+    memcpy(SGB.attr_map, SGB.attr_ram + file * 90, sizeof(SGB.attr_map));
+  }
+}
+
+static u8 reverse_bits_u8(u8 x) {
+  x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
+  x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
+  x = ((x << 1) & 0xaa) | ((x >> 1) & 0x55);
+  return x;
+}
+
 static void do_sgb(Emulator* e) {
+  if (!IS_SGB) { return; }
+
   if ((JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW ||
        JOYP.joypad_select == JOYPAD_SGB_P15_LOW) &&
       !SGB.player_incremented) {
@@ -2150,11 +2208,91 @@ static void do_sgb(Emulator* e) {
       };
       int code = SGB.data[0] >> 3;
       start = 1;
+      // Assume we can just read the data directly from VRAM.
+      u8* xfer_src =
+          VRAM.data +
+          (LCDC.bg_tile_data_select == TILE_DATA_8000_8FFF ? 0 : 0x800);
       switch (code) {
-        case 0x11: { // MLT_REQ
+        case 0x00: // PAL01
+          unpack_sgb_palette(e, 0, SGB.data[1], SGB.data[2], SGB.data[3],
+                             SGB.data[4], SGB.data[5], SGB.data[6], SGB.data[7],
+                             SGB.data[8]);
+          unpack_sgb_palette(e, 1, SGB.data[1], SGB.data[2], SGB.data[9],
+                             SGB.data[10], SGB.data[11], SGB.data[12],
+                             SGB.data[13], SGB.data[14]);
+          break;
+        case 0x0a: // PAL_SET
+          unpack_sgb_palette_ram(e, 0, SGB.data[1], SGB.data[2]);
+          unpack_sgb_palette_ram(e, 1, SGB.data[3], SGB.data[4]);
+          unpack_sgb_palette_ram(e, 2, SGB.data[5], SGB.data[6]);
+          unpack_sgb_palette_ram(e, 3, SGB.data[7], SGB.data[8]);
+          if (SGB.data[9] & 0x80) {  // Use attr file
+            set_sgb_attr(e, SGB.data[9] & 0x7f);
+          }
+          break;
+        case 0x0b: // PAL_TRN
+          memcpy(SGB.pal_ram, xfer_src, sizeof(SGB.pal_ram));
+          break;
+        case 0x11: // MLT_REQ
           SGB.player_mask = SGB.data[1] & 3;
           break;
-        }
+        case 0x13: // CHR_TRN
+          memcpy(SGB.chr_ram + ((SGB.data[1] & 1) << 12), xfer_src, 4096);
+          break;
+        case 0x14: // PCT_TRN
+          for (int pal = 0; pal < 4; ++pal) {
+            for (int col = 0; col < 16; ++col) {
+              int idx = 0x800 + (pal * 16 + col) * 2;
+              u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
+              SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
+            }
+          }
+          RGBA* dst = e->frame_buffer;
+          for (int col = 0; col < 28; ++col) {
+            for (int row = 0; row < 32; ++row) {
+              int idx = (col * 32 + row) * 2;
+              u8 tile = xfer_src[idx];
+              u8 info = xfer_src[idx + 1];
+              u8 pal = (info >> 2) & 3;
+              u8* src = SGB.chr_ram + tile * 32;
+              int dsrc = 2;
+              if (info & 0x80) {
+                dsrc = -2;
+                src += 14;
+              }
+              for (int y = 0; y < 8; ++y, src += dsrc) {
+                u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
+                if (!(info & 0x40)) {
+                  p0 = reverse_bits_u8(p0);
+                  p1 = reverse_bits_u8(p1);
+                  p2 = reverse_bits_u8(p2);
+                  p3 = reverse_bits_u8(p3);
+                }
+                for (int x = 0; x < 8; ++x) {
+                  int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
+                               ((p1 & 1) << 1) | (p0 & 1);
+                  dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
+                      SGB.border_pal[pal][palidx];
+                  p0 >>= 1;
+                  p1 >>= 1;
+                  p2 >>= 1;
+                  p3 >>= 1;
+                }
+              }
+            }
+          }
+          break;
+        case 0x15: // ATTR_TRN
+          memcpy(SGB.attr_ram, xfer_src, sizeof(SGB.attr_ram));
+          break;
+        case 0x16: // ATTR_SET
+          set_sgb_attr(e, SGB.data[1]);
+          break;
+        case 0x17: // MASK_EN
+          if (SGB.data[1] <= 3) {
+            SGB.mask = (SgbMask)(SGB.data[1]);
+          }
+          break;
         case 0x1e: case 0x1f:
           return;  // Invalid
       }
@@ -2279,9 +2417,16 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         } else {
           HOOK0(disable_display_v);
           /* Clear the framebuffer. */
-          size_t i;
-          for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
-            e->frame_buffer[i] = RGBA_WHITE;
+          if (e->use_sgb_border) {
+            for (int y = SGB_SCREEN_TOP; y < SGB_SCREEN_BOTTOM; ++y) {
+              for (int x = SGB_SCREEN_LEFT; x < SGB_SCREEN_RIGHT; ++x) {
+                e->frame_buffer[y * SGB_SCREEN_WIDTH + x] = RGBA_WHITE;
+              }
+            }
+          } else {
+            for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
+              e->frame_buffer[i] = RGBA_WHITE;
+            }
           }
           e->state.event |= EMULATOR_EVENT_NEW_FRAME;
         }
@@ -2446,9 +2591,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         u8 palette_index = (cp->index >> 3) & 7;
         u8 color_index = (cp->index >> 1) & 3;
         u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
-        RGBA color = MAKE_RGBA(UNPACK(color16, XCPD_RED_INTENSITY) << 3,
-                               UNPACK(color16, XCPD_GREEN_INTENSITY) << 3,
-                               UNPACK(color16, XCPD_BLUE_INTENSITY) << 3, 255);
+        RGBA color = unpack_cgb_color(color16);
         cp->palettes[palette_index].color[color_index] = color;
         if (cp->auto_increment) {
           cp->index = (cp->index + 1) & 0x3f;
@@ -2916,13 +3059,6 @@ static u32 mode3_tick_count(Emulator* e) {
   return ticks;
 }
 
-static u8 reverse_bits_u8(u8 x) {
-  x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
-  x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
-  x = ((x << 1) & 0xaa) | ((x >> 1) & 0x55);
-  return x;
-}
-
 static u16 map_select_to_address(TileMapSelect map_select) {
   return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
 }
@@ -2948,9 +3084,8 @@ static void ppu_mode3_synchronize(Emulator* e) {
                  ((my >> 3) * TILE_MAP_WIDTH);
   RGBA* pixel;
   if (e->use_sgb_border) {
-    int xborder = (SGB_SCREEN_WIDTH - SCREEN_WIDTH) / 2;
-    int yborder = (SGB_SCREEN_HEIGHT - SCREEN_HEIGHT) / 2;
-    pixel = &e->frame_buffer[(y + yborder) * SGB_SCREEN_WIDTH + (x + xborder)];
+    pixel = &e->frame_buffer[(y + SGB_SCREEN_TOP) * SGB_SCREEN_WIDTH +
+                             (x + SGB_SCREEN_LEFT)];
   } else {
     pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
   }
@@ -4310,6 +4445,7 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
   IS_CGB = !init->force_dmg && (e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
                                 e->cart_info->cgb_flag == CGB_FLAG_REQUIRED);
+  IS_SGB = !IS_CGB && e->cart_info->sgb_flag == SGB_FLAG_SUPPORTED;
   set_af_reg(e, 0xb0);
   REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
