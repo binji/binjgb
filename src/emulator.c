@@ -345,6 +345,14 @@ typedef enum {
   SGB_MASK_COLOR0 = 3,
 } SgbMask;
 
+typedef enum {
+  SGB_STATE_IDLE,
+  SGB_STATE_WAIT_BIT,
+  SGB_STATE_READ_BIT,
+  SGB_STATE_STOP_BIT,
+  SGB_STATE_STOP_WAIT,
+} SgbState;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -420,6 +428,7 @@ typedef struct {
   PaletteRGBA screen_pal[4];
   RGBA border_pal[4][16];
   SgbMask mask;
+  SgbState state;
   u8 data[16 * 7];
   u8 bits_read;
   u8 current_packet;
@@ -2186,6 +2195,18 @@ static void set_sgb_attr(Emulator* e, u8 byte) {
   }
 }
 
+static void set_sgb_attr_block(Emulator* e, int x0, int y0, int x1, int y1,
+                               u8 pal) {
+  for (int y = y0; y <= y1; ++y) {
+    for (int x = x0; x <= x1; ++x) {
+      int index = y * 20 + x;
+      u8 *byte = &SGB.attr_map[index >> 2];
+      u8 mask = ~(0xc0 >> (2 * (x & 3)));
+      *byte = (*byte & mask) | (pal << (2 * (3 - (x & 3))));
+    }
+  }
+}
+
 static u8 reverse_bits_u8(u8 x) {
   x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
   x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
@@ -2193,46 +2214,74 @@ static u8 reverse_bits_u8(u8 x) {
   return x;
 }
 
+static u16 map_select_to_address(TileMapSelect map_select) {
+  return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
+}
+
 static void do_sgb(Emulator* e) {
   if (!IS_SGB) { return; }
+
+  Bool do_command = FALSE;
+
+  switch (SGB.state) {
+    case SGB_STATE_IDLE:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW) {
+        SGB.bits_read = 0;
+        if (++SGB.current_packet >= SGB.packet_count) {
+          SGB.current_packet = 0;
+          SGB.packet_count = 0;
+          ZERO_MEMORY(SGB.data);
+        }
+        SGB.state = SGB_STATE_WAIT_BIT;
+      }
+      break;
+    case SGB_STATE_WAIT_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+        SGB.state =
+            SGB.bits_read >= 128 ? SGB_STATE_STOP_BIT : SGB_STATE_READ_BIT;
+      } else {
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+    case SGB_STATE_READ_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_P15_LOW) {
+        int curbyte = (SGB.current_packet << 4) | (SGB.bits_read >> 3);
+        u8 curbit = SGB.bits_read & 7;
+        SGB.data[curbyte] |= 1 << curbit;
+        SGB.bits_read++;
+        SGB.state = SGB_STATE_WAIT_BIT;
+      } else if (JOYP.joypad_select == JOYPAD_SGB_P14_LOW) {
+        SGB.bits_read++;
+        SGB.state = SGB_STATE_WAIT_BIT;
+      }
+      break;
+    case SGB_STATE_STOP_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_P14_LOW) {
+        SGB.state = SGB_STATE_STOP_WAIT;
+      } else {
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+    case SGB_STATE_STOP_WAIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+        do_command = TRUE;
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+  }
 
   if ((JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW ||
        JOYP.joypad_select == JOYPAD_SGB_P15_LOW) &&
       !SGB.player_incremented) {
     SGB.player_incremented = TRUE;
+  } else if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+    if (SGB.player_incremented) {
+      SGB.current_player = (SGB.current_player + 1) & SGB.player_mask;
+    }
+    SGB.player_incremented = FALSE;
   }
 
-  switch (JOYP.joypad_select) {
-    case JOYPAD_SGB_BOTH_LOW:
-      SGB.bits_read = 0;
-      if (++SGB.current_packet >= SGB.packet_count) {
-        SGB.current_packet = 0;
-        SGB.packet_count = 0;
-        ZERO_MEMORY(SGB.data);
-      }
-      break;
-    case JOYPAD_SGB_P15_LOW:
-      if (SGB.bits_read < 128) {
-        int curbyte = (SGB.current_packet << 4) | (SGB.bits_read >> 3);
-        u8 curbit = SGB.bits_read & 7;
-        SGB.data[curbyte] |= 1 << curbit;
-        SGB.bits_read++;
-      }
-      break;
-    case JOYPAD_SGB_P14_LOW:
-      if (SGB.bits_read < 129) {
-        SGB.bits_read++;
-      }
-      break;
-    case JOYPAD_SGB_BOTH_HIGH:
-      if (SGB.player_incremented) {
-        SGB.current_player = (SGB.current_player + 1) & SGB.player_mask;
-      }
-      SGB.player_incremented = FALSE;
-      return;
-  }
-
-  if (SGB.bits_read == 128) {
+  if (do_command) {
     int start = 0;
     int end = 16;
     if (SGB.current_packet == 0) {
@@ -2245,17 +2294,48 @@ static void do_sgb(Emulator* e) {
           "??",       "??",
       };
       int code = SGB.data[0] >> 3;
+      SGB.packet_count = SGB.data[0] & 7;
       start = 1;
-      // Assume we can just read the data directly from VRAM.
-      u8* xfer_src =
-          VRAM.data +
-          (LCDC.bg_tile_data_select == TILE_DATA_8000_8FFF ? 0 : 0x800);
+      printf(">>> got SGB start packet:$%02x (%s) len=%u  ", code,
+             s_names[code & 0x1f], SGB.packet_count);
+    } else {
+      printf(">>> got SGB packet %u:  ", SGB.current_packet);
+    }
+    for (int i = start; i < 16; ++i) {
+      printf(" $%02x", SGB.data[i]);
+    }
+    printf("\n");
+
+    if (SGB.current_packet == SGB.packet_count - 1) {
+      // Assume we can just read the data directly from VRAM. Cheat by reading
+      // the upper-left tile and assuming that the rest of the data is in
+      // order.
+      int code = SGB.data[0] >> 3;
+      u8* xfer_src;
+      if (code == 0x0b || code == 0x13 || code == 0x14 || code == 0x15) {
+        u16 map_base = map_select_to_address(LCDC.bg_tile_map_select);
+        u16 tile_index = VRAM.data[map_base];
+        if (LCDC.bg_tile_data_select == TILE_DATA_8800_97FF) {
+          // Copy the data into the temporary buffer so it can be used
+          // contiguously.
+          static u8 s_temp_xfer_buffer[4096];
+          u16 start_offset = (256 + (s8)tile_index) * 16;
+          u16 len = 0x1800 - start_offset;
+          memcpy(s_temp_xfer_buffer, VRAM.data + start_offset, len);
+          memcpy(s_temp_xfer_buffer + len, VRAM.data + 0x800, 0x1000 - len);
+          xfer_src = s_temp_xfer_buffer;
+        } else {
+          xfer_src = VRAM.data + tile_index * 16;
+        }
+      }
+
       switch (code) {
         case 0x00:   // PAL01
         case 0x01:   // PAL23
         case 0x02:   // PAL03
         case 0x03: { // PAL12
-          static struct { int pal0, pal1;
+          static struct {
+            int pal0, pal1;
           } s_pals[] = {{0, 1}, {2, 3}, {0, 3}, {1, 2}};
           set_sgb_palette(e, s_pals[code].pal0, SGB.data[1], SGB.data[2],
                           SGB.data[3], SGB.data[4], SGB.data[5], SGB.data[6],
@@ -2263,6 +2343,80 @@ static void do_sgb(Emulator* e) {
           set_sgb_palette(e, s_pals[code].pal1, SGB.data[1], SGB.data[2],
                           SGB.data[9], SGB.data[10], SGB.data[11], SGB.data[12],
                           SGB.data[13], SGB.data[14]);
+          break;
+        }
+        case 0x04: { // ATTR_BLK
+          int datasets = MIN(SGB.data[1], (SGB.packet_count * 16 - 2) / 6);
+          for (int i = 0; i < datasets; ++i) {
+            u8 info = SGB.data[2 + i * 6];
+            u8 pal = SGB.data[3 + i * 6];
+            u8 palin = pal & 3, palon = (pal >> 2) & 3, palout = (pal >> 4) & 3;
+            u8 l = SGB.data[4 + i * 6], t = SGB.data[5 + i * 6],
+               r = SGB.data[6 + i * 6], b = SGB.data[7 + i * 6];
+            if (info & 1) {  // colors inside region
+              set_sgb_attr_block(e, l, t, r, b, palin);
+            }
+            if (info & 2) { // colors on region border
+              set_sgb_attr_block(e, l, t, r, t, palon);  // top
+              set_sgb_attr_block(e, l, t, l, b, palon);  // left
+              set_sgb_attr_block(e, l, b, r, b, palon);  // bottom
+              set_sgb_attr_block(e, r, t, r, b, palon);  // right
+            }
+            if (info & 4) { // colors outside region
+              set_sgb_attr_block(e, 0, 0, 19, t - 1, palout);   // top
+              set_sgb_attr_block(e, 0, t, l - 1, b, palout);    // left
+              set_sgb_attr_block(e, 0, b + 1, 19, 17, palout);  // bottom
+              set_sgb_attr_block(e, r + 1, t, 19, b, palout);   // right
+            }
+          }
+          break;
+        }
+        case 0x05: { // ATTR_LIN
+          int datasets = MIN(SGB.data[1], SGB.packet_count * 16 - 2);
+          for (int i = 0; i < datasets; ++i) {
+            u8 info = SGB.data[2 + i];
+            u8 line = info & 0x1f;
+            u8 pal = (info >> 5) & 3;
+            if (info & 0x80) {  // horizontal
+              set_sgb_attr_block(e, 0, line, 19, line, pal);
+            } else { // vertical
+              set_sgb_attr_block(e, line, 0, line, 17, pal);
+            }
+          }
+          break;
+        }
+        case 0x06: { // ATTR_DIV
+          u8 pal = SGB.data[1];
+          u8 pallo = pal & 3, palon = (pal >> 2) & 3, palhi = (pal >> 4) & 3;
+          u8 line = SGB.data[2];
+          if (pal & 0x40) {  // above/below
+            set_sgb_attr_block(e, 0, 0, 19, line - 1, palhi);   // top
+            set_sgb_attr_block(e, 0, line, 19, line, palon);    // on
+            set_sgb_attr_block(e, 0, line + 1, 19, 17, pallo);  // bottom
+          } else { // left/right
+            set_sgb_attr_block(e, 0, 0, line - 1, 17, palhi);   // left
+            set_sgb_attr_block(e, line, 0, line, 17, palon);    // on
+            set_sgb_attr_block(e, line + 1, 0, 19, 17, pallo);  // right
+          }
+          break;
+        }
+        case 0x07: { // ATTR_CHR
+          u8 x = SGB.data[1], y = SGB.data[2];
+          u8 dx = 0, dy = 0;
+          if (SGB.data[5] == 0) { dx = 1; } else { dy = 1; }
+          int datasets = MIN(MIN((SGB.data[4] << 8) | SGB.data[3],
+                                 (SGB.packet_count * 16 - 6) * 4),
+                             360);
+          for (int i = 0; i < datasets; i += 4) {
+            u8 byte = SGB.data[6 + (i >> 2)];
+            for (int j = 0; j < MIN(datasets, 4); ++j) {
+              set_sgb_attr_block(e, x, y, x, y, byte >> ((3 - j) * 2));
+              x += dx;
+              y += dy;
+              if (x >= 20) { x = 0; y++; }
+              if (y >= 18) { y = 0; x++; if (x >= 20) { x = 0; } }
+            }
+          }
           break;
         }
         case 0x0a: // PAL_SET
@@ -2344,16 +2498,7 @@ static void do_sgb(Emulator* e) {
         case 0x1e: case 0x1f:
           return;  // Invalid
       }
-      SGB.packet_count = SGB.data[0] & 7;
-      printf(">>> got SGB start packet:$%02x (%s) len=%u  ", code,
-             s_names[code & 0x1f], SGB.packet_count);
-    } else {
-      printf(">>> got SGB packet %u:  ", SGB.current_packet);
     }
-    for (int i = start; i < 16; ++i) {
-      printf(" $%02x", SGB.data[i]);
-    }
-    printf("\n");
   }
 }
 
@@ -3099,10 +3244,6 @@ static u32 mode3_tick_count(Emulator* e) {
     ticks += buckets[i];
   }
   return ticks;
-}
-
-static u16 map_select_to_address(TileMapSelect map_select) {
-  return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
 }
 
 static void ppu_mode3_synchronize(Emulator* e) {
