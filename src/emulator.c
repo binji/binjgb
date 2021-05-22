@@ -689,6 +689,7 @@ struct Emulator {
   MemoryMap memory_map;
   EmulatorState state;
   FrameBuffer frame_buffer;
+  SgbFrameBuffer sgb_frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallbackInfo joypad_info;
   /* color_to_rgba stores mappings from 4 DMG colors to RGBA colors. pal is a
@@ -696,7 +697,6 @@ struct Emulator {
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
   PaletteRGBA sgb_pal[4];
-  Bool use_sgb_border;
 };
 
 
@@ -2156,16 +2156,8 @@ static void unpack_sgb_palette_ram(Emulator* e, int pal, u8 idx_lo, u8 idx_hi) {
 }
 
 static void clear_frame_buffer(Emulator* e, RGBA color) {
-  if (e->use_sgb_border) {
-    for (int y = SGB_SCREEN_TOP; y < SGB_SCREEN_BOTTOM; ++y) {
-      for (int x = SGB_SCREEN_LEFT; x < SGB_SCREEN_RIGHT; ++x) {
-        e->frame_buffer[y * SGB_SCREEN_WIDTH + x] = color;
-      }
-    }
-  } else {
-    for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
-      e->frame_buffer[i] = color;
-    }
+  for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
+    e->frame_buffer[i] = color;
   }
 }
 
@@ -2292,51 +2284,50 @@ static void do_sgb(Emulator* e) {
           memcpy(SGB.chr_ram + ((SGB.data[1] & 1) << 12), xfer_src, 4096);
           break;
         case 0x14: // PCT_TRN
-          if (e->use_sgb_border) {
-            for (int pal = 0; pal < 4; ++pal) {
-              for (int col = 0; col < 16; ++col) {
-                int idx = 0x800 + (pal * 16 + col) * 2;
-                u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
-                SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
-              }
+          for (int pal = 0; pal < 4; ++pal) {
+            SGB.border_pal[pal][0] = 0;
+            for (int col = 1; col < 16; ++col) {
+              int idx = 0x800 + (pal * 16 + col) * 2;
+              u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
+              SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
             }
-            RGBA* dst = e->frame_buffer;
-            for (int col = 0; col < 28; ++col) {
-              for (int row = 0; row < 32; ++row) {
-                int idx = (col * 32 + row) * 2;
-                u8 tile = xfer_src[idx];
-                u8 info = xfer_src[idx + 1];
-                u8 pal = (info >> 2) & 3;
-                u8* src = SGB.chr_ram + tile * 32;
-                int dsrc = 2;
-                if (info & 0x80) {
-                  dsrc = -2;
-                  src += 14;
-                }
-                for (int y = 0; y < 8; ++y, src += dsrc) {
-                  u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
-                  if (!(info & 0x40)) {
-                    p0 = reverse_bits_u8(p0);
-                    p1 = reverse_bits_u8(p1);
-                    p2 = reverse_bits_u8(p2);
-                    p3 = reverse_bits_u8(p3);
-                  }
-                  for (int x = 0; x < 8; ++x) {
-                    int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
-                                 ((p1 & 1) << 1) | (p0 & 1);
-                    dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
-                        SGB.border_pal[pal][palidx];
-                    p0 >>= 1;
-                    p1 >>= 1;
-                    p2 >>= 1;
-                    p3 >>= 1;
-                  }
-                }
-              }
-            }
-            // Update the mask in case we overwrote the center area.
-            update_sgb_mask(e);
           }
+          RGBA* dst = e->sgb_frame_buffer;
+          for (int col = 0; col < 28; ++col) {
+            for (int row = 0; row < 32; ++row) {
+              int idx = (col * 32 + row) * 2;
+              u8 tile = xfer_src[idx];
+              u8 info = xfer_src[idx + 1];
+              u8 pal = (info >> 2) & 3;
+              u8* src = SGB.chr_ram + tile * 32;
+              int dsrc = 2;
+              if (info & 0x80) {
+                dsrc = -2;
+                src += 14;
+              }
+              for (int y = 0; y < 8; ++y, src += dsrc) {
+                u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
+                if (!(info & 0x40)) {
+                  p0 = reverse_bits_u8(p0);
+                  p1 = reverse_bits_u8(p1);
+                  p2 = reverse_bits_u8(p2);
+                  p3 = reverse_bits_u8(p3);
+                }
+                for (int x = 0; x < 8; ++x) {
+                  int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
+                               ((p1 & 1) << 1) | (p0 & 1);
+                  dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
+                      SGB.border_pal[pal][palidx];
+                  p0 >>= 1;
+                  p1 >>= 1;
+                  p2 >>= 1;
+                  p3 >>= 1;
+                }
+              }
+            }
+          }
+          // Update the mask in case we overwrote the center area.
+          update_sgb_mask(e);
           break;
         case 0x15: // ATTR_TRN
           memcpy(SGB.attr_ram, xfer_src, sizeof(SGB.attr_ram));
@@ -3137,9 +3128,6 @@ static void ppu_mode3_synchronize(Emulator* e) {
   if (SGB.mask != SGB_MASK_CANCEL) {
     static RGBA s_dummy_frame_buffer_line[SCREEN_WIDTH];
     pixel = s_dummy_frame_buffer_line;
-  } else if (e->use_sgb_border) {
-    pixel = &e->frame_buffer[(y + SGB_SCREEN_TOP) * SGB_SCREEN_WIDTH +
-                             (x + SGB_SCREEN_LEFT)];
   } else {
     pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
   }
@@ -4542,8 +4530,6 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   write_io(e, IO_IE_ADDR, 0x0);
   HDMA.blocks = 0xff;
 
-  e->use_sgb_border = init->use_sgb_border;
-
   /* Set initial DMG/SGB palettes */
   emulator_set_builtin_palette(e, init->builtin_palette);
 
@@ -4598,6 +4584,10 @@ FrameBuffer* emulator_get_frame_buffer(Emulator* e) {
   return &e->frame_buffer;
 }
 
+SgbFrameBuffer* emulator_get_sgb_frame_buffer(Emulator* e) {
+  return &e->sgb_frame_buffer;
+}
+
 AudioBuffer* emulator_get_audio_buffer(Emulator* e) {
   return &e->audio_buffer;
 }
@@ -4640,14 +4630,6 @@ Bool emulator_was_ext_ram_updated(Emulator* e) {
   Bool result = e->state.ext_ram_updated;
   e->state.ext_ram_updated = FALSE;
   return result;
-}
-
-int emulator_get_frame_buffer_width(Emulator* e) {
-  return e->use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
-}
-
-int emulator_get_frame_buffer_height(Emulator* e) {
-  return e->use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
 }
 
 void emulator_init_state_file_data(FileData* file_data) {

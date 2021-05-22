@@ -27,14 +27,12 @@ static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
 Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
-                              int audio_frequency, int audio_frames,
-                              int use_sgb_border) {
+                              int audio_frequency, int audio_frames) {
   s_init.rom.data = rom_data;
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;
   s_init.audio_frames = audio_frames;
   s_init.random_seed = 0xcabba6e5;
-  s_init.use_sgb_border = use_sgb_border;
 
   e = emulator_new(&s_init);
 
@@ -149,6 +147,12 @@ void* get_frame_buffer_ptr(Emulator* e) {
 }
 
 size_t get_frame_buffer_size(Emulator* e) { return sizeof(FrameBuffer); }
+
+void* get_sgb_frame_buffer_ptr(Emulator* e) {
+  return *emulator_get_sgb_frame_buffer(e);
+}
+
+size_t get_sgb_frame_buffer_size(Emulator* e) { return sizeof(SgbFrameBuffer); }
 
 void* get_audio_buffer_ptr(Emulator* e) {
   return emulator_get_audio_buffer(e)->data;

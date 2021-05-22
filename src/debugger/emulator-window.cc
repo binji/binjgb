@@ -19,8 +19,8 @@ void Debugger::EmulatorWindow::Tick() {
   if (!is_open) return;
 
   if (ImGui::Begin(s_emulator_window_name, &is_open)) {
-    int fb_width = emulator_get_frame_buffer_width(d->e);
-    int fb_height = emulator_get_frame_buffer_height(d->e);
+    int fb_width = d->host_init.use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+    int fb_height = d->host_init.use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     HostTexture* fb_texture = host_get_frame_buffer_texture(d->host);
     ImVec2 avail_size = ImGui::GetContentRegionAvail();

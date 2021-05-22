@@ -18,6 +18,8 @@
 "_get_file_data_size",
 "_get_frame_buffer_ptr",
 "_get_frame_buffer_size",
+"_get_sgb_frame_buffer_ptr",
+"_get_sgb_frame_buffer_size",
 "_joypad_delete",
 "_joypad_new",
 "_rewind_append",

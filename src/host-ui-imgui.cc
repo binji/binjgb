@@ -427,7 +427,7 @@ const char* HostUI::get_clipboard_text(void* user_data) {
   return SDL_GetClipboardText();
 }
 
-HostUI* host_ui_new(struct SDL_Window* window, int width, int height) {
+HostUI* host_ui_new(struct SDL_Window* window, Bool use_sgb_border) {
   HostUI* ui = new HostUI(window);
   if (!SUCCESS(ui->init())) {
     delete ui;
@@ -445,7 +445,8 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   ui->event(event);
 }
 
-void host_ui_begin_frame(HostUI* ui, HostTexture* fb_texture) {
+void host_ui_begin_frame(HostUI* ui, HostTexture* fb_texture,
+                         HostTexture* sgb_fb_texture) {
   ui->begin_frame();
 }
 

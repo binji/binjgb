@@ -10,6 +10,12 @@ const RESULT_OK = 0;
 const RESULT_ERROR = 1;
 const SCREEN_WIDTH = 160;
 const SCREEN_HEIGHT = 144;
+const SGB_SCREEN_WIDTH = 256;
+const SGB_SCREEN_HEIGHT = 224;
+const SGB_SCREEN_LEFT = (SGB_SCREEN_WIDTH - SCREEN_WIDTH) >> 1;
+const SGB_SCREEN_RIGHT = (SGB_SCREEN_WIDTH + SCREEN_WIDTH) >> 1;
+const SGB_SCREEN_TOP = (SGB_SCREEN_HEIGHT - SCREEN_HEIGHT) >> 1;
+const SGB_SCREEN_BOTTOM = (SGB_SCREEN_HEIGHT + SCREEN_HEIGHT) >> 1;
 const AUDIO_FRAMES = 4096;
 const AUDIO_LATENCY_SEC = 0.1;
 const MAX_UPDATE_SEC = 5 / 60;
@@ -24,7 +30,6 @@ const REWIND_UPDATE_MS = 16;
 const BUILTIN_PALETTES = 83;  // See builtin-palettes.def.
 const GAMEPAD_POLLING_INTERVAL = 1000 / 60 / 4; // When activated, poll for gamepad input about ~4 times per gameboy frame (~240 times second)
 const GAMEPAD_KEYMAP_STANDARD_STR = "standard"; // Try to use "standard" HTML5 mapping config if available
-const use_sgb_border = false; // XXX
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
@@ -54,6 +59,7 @@ let data = {
   extRamUpdated: false,
   canvas: {
     show: false,
+    useSgbBorder: false,
     scale: 3,
   },
   rewind: {
@@ -88,11 +94,17 @@ let vm = new Vue({
     $('.main').classList.add('ready');
   },
   computed: {
+    canvasWidth: function() {
+      return this.canvas.useSgbBorder ? 256 : 160;
+    },
+    canvasHeight: function() {
+      return this.canvas.useSgbBorder ? 224 : 144;
+    },
     canvasWidthPx: function() {
-      return (160 * this.canvas.scale) + 'px';
+      return (this.canvasWidth * this.canvas.scale) + 'px';
     },
     canvasHeightPx: function() {
-      return (144 * this.canvas.scale) + 'px';
+      return (this.canvasHeight * this.canvas.scale) + 'px';
     },
     rewindTime: function() {
       const zeroPadLeft = (num, width) => ('' + (num | 0)).padStart(width, '0');
@@ -289,7 +301,7 @@ class Emulator {
         .set(new Uint8Array(romBuffer));
     this.e = this.module._emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
-        AUDIO_FRAMES, use_sgb_border);
+        AUDIO_FRAMES);
     if (this.e == 0) {
       throw new Error('Invalid ROM.');
     }
@@ -810,29 +822,46 @@ class Video {
     this.buffer = makeWasmBuffer(
         this.module, this.module._get_frame_buffer_ptr(e),
         this.module._get_frame_buffer_size(e));
+    this.sgbBuffer = makeWasmBuffer(
+        this.module, this.module._get_sgb_frame_buffer_ptr(e),
+        this.module._get_sgb_frame_buffer_size(e));
   }
 
   uploadTexture() {
-    this.renderer.uploadTexture(this.buffer);
+    this.renderer.uploadTextures(this.buffer, this.sgbBuffer);
   }
 
   renderTexture() {
-    this.renderer.renderTexture();
+    this.renderer.renderTextures();
   }
 }
 
 class Canvas2DRenderer {
   constructor(el) {
     this.ctx = el.getContext('2d');
-    this.imageData = this.ctx.createImageData(el.width, el.height);
+    this.imageData = this.ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+    this.sgbImageData =
+        this.ctx.createImageData(SGB_SCREEN_WIDTH, SGB_SCREEN_HEIGHT);
+
+    this.overlayCanvas = document.createElement('canvas');
+    this.overlayCanvas.width = SGB_SCREEN_WIDTH;
+    this.overlayCanvas.height = SGB_SCREEN_HEIGHT;
+    this.overlayCtx = this.overlayCanvas.getContext('2d');
   }
 
-  renderTexture() {
-    this.ctx.putImageData(this.imageData, 0, 0);
-  }
-
-  uploadTexture(buffer) {
+  uploadTextures(buffer, sgbBuffer) {
     this.imageData.data.set(buffer);
+    this.sgbImageData.data.set(sgbBuffer);
+  }
+
+  renderTextures() {
+    if (vm.canvas.useSgbBorder) {
+      this.ctx.putImageData(this.imageData, SGB_SCREEN_LEFT, SGB_SCREEN_TOP);
+      this.overlayCtx.putImageData(this.sgbImageData, 0, 0);
+      this.ctx.drawImage(this.overlayCanvas, 0, 0);
+    } else {
+      this.ctx.putImageData(this.imageData, 0, 0);
+    }
   }
 }
 
@@ -842,24 +871,6 @@ class WebGLRenderer {
     if (gl === null) {
       throw new Error('unable to create webgl context');
     }
-
-    const w = SCREEN_WIDTH / 256;
-    const h = SCREEN_HEIGHT / 256;
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -1, -1,  0, h,
-      +1, -1,  w, h,
-      -1, +1,  0, 0,
-      +1, +1,  w, 0,
-    ]), gl.STATIC_DRAW);
-
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(
-        gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
 
     function compileShader(type, source) {
       const shader = gl.createShader(type);
@@ -895,27 +906,95 @@ class WebGLRenderer {
     }
     gl.useProgram(program);
 
-    const aPos = gl.getAttribLocation(program, 'aPos');
-    const aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
-    const uSampler = gl.getUniformLocation(program, 'uSampler');
+    this.aPos = gl.getAttribLocation(program, 'aPos');
+    this.aTexCoord = gl.getAttribLocation(program, 'aTexCoord');
+    this.uSampler = gl.getUniformLocation(program, 'uSampler');
 
-    gl.enableVertexAttribArray(aPos);
-    gl.enableVertexAttribArray(aTexCoord);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, gl.FALSE, 16, 0);
-    gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, gl.FALSE, 16, 8);
-    gl.uniform1i(uSampler, 0);
+    this.fbTexture = this.createTexture();
+    this.sgbFbTexture = this.createTexture();
+
+    const invLerpClipSpace = (x, max) => 2 * (x / max) - 1;
+    const l = invLerpClipSpace(SGB_SCREEN_LEFT, SGB_SCREEN_WIDTH);
+    const r = invLerpClipSpace(SGB_SCREEN_RIGHT, SGB_SCREEN_WIDTH);
+    const t = -invLerpClipSpace(SGB_SCREEN_TOP, SGB_SCREEN_HEIGHT);
+    const b = -invLerpClipSpace(SGB_SCREEN_BOTTOM, SGB_SCREEN_HEIGHT);
+    const w = SCREEN_WIDTH / 256, sw = SGB_SCREEN_WIDTH / 256;
+    const h = SCREEN_HEIGHT / 256, sh = SGB_SCREEN_HEIGHT / 256;
+
+    const verts = new Float32Array([
+      // fb only
+      -1, -1,  0, h,
+      +1, -1,  w, h,
+      -1, +1,  0, 0,
+      +1, +1,  w, 0,
+
+      // sgb fb
+      l, b,  0, h,
+      r, b,  w, h,
+      l, t,  0, 0,
+      r, t,  w, 0,
+
+      // sgb border
+      -1, -1,  0,  sh,
+      +1, -1,  sw, sh,
+      -1, +1,  0,  0,
+      +1, +1,  sw, 0,
+    ]);
+
+    const buffer = gl.createBuffer();
+    this.gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(this.aPos);
+    gl.enableVertexAttribArray(this.aTexCoord);
+    gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, gl.FALSE, 16, 0);
+    gl.vertexAttribPointer(this.aTexCoord, 2, gl.FLOAT, gl.FALSE, 16, 8);
+    gl.uniform1i(this.uSampler, 0);
   }
 
-  renderTexture() {
-    this.gl.clearColor(0.5, 0.5, 0.5, 1.0);
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-    this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+  createTexture() {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+        gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    return texture;
   }
 
-  uploadTexture(buffer) {
-    this.gl.texSubImage2D(
-        this.gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, this.gl.RGBA,
-        this.gl.UNSIGNED_BYTE, buffer);
+  uploadTextures(buffer, sgbBuffer) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.fbTexture);
+    gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, gl.RGBA,
+        gl.UNSIGNED_BYTE, buffer);
+
+    gl.bindTexture(gl.TEXTURE_2D, this.sgbFbTexture);
+    gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, 0, 0, SGB_SCREEN_WIDTH, SGB_SCREEN_HEIGHT, gl.RGBA,
+        gl.UNSIGNED_BYTE, sgbBuffer);
+  }
+
+  renderTextures() {
+    const gl = this.gl;
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.clearColor(0.5, 0.5, 0.5, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    if (vm.canvas.useSgbBorder) {
+      gl.bindTexture(gl.TEXTURE_2D, this.fbTexture);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 4, 4);
+
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindTexture(gl.TEXTURE_2D, this.sgbFbTexture);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 8, 4);
+      gl.disable(gl.BLEND);
+    } else {
+      gl.bindTexture(gl.TEXTURE_2D, this.fbTexture);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
   }
 }
 

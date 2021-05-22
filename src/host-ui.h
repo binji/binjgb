@@ -19,10 +19,11 @@ struct HostTexture;
 extern "C" {
 #endif
 
-struct HostUI* host_ui_new(struct SDL_Window*, int width, int height);
+struct HostUI* host_ui_new(struct SDL_Window*, Bool use_sgb_border);
 void host_ui_delete(struct HostUI*);
 void host_ui_event(struct HostUI*, union SDL_Event*);
-void host_ui_begin_frame(struct HostUI*, struct HostTexture* fb_texture);
+void host_ui_begin_frame(struct HostUI*, struct HostTexture* fb_texture,
+                         struct HostTexture* sgb_fb_texture);
 void host_ui_end_frame(struct HostUI*);
 intptr_t host_ui_get_frame_buffer_texture(struct HostUI*);
 void host_ui_set_palette(struct HostUI*, RGBA palette[4]);

@@ -55,7 +55,8 @@ typedef struct JoypadCallbackInfo {
   void* user_data;
 } JoypadCallbackInfo;
 
-typedef RGBA FrameBuffer[SGB_SCREEN_WIDTH * SGB_SCREEN_HEIGHT];
+typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
+typedef RGBA SgbFrameBuffer[SGB_SCREEN_WIDTH * SGB_SCREEN_HEIGHT];
 
 typedef enum Color {
   COLOR_WHITE = 0,
@@ -151,7 +152,6 @@ typedef struct EmulatorInit {
   u32 random_seed;
   u32 builtin_palette;
   Bool force_dmg;
-  Bool use_sgb_border;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {
@@ -182,6 +182,7 @@ JoypadCallbackInfo emulator_get_joypad_callback(Emulator*);
 void emulator_set_config(Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(Emulator*);
 FrameBuffer* emulator_get_frame_buffer(Emulator*);
+SgbFrameBuffer* emulator_get_sgb_frame_buffer(Emulator*);
 AudioBuffer* emulator_get_audio_buffer(Emulator*);
 Ticks emulator_get_ticks(Emulator*);
 u32 emulator_get_ppu_frame(Emulator*);
@@ -194,8 +195,6 @@ void emulator_ticks_to_time(Ticks, u32* day, u32* hr, u32* min, u32* sec,
                             u32* ms);
 
 Bool emulator_was_ext_ram_updated(Emulator*);
-int emulator_get_frame_buffer_width(Emulator*);
-int emulator_get_frame_buffer_height(Emulator*);
 
 void emulator_init_state_file_data(FileData*);
 void emulator_init_ext_ram_file_data(Emulator*, FileData*);

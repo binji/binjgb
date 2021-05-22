@@ -136,7 +136,6 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   emulator_init.random_seed = random_seed;
   emulator_init.builtin_palette = builtin_palette;
   emulator_init.force_dmg = force_dmg ? TRUE : FALSE;
-  emulator_init.use_sgb_border = use_sgb_border ? TRUE : FALSE;
   e = emulator_new(&emulator_init);
   if (e == nullptr) {
     return false;
@@ -164,6 +163,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   // TODO: make these configurable?
   host_init.rewind.frames_per_base_state = 45;
   host_init.rewind.buffer_capacity = MEGABYTES(32);
+  host_init.use_sgb_border = use_sgb_border ? TRUE : FALSE;
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;

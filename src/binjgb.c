@@ -429,7 +429,6 @@ int main(int argc, char** argv) {
   emulator_init.random_seed = s_random_seed;
   emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
-  emulator_init.use_sgb_border = s_use_sgb_border;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 
@@ -444,6 +443,7 @@ int main(int argc, char** argv) {
   host_init.rewind.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
   host_init.rewind.buffer_capacity = REWIND_BUFFER_CAPACITY;
   host_init.joypad_filename = s_read_joypad_filename;
+  host_init.use_sgb_border = s_use_sgb_border;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
