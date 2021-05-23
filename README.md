@@ -8,6 +8,7 @@ A simple GB/GBC emulator.
 
 * [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
 * Hacky-but-passable **CGB support**!
+* Mostly-there **Super GB support**!
 * Cycle accurate, passes many timing tests (see below)
 * Supports MBC1, MBC1M, MMM01, MBC2, MBC3, MBC5 and HuC1
 * Save/load battery backup
