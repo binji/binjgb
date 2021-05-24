@@ -2282,36 +2282,16 @@ static void do_sgb(Emulator* e) {
   }
 
   if (do_command) {
-    int start = 0;
-    int end = 16;
     if (SGB.current_packet == 0) {
-      static const char* s_names[0x20] = {
-          "PAL01",    "PAL23",    "PAL03",   "PAL12",    "ATTR_BLK", "ATTR_LIN",
-          "ATTR_DIV", "ATTR_CHR", "SOUND",   "SOU_TRN",  "PAL_SET",  "PAL_TRN",
-          "ATRC_EN",  "TEST_EN",  "ICON_EN", "DATA_SND", "DATA_TRN", "MLT_REQ",
-          "JUMP",     "CHR_TRN",  "PCT_TRN", "ATTR_TRN", "ATTR_SET", "MASK_EN",
-          "OBJ_TRN",  "??",       "??",      "??",       "??",       "??",
-          "??",       "??",
-      };
-      int code = SGB.data[0] >> 3;
       SGB.packet_count = SGB.data[0] & 7;
-      start = 1;
-      printf(">>> got SGB start packet:$%02x (%s) len=%u  ", code,
-             s_names[code & 0x1f], SGB.packet_count);
-    } else {
-      printf(">>> got SGB packet %u:  ", SGB.current_packet);
     }
-    for (int i = start; i < 16; ++i) {
-      printf(" $%02x", SGB.data[i]);
-    }
-    printf("\n");
 
     if (SGB.current_packet == SGB.packet_count - 1) {
       // Assume we can just read the data directly from VRAM. Cheat by reading
       // the upper-left tile and assuming that the rest of the data is in
       // order.
       int code = SGB.data[0] >> 3;
-      u8* xfer_src;
+      u8* xfer_src = NULL;
       if (code == 0x0b || code == 0x13 || code == 0x14 || code == 0x15) {
         u16 map_base = map_select_to_address(LCDC.bg_tile_map_select);
         u16 tile_index = VRAM.data[map_base];
