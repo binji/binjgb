@@ -41,23 +41,50 @@ static const char* s_rom_filename;
 static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
+static Bool s_use_sgb_border;
 
 
 Result write_frame_ppm(Emulator* e, const char* filename) {
   FILE* f = fopen(filename, "wb");
+  int width = s_use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+  int height = s_use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
-  CHECK_MSG(fputs("P3\n160 144\n255\n", f) >= 0, "fputs failed.\n");
-  u8 x, y;
+  CHECK_MSG(fprintf(f, "P3\n%u %u\n255\n", width, height) >= 0,
+            "fputs failed.\n");
+  int x, y;
   RGBA* data = *emulator_get_frame_buffer(e);
-  for (y = 0; y < SCREEN_HEIGHT; ++y) {
-    for (x = 0; x < SCREEN_WIDTH; ++x) {
-      RGBA pixel = *data++;
-      u8 b = (pixel >> 16) & 0xff;
-      u8 g = (pixel >> 8) & 0xff;
-      u8 r = (pixel >> 0) & 0xff;
-      CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0, "fprintf failed.\n");
+  RGBA* sgb_data = *emulator_get_sgb_frame_buffer(e);
+  if (s_use_sgb_border) {
+    for (y = 0; y < height; ++y) {
+      for (x = 0; x < width; ++x) {
+        RGBA pixel = *sgb_data++;
+        if (x >= SGB_SCREEN_LEFT && x < SGB_SCREEN_LEFT + SCREEN_WIDTH &&
+            y >= SGB_SCREEN_TOP && y < SGB_SCREEN_TOP + SCREEN_HEIGHT) {
+          if (pixel == 0) {
+            pixel = *data;
+          }
+          data++;
+        }
+        u8 b = (pixel >> 16) & 0xff;
+        u8 g = (pixel >> 8) & 0xff;
+        u8 r = (pixel >> 0) & 0xff;
+        CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0,
+                  "fprintf failed.\n");
+      }
+      CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
     }
-    CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
+  } else {
+    for (y = 0; y < height; ++y) {
+      for (x = 0; x < width; ++x) {
+        RGBA pixel = *data++;
+        u8 b = (pixel >> 16) & 0xff;
+        u8 g = (pixel >> 8) & 0xff;
+        u8 r = (pixel >> 0) & 0xff;
+        CHECK_MSG(fprintf(f, "%3u %3u %3u ", r, g, b) >= 0,
+                  "fprintf failed.\n");
+      }
+      CHECK_MSG(fputs("\n", f) >= 0, "fputs failed.\n");
+    }
   }
   fclose(f);
   return OK;
@@ -84,7 +111,8 @@ void usage(int argc, char** argv) {
 #endif
       "  -s,--seed SEED       random seed used for initializing RAM\n"
       "  -P,--palette PAL     use a builtin palette for DMG\n"
-      "     --force-dmg       force running as a DMG (original gameboy)\n";
+      "     --force-dmg       force running as a DMG (original gameboy)\n"
+      "     --sgb-border         draw the super gameboy border\n";
 
   PRINT_ERROR(usage, argv[0], DEFAULT_FRAMES);
 
@@ -124,6 +152,7 @@ void parse_options(int argc, char**argv) {
     {'s', "seed", 1},
     {'P', "palette", 1},
     {0, "force-dmg", 0},
+    {0, "sgb-border", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -226,6 +255,8 @@ void parse_options(int argc, char**argv) {
 #endif
             } else if (strcmp(result.option->long_name, "force-dmg") == 0) {
               s_force_dmg = TRUE;
+            } else if (strcmp(result.option->long_name, "sgb-border") == 0) {
+              s_use_sgb_border = TRUE;
             } else {
               abort();
             }

@@ -43,6 +43,12 @@ A simple GB/GBC emulator.
 ![Toki Tori](/images/toki.png)
 ![Wario 3](/images/wario3.png)
 
+## SGB Screenshots
+
+![Donkey Kong](/images/dk-sgb.png)
+![Kirby's Dreamland 2](/images/kirby2-sgb.png)
+![Mole Mania](/images/mole-sgb.png)
+
 ## Debugger Screenshots
 
 ![Debugger](/images/debugger.png)
