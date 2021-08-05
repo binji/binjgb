@@ -3324,6 +3324,14 @@ static void ppu_mode3_synchronize(Emulator* e) {
         pixel[i] = pal->color[palette_index];
         bg_is_zero[i] = palette_index == 0;
         bg_priority[i] = priority;
+      } else {
+        if (IS_CGB) {
+          pixel[i] = PPU.bgcp.palettes[0].color[0];
+        } else if (IS_SGB) {
+          pixel[i] = e->sgb_pal[0].color[0];
+        } else {
+          pixel[i] = e->color_to_rgba[0].color[0];
+        }
       }
     }
 
