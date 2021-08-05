@@ -312,13 +312,12 @@ void print_ops(void) {
   ZERO_MEMORY(pairs);
 
   u32 i;
-  for (i = 0; i < 256;) {
-    pairs[i].value = i;
-    pairs[i].count = opcode_count[i];
-    ++i;
-    pairs[i].value = 0xcb00 | i;
-    pairs[i].count = cb_opcode_count[i];
-    ++i;
+  for (i = 0; i < 512; i += 2) {
+    u8 op = i / 2;
+    pairs[i].value = op;
+    pairs[i].count = opcode_count[op];
+    pairs[i + 1].value = 0xcb00 | op;
+    pairs[i + 1].count = cb_opcode_count[op];
   }
 
   qsort(pairs, ARRAY_SIZE(pairs), sizeof(pairs[0]), compare_pair);
@@ -333,6 +332,7 @@ void print_ops(void) {
     if (pairs[i].count > 0) {
       u16 opcode = pairs[i].value;
       if (i < s_print_ops_limit) {
+        if (opcode == 0xcb) continue;
         if (opcode < 0x100) {
           printf("  %02x", opcode);
         } else {
