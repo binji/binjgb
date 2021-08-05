@@ -4618,7 +4618,8 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
   IS_CGB = !init->force_dmg && (e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
                                 e->cart_info->cgb_flag == CGB_FLAG_REQUIRED);
-  IS_SGB = !IS_CGB && e->cart_info->sgb_flag == SGB_FLAG_SUPPORTED;
+  IS_SGB = !init->force_dmg && !IS_CGB &&
+           e->cart_info->sgb_flag == SGB_FLAG_SUPPORTED;
   set_af_reg(e, 0xb0);
   REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
