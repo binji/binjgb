@@ -1316,7 +1316,11 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: { /* 2000-3fff */
-      set_rom_bank(e, 1, value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e));
+      u16 rom1_bank = value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+      if (rom1_bank == 0) {
+        rom1_bank++;
+      }
+      set_rom_bank(e, 1, rom1_bank);
       break;
     }
     case 2: /* 4000-5fff */
