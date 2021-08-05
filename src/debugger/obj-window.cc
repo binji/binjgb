@@ -57,6 +57,8 @@ void Debugger::ObjWindow::Tick() {
                                       palette_rgba, obj.xflip, obj.yflip);
 
           if (tile_index >= 0) {
+            d->highlight_tile = true;
+            d->highlight_tile_index = tile_index;
             d->highlight_obj_index = obj_index = button_index;
           }
           ImGui::InvisibleButton(label, button_size);

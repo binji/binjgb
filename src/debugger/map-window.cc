@@ -84,6 +84,8 @@ void Debugger::MapWindow::Tick() {
         }
         if (d->DrawTile(draw_list, tile_index, ul_pos, scale, palette_rgba,
                         xflip, yflip)) {
+          d->highlight_tile = true;
+          d->highlight_tile_index = tile_index;
           hovering_map_index = map_index;
         }
       }
