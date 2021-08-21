@@ -168,6 +168,64 @@ Keys:
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
 
+## INI file
+
+Binjgb tries to read from `binjgb.ini` on startup for configuration. The
+following keys are supported:
+
+```
+# Load this file automatically on startup
+autoload=filename.gb
+
+# Set the audio frequency in Hz
+audio-frequency=44100
+
+# Set the number of audio frames per buffer
+# lower=better latency, more pops/clicks
+# higher=worse latency, fewer pops/clicks
+audio-frames=2048
+
+# Set to the index of a builtin palette
+# (valid numbers are 0..82)
+builtin-palette=0
+
+# Force the emulator to run in DMG (original gameboy) mode.
+# 0=Don't force DMG
+# 1=Force DMG
+force-dmg=0
+
+# The number of video frames to display before storing a full dump of
+# the emulator state in the rewind buffer. Probably best to leave this
+# alone
+rewind-frames-per-base-state=45
+
+# The number of megabytes to allocate to the rewind buffer.
+# lower=less memory usage, less rewind time
+# higher=more memory usage, more rewind time
+rewind-buffer-capacity-megabytes=32
+
+# The speed at which to rewind the game, as a scale.
+# 1=rewind at 1x
+# 2=rewind at 2x
+# etc.
+rewind-scale=1.5
+
+# How much to scale the emulator window at startup.
+render-scale=4
+
+# What to set the random seed to when initializing memory. Using 0
+# disables memory randomization.
+random-seed=0
+
+# Whether to display the SGB border or not.
+# 0=Don't display SGB border
+# 1=Display SGB border, even if it doesn't exist.
+sgb-border=0
+```
+
+The INI file is loaded before parsing the command line flags, so you can use
+the command line to override the values in the INI file.
+
 ## Running tests
 
 Run `scripts/build_tests.py` to download and build the necessary testsuites.

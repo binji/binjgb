@@ -26,13 +26,6 @@
 #define STATUS_TEXT_RGBA MAKE_RGBA(255, 0, 0, 255)
 #define STATUS_TEXT_TIMEOUT 120 /* Frames */
 
-// TODO: make these configurable?
-#define AUDIO_FREQUENCY 44100
-#define AUDIO_FRAMES 2048 /* ~46ms of latency at 44.1kHz */
-#define REWIND_FRAMES_PER_BASE_STATE 45
-#define REWIND_BUFFER_CAPACITY MEGABYTES(32)
-#define REWIND_CYCLES_PER_FRAME (70224 * 3 / 2) /* Rewind at 1.5x */
-
 typedef enum Layer {
   LAYER_BG,
   LAYER_WINDOW,
@@ -68,6 +61,12 @@ static u32 s_builtin_palette;
 static Bool s_force_dmg;
 static Bool s_use_sgb_border;
 static u32 s_render_scale = 4;
+
+static u32 s_audio_frequency = 44100;
+static u32 s_audio_frames = 2048; /* ~46ms of latency at 44.1kHz */
+static u32 s_rewind_frames_per_base_state = 45;
+static u32 s_rewind_buffer_capacity_megabytes = 32;
+static f32 s_rewind_scale = 1.5f;
 
 static Overlay s_overlay;
 static StatusText s_status_text;
@@ -413,8 +412,67 @@ error:
   exit(1);
 }
 
+void read_ini_file(void) {
+  FILE* file = fopen("binjgb.ini", "r");
+  if (!file) {
+    return;
+  }
+  while (1) {
+    char buffer[1024], *value, *equals, *newline;
+    if (!fgets(buffer, sizeof(buffer), file)) {
+      break;
+    }
+
+    if (buffer[0] == '#' || buffer[0] == '\n') {
+      continue;
+    }
+
+    equals = strchr(buffer, '=');
+    if (!equals) {
+      fprintf(stderr, "warning: bad ini line: %s\n", buffer);
+      continue;
+    }
+    *equals = 0;
+    value = equals + 1;
+
+    newline = strchr(value, '\n');
+    if (newline) {
+      *newline = 0;
+    }
+
+    if (strcmp(buffer, "autoload") == 0) {
+      s_rom_filename = xstrdup(value);
+    } else if (strcmp(buffer, "audio-frequency") == 0) {
+      s_audio_frequency = atoi(value);
+    } else if (strcmp(buffer, "audio-frames") == 0) {
+      s_audio_frames = atoi(value);
+    } else if (strcmp(buffer, "builtin-palette") == 0) {
+      s_builtin_palette = atoi(value);
+    } else if (strcmp(buffer, "force-dmg") == 0) {
+      s_force_dmg = atoi(value);
+    } else if (strcmp(buffer, "rewind-frames-per-base-state") == 0) {
+      s_rewind_frames_per_base_state = atoi(value);
+    } else if (strcmp(buffer, "rewind-buffer-capacity-megabytes") == 0) {
+      s_rewind_buffer_capacity_megabytes = atoi(value);
+    } else if (strcmp(buffer, "rewind-scale") == 0) {
+      s_rewind_scale = atof(value);
+    } else if (strcmp(buffer, "render-scale") == 0) {
+      s_render_scale = atoi(value);
+    } else if (strcmp(buffer, "random-seed") == 0) {
+      s_random_seed = atoi(value);
+    } else if (strcmp(buffer, "sgb-border") == 0) {
+      s_use_sgb_border = atoi(value);
+    } else {
+      fprintf(stderr, "warning: unknown ini key: %s\n", buffer);
+    }
+  }
+  fclose(file);
+}
+
 int main(int argc, char** argv) {
   int result = 1;
+
+  read_ini_file();
 
   parse_arguments(argc, argv);
 
@@ -424,8 +482,8 @@ int main(int argc, char** argv) {
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);
   emulator_init.rom = rom;
-  emulator_init.audio_frequency = AUDIO_FREQUENCY;
-  emulator_init.audio_frames = AUDIO_FRAMES;
+  emulator_init.audio_frequency = s_audio_frequency;
+  emulator_init.audio_frames = s_audio_frames;
   emulator_init.random_seed = s_random_seed;
   emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
@@ -437,11 +495,11 @@ int main(int argc, char** argv) {
   host_init.hooks.key_down = key_down;
   host_init.hooks.key_up = key_up;
   host_init.render_scale = s_render_scale;
-  host_init.audio_frequency = AUDIO_FREQUENCY;
-  host_init.audio_frames = AUDIO_FRAMES;
+  host_init.audio_frequency = s_audio_frequency;
+  host_init.audio_frames = s_audio_frames;
   host_init.audio_volume = s_audio_volume;
-  host_init.rewind.frames_per_base_state = REWIND_FRAMES_PER_BASE_STATE;
-  host_init.rewind.buffer_capacity = REWIND_BUFFER_CAPACITY;
+  host_init.rewind.frames_per_base_state = s_rewind_frames_per_base_state;
+  host_init.rewind.buffer_capacity = s_rewind_buffer_capacity_megabytes * MEGABYTES(1);
   host_init.joypad_filename = s_read_joypad_filename;
   host_init.use_sgb_border = s_use_sgb_border;
   host = host_new(&host_init, e);
@@ -458,7 +516,7 @@ int main(int argc, char** argv) {
   f64 refresh_ms = host_get_monitor_refresh_ms(host);
   while (s_running && host_poll_events(host)) {
     if (s_rewinding) {
-      rewind_by(REWIND_CYCLES_PER_FRAME);
+      rewind_by((Ticks)(PPU_FRAME_TICKS * s_rewind_scale));
     } else if (!s_paused) {
       EmulatorEvent event = host_run_ms(host, refresh_ms);
       if (event & EMULATOR_EVENT_INVALID_OPCODE) {

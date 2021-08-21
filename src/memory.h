@@ -8,6 +8,7 @@
 #define BINJGB_MEMORY_H_
 
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,17 +21,20 @@ extern "C" {
 #define xmalloc(size) xmalloc_(__FILE__, __LINE__, size)
 #define xfree(p) xfree_(__FILE__, __LINE__, p)
 #define xcalloc(count, size) xcalloc_(__FILE__, __LINE__, count, size)
+#define xstrdup(s) xstrdup_(__FILE__, __LINE__, s)
 
 /* Use these instead to make it easier to track memory usage. */
 void* xmalloc_(const char* file, int line, size_t);
 void xfree_(const char* file, int line, void*);
 void* xcalloc_(const char* file, int line, size_t, size_t);
+char* xstrdup_(const char* file, int line, const char*);
 
 #else
 
 #define xmalloc malloc
 #define xfree free
 #define xcalloc calloc
+#define xstrdup strdup
 
 #endif
 
