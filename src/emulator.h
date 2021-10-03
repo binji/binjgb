@@ -145,6 +145,12 @@ typedef struct AudioBuffer {
   u8* position;
 } AudioBuffer;
 
+typedef enum CgbColorCurve {
+  CGB_COLOR_CURVE_NONE,
+  CGB_COLOR_CURVE_SAMEBOY_EMULATE_HARDWARE,
+  CGB_COLOR_CURVE_GAMBATTE,
+} CgbColorCurve;
+
 typedef struct EmulatorInit {
   FileData rom;
   int audio_frequency;
@@ -152,6 +158,7 @@ typedef struct EmulatorInit {
   u32 random_seed;
   u32 builtin_palette;
   Bool force_dmg;
+  CgbColorCurve cgb_color_curve;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {

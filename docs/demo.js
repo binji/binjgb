@@ -72,7 +72,10 @@ let data = {
     list: []
   },
   volume: 0.5,
-  pal: 0
+  pal: 0,
+  cgbColorCurve: 2, // Gambatte/Gameboy Online
+  colorOptions: false,
+  needsReload: false,
 };
 
 let vm = new Vue({
@@ -160,6 +163,9 @@ let vm = new Vue({
       this.pal = pal;
       if (emulator) { emulator.setBuiltinPalette(this.pal); }
     },
+    setCgbColorCurve: function() {
+      this.needsReload = true;
+    },
     updateTicks: function() {
       this.ticks = emulator.ticks;
     },
@@ -185,6 +191,7 @@ let vm = new Vue({
       this.canvas.show = true;
       this.files.show = false;
       this.loadedFile = file;
+      this.needsReload = false;
       Emulator.start(await binjgbPromise, romBuffer, extRamBuffer);
       emulator.setBuiltinPalette(this.pal);
     },
@@ -301,7 +308,7 @@ class Emulator {
         .set(new Uint8Array(romBuffer));
     this.e = this.module._emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
-        AUDIO_FRAMES);
+        AUDIO_FRAMES, vm.cgbColorCurve);
     if (this.e == 0) {
       throw new Error('Invalid ROM.');
     }

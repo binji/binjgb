@@ -60,6 +60,7 @@ static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
 static Bool s_use_sgb_border;
+static u32 s_cgb_color_curve;
 static u32 s_render_scale = 4;
 
 static u32 s_audio_frequency = 44100;
@@ -312,6 +313,10 @@ static void usage(int argc, char** argv) {
       "  -s,--seed SEED          random seed used for initializing RAM\n"
       "  -P,--palette PAL        use a builtin palette for DMG\n"
       "  -x,--scale SCALE        render scale\n"
+      "  -C,--cgb-color COLOR    cgb color curve to use\n"
+      "                            0: none\n"
+      "                            1: Sameboy (Emulate Hardware)\n"
+      "                            2: Gambatte/Gameboy Online\n"
       "     --force-dmg          force running as a DMG (original gameboy)\n"
       "     --sgb-border         draw the super gameboy border\n",
       argv[0]);
@@ -325,6 +330,7 @@ void parse_arguments(int argc, char** argv) {
     {'s', "seed", 1},
     {'P', "palette", 1},
     {'x', "scale", 1},
+    {'C', "cgb-color", 1},
     {0, "force-dmg", 0},
     {0, "sgb-border", 0},
   };
@@ -374,6 +380,10 @@ void parse_arguments(int argc, char** argv) {
 
           case 'x':
             s_render_scale = atoi(result.value);
+            break;
+
+          case 'C':
+            s_cgb_color_curve = atoi(result.value);
             break;
 
           default:
@@ -450,6 +460,8 @@ void read_ini_file(void) {
       s_builtin_palette = atoi(value);
     } else if (strcmp(buffer, "force-dmg") == 0) {
       s_force_dmg = atoi(value);
+    } else if (strcmp(buffer, "cgb-color") == 0) {
+      s_cgb_color_curve = atoi(value);
     } else if (strcmp(buffer, "rewind-frames-per-base-state") == 0) {
       s_rewind_frames_per_base_state = atoi(value);
     } else if (strcmp(buffer, "rewind-buffer-capacity-megabytes") == 0) {
@@ -487,6 +499,7 @@ int main(int argc, char** argv) {
   emulator_init.random_seed = s_random_seed;
   emulator_init.builtin_palette = s_builtin_palette;
   emulator_init.force_dmg = s_force_dmg;
+  emulator_init.cgb_color_curve = s_cgb_color_curve;
   e = emulator_new(&emulator_init);
   CHECK(e != NULL);
 

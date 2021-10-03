@@ -27,12 +27,14 @@ static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
 Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
-                              int audio_frequency, int audio_frames) {
+                              int audio_frequency, int audio_frames,
+                              CgbColorCurve cgb_color_curve) {
   s_init.rom.data = rom_data;
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;
   s_init.audio_frames = audio_frames;
   s_init.random_seed = 0xcabba6e5;
+  s_init.cgb_color_curve = cgb_color_curve;
 
   e = emulator_new(&s_init);
 

@@ -32,7 +32,8 @@ class Debugger {
 
   bool Init(const char* filename, int audio_frequency, int audio_frames,
             int font_scale, bool paused_at_start, u32 random_seed,
-            u32 builtin_palette, bool force_dmg, bool use_sgb_border);
+            u32 builtin_palette, bool force_dmg, bool use_sgb_border,
+            CgbColorCurve cgb_color_curve);
   void Run();
 
  private:

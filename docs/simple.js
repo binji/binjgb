@@ -22,6 +22,7 @@ const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 const REWIND_FACTOR = 1.5;
 const REWIND_UPDATE_MS = 16;
 const BUILTIN_PALETTES = 83;  // See builtin-palettes.def.
+const CGB_COLOR_CURVE = 2; // Gambatte/Gameboy Online
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
@@ -113,7 +114,7 @@ class Emulator {
         .set(new Uint8Array(romBuffer));
     this.e = this.module._emulator_new_simple(
         this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
-        AUDIO_FRAMES);
+        AUDIO_FRAMES, CGB_COLOR_CURVE);
     if (this.e == 0) {
       throw new Error('Invalid ROM.');
     }

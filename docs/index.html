@@ -229,24 +229,41 @@
               v-show="loaded"
               @click="toggleFullscreen">fullscreen
           </button>
-          <span v-if="loaded">pal:{{pal}}</span>
-          <button
-            v-show="loaded" @click="palDown">-</button><button
-            v-show="loaded" @click="palUp">+</button>
           <span v-if="loaded">
             vol:<input id="volume" type="range" min="0" max="1" step="0.01"
                   v-model:value="volume">
           </span>
-          <input id="useSgbBorder" v-if="loaded" type="checkbox"
-            v-model:checked="canvas.useSgbBorder"></input>
-          <label v-if="loaded" for="useSgbBorder">SGB border</label>
           <button
               v-show="loaded"
               v-bind:disabled="files.show"
               @click="togglePause">{{pauseLabel}}</button>
+          <input id="colorOptions" v-if="loaded" type="checkbox"
+            v-model:checked="colorOptions"></input>
+          <label v-if="loaded" for="colorOptions">color options...</label>
         </div>
         <div class="right">
           <span>{{fps.toFixed(1)}}</span> FPS
+        </div>
+      </div>
+      <div class="bar" v-if="colorOptions">
+        <div class="left">
+          <span v-if="loaded">dmg pal:{{pal}}</span>
+          <button
+            v-show="loaded" @click="palDown">-</button><button
+            v-show="loaded" @click="palUp">+</button>
+          <span v-if="loaded">cgb colors:</span>
+          <select
+              v-if="loaded"
+              v-model="cgbColorCurve"
+              @change="setCgbColorCurve">
+            <option value="0">Raw</option>
+            <option value="1" selected>Sameboy</option>
+            <option value="2">Gambatte</option>
+          </select>
+          <input id="useSgbBorder" v-if="loaded" type="checkbox"
+            v-model:checked="canvas.useSgbBorder"></input>
+          <label v-if="loaded" for="useSgbBorder">SGB border</label>
+          <label v-if="needsReload">(reload game for updated colors)</label>
         </div>
       </div>
       <div v-if="loaded && paused">

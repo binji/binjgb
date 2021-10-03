@@ -706,6 +706,7 @@ struct Emulator {
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
   PaletteRGBA sgb_pal[4];
+  CgbColorCurve cgb_color_curve;
 };
 
 
@@ -2136,34 +2137,51 @@ static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
   }
 }
 
-static RGBA unpack_cgb_color(u16 color) {
-  // Using Sameboy's color curves, see
-  // https://github.com/LIJI32/SameBoy/blob/345e51647f2a7ce1ea39f21497f5a6dc75a587c8/Core/display.c#L239
-  static const u8 curve[] = {
-      0,   6,   12,  20,  28,  36,  45,  56,  66,  76,  88,
-      100, 113, 125, 137, 149, 161, 172, 182, 192, 202, 210,
-      218, 225, 232, 238, 243, 247, 250, 252, 254, 255,
-  };
-  u8 r = curve[UNPACK(color, XCPD_RED_INTENSITY)];
-  u8 g = curve[UNPACK(color, XCPD_GREEN_INTENSITY)];
-  u8 b = curve[UNPACK(color, XCPD_BLUE_INTENSITY)];
-  g = (g * 3 + b) / 4;
+static RGBA unpack_cgb_color(Emulator* e, u16 color) {
+  u8 r = UNPACK(color, XCPD_RED_INTENSITY);
+  u8 g = UNPACK(color, XCPD_GREEN_INTENSITY);
+  u8 b = UNPACK(color, XCPD_BLUE_INTENSITY);
 
-  return MAKE_RGBA(r, g, b, 255);
+  switch (e->cgb_color_curve) {
+    default:
+    case CGB_COLOR_CURVE_NONE:
+      return MAKE_RGBA(r << 3, g << 3, b << 3, 255);
+
+    case CGB_COLOR_CURVE_SAMEBOY_EMULATE_HARDWARE: {
+      // Using Sameboy's color curves, see
+      // https://github.com/LIJI32/SameBoy/blob/345e51647f2a7ce1ea39f21497f5a6dc75a587c8/Core/display.c#L239
+      static const u8 curve[] = {
+          0,   6,   12,  20,  28,  36,  45,  56,  66,  76,  88,
+          100, 113, 125, 137, 149, 161, 172, 182, 192, 202, 210,
+          218, 225, 232, 238, 243, 247, 250, 252, 254, 255,
+      };
+      r = curve[r];
+      g = curve[g];
+      b = curve[b];
+      g = (g * 3 + b) / 4;
+      return MAKE_RGBA(r, g, b, 255);
+    }
+
+    case CGB_COLOR_CURVE_GAMBATTE:
+      // Using gambatte's color curves, according to Gameboy Online, see
+      // https://github.com/taisel/GameBoy-Online/blob/47f9f638a8a9445aaa75050f634e437baa34aae0/js/GameBoyCore.js#L6453
+      return MAKE_RGBA((r * 13 + g * 2 + b) >> 1, (g * 3 + b) << 1,
+                       (r * 3 + g * 2 + b * 11) >> 1, 255);
+  }
 }
 
-static RGBA unpack_cgb_color8(u8 lo, u8 hi) {
-  return unpack_cgb_color((hi << 8) | lo);
+static RGBA unpack_cgb_color8(Emulator* e, u8 lo, u8 hi) {
+  return unpack_cgb_color(e, (hi << 8) | lo);
 }
 
 static void set_sgb_palette(Emulator* e, int pal, u8 lo0, u8 hi0, u8 lo1,
                                u8 hi1, u8 lo2, u8 hi2, u8 lo3, u8 hi3) {
   for (int i = 0; i < 4; ++i) {
-    SGB.screen_pal[i].color[0] = unpack_cgb_color8(lo0, hi0);
+    SGB.screen_pal[i].color[0] = unpack_cgb_color8(e, lo0, hi0);
   }
-  SGB.screen_pal[pal].color[1] = unpack_cgb_color8(lo1, hi1);
-  SGB.screen_pal[pal].color[2] = unpack_cgb_color8(lo2, hi2);
-  SGB.screen_pal[pal].color[3] = unpack_cgb_color8(lo3, hi3);
+  SGB.screen_pal[pal].color[1] = unpack_cgb_color8(e, lo1, hi1);
+  SGB.screen_pal[pal].color[2] = unpack_cgb_color8(e, lo2, hi2);
+  SGB.screen_pal[pal].color[3] = unpack_cgb_color8(e, lo3, hi3);
   if (pal == 0) {
     emulator_set_bw_palette(e, PALETTE_TYPE_OBP0, &SGB.screen_pal[0]);
     emulator_set_bw_palette(e, PALETTE_TYPE_OBP1, &SGB.screen_pal[0]);
@@ -2437,7 +2455,7 @@ static void do_sgb(Emulator* e) {
             for (int col = 1; col < 16; ++col) {
               int idx = 0x800 + (pal * 16 + col) * 2;
               u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
-              SGB.border_pal[pal][col] = unpack_cgb_color8(lo, hi);
+              SGB.border_pal[pal][col] = unpack_cgb_color8(e, lo, hi);
             }
           }
           RGBA* dst = e->sgb_frame_buffer;
@@ -2772,7 +2790,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         u8 palette_index = (cp->index >> 3) & 7;
         u8 color_index = (cp->index >> 1) & 3;
         u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
-        RGBA color = unpack_cgb_color(color16);
+        RGBA color = unpack_cgb_color(e, color16);
         cp->palettes[palette_index].color[color_index] = color;
         if (cp->auto_increment) {
           cp->index = (cp->index + 1) & 0x3f;
@@ -4676,6 +4694,9 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
 
   /* Set initial DMG/SGB palettes */
   emulator_set_builtin_palette(e, init->builtin_palette);
+
+  /* Set up cgb color curve */
+  e->cgb_color_curve = init->cgb_color_curve;
 
   /* Set initial CGB palettes to white. */
   int pal_index;
