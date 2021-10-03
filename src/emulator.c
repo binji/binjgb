@@ -2137,9 +2137,19 @@ static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
 }
 
 static RGBA unpack_cgb_color(u16 color) {
-  return MAKE_RGBA(UNPACK(color, XCPD_RED_INTENSITY) << 3,
-                   UNPACK(color, XCPD_GREEN_INTENSITY) << 3,
-                   UNPACK(color, XCPD_BLUE_INTENSITY) << 3, 255);
+  // Using Sameboy's color curves, see
+  // https://github.com/LIJI32/SameBoy/blob/345e51647f2a7ce1ea39f21497f5a6dc75a587c8/Core/display.c#L239
+  static const u8 curve[] = {
+      0,   6,   12,  20,  28,  36,  45,  56,  66,  76,  88,
+      100, 113, 125, 137, 149, 161, 172, 182, 192, 202, 210,
+      218, 225, 232, 238, 243, 247, 250, 252, 254, 255,
+  };
+  u8 r = curve[UNPACK(color, XCPD_RED_INTENSITY)];
+  u8 g = curve[UNPACK(color, XCPD_GREEN_INTENSITY)];
+  u8 b = curve[UNPACK(color, XCPD_BLUE_INTENSITY)];
+  g = (g * 3 + b) / 4;
+
+  return MAKE_RGBA(r, g, b, 255);
 }
 
 static RGBA unpack_cgb_color8(u8 lo, u8 hi) {
