@@ -21,7 +21,7 @@ const REWIND_FRAMES_PER_BASE_STATE = 45;
 const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 const REWIND_FACTOR = 1.5;
 const REWIND_UPDATE_MS = 16;
-const BUILTIN_PALETTES = 83;  // See builtin-palettes.def.
+const BUILTIN_PALETTES = 84;  // See builtin-palettes.def.
 const CGB_COLOR_CURVE = 2; // Gambatte/Gameboy Online
 
 const $ = document.querySelector.bind(document);
