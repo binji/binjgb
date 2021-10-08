@@ -3,6 +3,9 @@
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
+ *
+ *
+ * Some code from GB-Studio, see LICENSE.gbstudio
  */
 "use strict";
 
@@ -22,10 +25,18 @@ const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
 const REWIND_FACTOR = 1.5;
 const REWIND_UPDATE_MS = 16;
 const BUILTIN_PALETTES = 84;  // See builtin-palettes.def.
-const CGB_COLOR_CURVE = 2; // Gambatte/Gameboy Online
+const CGB_COLOR_CURVE = 2;    // Gambatte/Gameboy Online
+const OSGP_DEADZONE = 0.1;    // On screen gamepad
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
+
+const controllerEl = $('#controller');
+const dpadEl = $('#controller_dpad');
+const selectEl = $('#controller_select');
+const startEl = $('#controller_start');
+const bEl = $('#controller_b');
+const aEl = $('#controller_a');
 
 const binjgbPromise = Binjgb();
 
@@ -80,7 +91,7 @@ const vm = new VM();
 
 // Load a ROM.
 (async function go() {
-  let response = await fetch('cpu_instrs.gb');
+  let response = await fetch('sml.gb');
   let romBuffer = await response.arrayBuffer();
   const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
   Emulator.start(await binjgbPromise, romBuffer, extRam);
@@ -133,9 +144,14 @@ class Emulator {
     }
 
     this.bindKeys();
+    this.bindTouch();
+
+    this.touchEnabled = 'ontouchstart' in document.documentElement;
+    this.updateOnscreenGamepad();
   }
 
   destroy() {
+    this.unbindTouch();
     this.unbindKeys();
     this.cancelAnimationFrame();
     clearInterval(this.rewindIntervalId);
@@ -288,16 +304,128 @@ class Emulator {
     this.video.renderTexture();
   }
 
+  updateOnscreenGamepad() {
+    $('#controller').style.display = this.touchEnabled ? 'block' : 'none';
+  }
+
+  bindTouch() {
+    this.touchFuncs = {
+      'controller_b': this.setJoypB.bind(this),
+      'controller_a': this.setJoypA.bind(this),
+      'controller_start': this.setJoypStart.bind(this),
+      'controller_select': this.setJoypSelect.bind(this),
+    };
+
+    this.boundButtonTouchStart = this.buttonTouchStart.bind(this);
+    this.boundButtonTouchEnd = this.buttonTouchEnd.bind(this);
+    selectEl.addEventListener('touchstart', this.boundButtonTouchStart);
+    selectEl.addEventListener('touchend', this.boundButtonTouchEnd);
+    startEl.addEventListener('touchstart', this.boundButtonTouchStart);
+    startEl.addEventListener('touchend', this.boundButtonTouchEnd);
+    bEl.addEventListener('touchstart', this.boundButtonTouchStart);
+    bEl.addEventListener('touchend', this.boundButtonTouchEnd);
+    aEl.addEventListener('touchstart', this.boundButtonTouchStart);
+    aEl.addEventListener('touchend', this.boundButtonTouchEnd);
+
+    this.boundDpadTouchStartMove = this.dpadTouchStartMove.bind(this);
+    this.boundDpadTouchEnd = this.dpadTouchEnd.bind(this);
+    dpadEl.addEventListener('touchstart', this.boundDpadTouchStartMove);
+    dpadEl.addEventListener('touchmove', this.boundDpadTouchStartMove);
+    dpadEl.addEventListener('touchend', this.boundDpadTouchEnd);
+
+    this.boundTouchRestore = this.touchRestore.bind(this);
+    window.addEventListener('touchstart', this.boundTouchRestore);
+  }
+
+  unbindTouch() {
+    selectEl.removeEventListener('touchstart', this.boundButtonTouchStart);
+    selectEl.removeEventListener('touchend', this.boundButtonTouchEnd);
+    startEl.removeEventListener('touchstart', this.boundButtonTouchStart);
+    startEl.removeEventListener('touchend', this.boundButtonTouchEnd);
+    bEl.removeEventListener('touchstart', this.boundButtonTouchStart);
+    bEl.removeEventListener('touchend', this.boundButtonTouchEnd);
+    aEl.removeEventListener('touchstart', this.boundButtonTouchStart);
+    aEl.removeEventListener('touchend', this.boundButtonTouchEnd);
+
+    dpadEl.removeEventListener('touchstart', this.boundDpadTouchStartMove);
+    dpadEl.removeEventListener('touchmove', this.boundDpadTouchStartMove);
+    dpadEl.removeEventListener('touchend', this.boundDpadTouchEnd);
+
+    window.removeEventListener('touchstart', this.boundTouchRestore);
+  }
+
+  buttonTouchStart(event) {
+    if (event.currentTarget.id in this.touchFuncs) {
+      this.touchFuncs[event.currentTarget.id](true);
+      event.currentTarget.classList.add('btnPressed');
+      event.preventDefault();
+    }
+  }
+
+  buttonTouchEnd(event) {
+    if (event.currentTarget.id in this.touchFuncs) {
+      this.touchFuncs[event.currentTarget.id](false);
+      event.currentTarget.classList.remove('btnPressed');
+      event.preventDefault();
+    }
+  }
+
+  dpadTouchStartMove(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = (2 * (event.targetTouches[0].clientX - rect.left)) / rect.width - 1;
+    const y = (2 * (event.targetTouches[0].clientY - rect.top)) / rect.height - 1;
+
+    if (Math.abs(x) > OSGP_DEADZONE) {
+      if (y > x && y < -x) {
+        this.setJoypLeft(true);
+        this.setJoypRight(false);
+      } else if (y < x && y > -x) {
+        this.setJoypLeft(false);
+        this.setJoypRight(true);
+      }
+    } else {
+      this.setJoypLeft(false);
+      this.setJoypRight(false);
+    }
+
+    if (Math.abs(y) > OSGP_DEADZONE) {
+      if (x > y && x < -y) {
+        this.setJoypUp(true);
+        this.setJoypDown(false);
+      } else if (x < y && x > -y) {
+        this.setJoypUp(false);
+        this.setJoypDown(true);
+      }
+    } else {
+      this.setJoypUp(false);
+      this.setJoypDown(false);
+    }
+    event.preventDefault();
+  }
+
+  dpadTouchEnd(event) {
+    this.setJoypLeft(false);
+    this.setJoypRight(false);
+    this.setJoypUp(false);
+    this.setJoypDown(false);
+    event.preventDefault();
+  }
+
+  touchRestore() {
+    this.touchEnabled = true;
+    this.updateOnscreenGamepad();
+  }
+
   bindKeys() {
     this.keyFuncs = {
-      'ArrowDown': this.module._set_joyp_down.bind(null, this.e),
-      'ArrowLeft': this.module._set_joyp_left.bind(null, this.e),
-      'ArrowRight': this.module._set_joyp_right.bind(null, this.e),
-      'ArrowUp': this.module._set_joyp_up.bind(null, this.e),
-      'KeyZ': this.module._set_joyp_B.bind(null, this.e),
-      'KeyX': this.module._set_joyp_A.bind(null, this.e),
-      'Enter': this.module._set_joyp_start.bind(null, this.e),
-      'Tab': this.module._set_joyp_select.bind(null, this.e),
+      'ArrowDown': this.setJoypDown.bind(this),
+      'ArrowLeft': this.setJoypLeft.bind(this),
+      'ArrowRight': this.setJoypRight.bind(this),
+      'ArrowUp': this.setJoypUp.bind(this),
+      'KeyZ': this.setJoypB.bind(this),
+      'KeyX': this.setJoypA.bind(this),
+      'Enter': this.setJoypStart.bind(this),
+      'Tab': this.setJoypSelect.bind(this),
       'Backspace': this.keyRewind.bind(this),
       'Space': this.keyPause.bind(this),
     };
@@ -315,6 +443,10 @@ class Emulator {
 
   keyDown(event) {
     if (event.code in this.keyFuncs) {
+      if (this.touchEnabled) {
+        this.touchEnabled = false;
+        this.updateOnscreenGamepad();
+      }
       this.keyFuncs[event.code](true);
       event.preventDefault();
     }
@@ -342,21 +474,45 @@ class Emulator {
   keyPause(isKeyDown) {
     if (isKeyDown) vm.togglePause();
   }
+
+  setJoypDown(set) { this.module._set_joyp_down(this.e, set); }
+  setJoypUp(set) { this.module._set_joyp_up(this.e, set); }
+  setJoypLeft(set) { this.module._set_joyp_left(this.e, set); }
+  setJoypRight(set) { this.module._set_joyp_right(this.e, set); }
+  setJoypSelect(set) { this.module._set_joyp_select(this.e, set); }
+  setJoypStart(set) { this.module._set_joyp_start(this.e, set); }
+  setJoypB(set) { this.module._set_joyp_B(this.e, set); }
+  setJoypA(set) { this.module._set_joyp_A(this.e, set); }
 }
 
 class Audio {
   constructor(module, e) {
+    this.started = false;
     this.module = module;
     this.buffer = makeWasmBuffer(
         this.module, this.module._get_audio_buffer_ptr(e),
         this.module._get_audio_buffer_capacity(e));
     this.startSec = 0;
     this.resume();
+
+    this.boundStartPlayback = this.startPlayback.bind(this);
+    window.addEventListener('keydown', this.boundStartPlayback, true);
+    window.addEventListener('click', this.boundStartPlayback, true);
+    window.addEventListener('touchend', this.boundStartPlayback, true);
+  }
+
+  startPlayback() {
+    window.removeEventListener('touchend', this.boundStartPlayback, true);
+    window.removeEventListener('keydown', this.boundStartPlayback, true);
+    window.removeEventListener('click', this.boundStartPlayback, true);
+    this.started = true;
+    this.resume();
   }
 
   get sampleRate() { return Audio.ctx.sampleRate; }
 
   pushBuffer() {
+    if (!this.started) { return; }
     const nowSec = Audio.ctx.currentTime;
     const nowPlusLatency = nowSec + AUDIO_LATENCY_SEC;
     const volume = vm.volume;
@@ -384,10 +540,12 @@ class Audio {
   }
 
   pause() {
+    if (!this.started) { return; }
     Audio.ctx.suspend();
   }
 
   resume() {
+    if (!this.started) { return; }
     Audio.ctx.resume();
   }
 }
