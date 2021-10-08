@@ -9,24 +9,34 @@
  */
 "use strict";
 
+// User configurable.
+const ENABLE_REWIND = true;
+const ENABLE_PAUSE = false;
+const OSGP_DEADZONE = 0.1;    // On screen gamepad deadzone range
+const CGB_COLOR_CURVE = 2;    // 0: none, 1: Sameboy "Emulate Hardware" 2: Gambatte/Gameboy Online
+const BUILTIN_PALETTE = 83;   // Must be [0, 84) See builtin-palettes.def for list
+
+// It's probably OK to leave these alone. But you can tweak them to get better
+// rewind performance.
+const REWIND_FRAMES_PER_BASE_STATE = 45;  // How many delta frames until keyframe
+const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;  // Total rewind capacity
+const REWIND_FACTOR = 1.5;    // How fast is rewind compared to normal speed
+const REWIND_UPDATE_MS = 16;  // Rewind setInterval rate
+
+// Probably OK to leave these alone too.
+const AUDIO_FRAMES = 4096;      // Number of audio frames pushed per buffer
+const AUDIO_LATENCY_SEC = 0.1;
+const MAX_UPDATE_SEC = 5 / 60;  // Max. time to run emulator per step (== 5 frames)
+
+// Constants
 const RESULT_OK = 0;
 const RESULT_ERROR = 1;
 const SCREEN_WIDTH = 160;
 const SCREEN_HEIGHT = 144;
-const AUDIO_FRAMES = 4096;
-const AUDIO_LATENCY_SEC = 0.1;
-const MAX_UPDATE_SEC = 5 / 60;
 const CPU_TICKS_PER_SECOND = 4194304;
 const EVENT_NEW_FRAME = 1;
 const EVENT_AUDIO_BUFFER_FULL = 2;
 const EVENT_UNTIL_TICKS = 4;
-const REWIND_FRAMES_PER_BASE_STATE = 45;
-const REWIND_BUFFER_CAPACITY = 4 * 1024 * 1024;
-const REWIND_FACTOR = 1.5;
-const REWIND_UPDATE_MS = 16;
-const BUILTIN_PALETTES = 84;  // See builtin-palettes.def.
-const CGB_COLOR_CURVE = 2;    // Gambatte/Gameboy Online
-const OSGP_DEADZONE = 0.1;    // On screen gamepad
 
 const $ = document.querySelector.bind(document);
 let emulator = null;
@@ -47,7 +57,7 @@ class VM {
     this.extRamUpdated = false;
     this.paused_ = false;
     this.volume = 0.5;
-    this.pal = 0;
+    this.pal = BUILTIN_PALETTE;
     this.rewind = {
       minTicks: 0,
       maxTicks: 0,
@@ -211,14 +221,16 @@ class Emulator {
   }
 
   get isRewinding() {
-    return this.rewind.isRewinding;
+    return ENABLE_REWIND && this.rewind.isRewinding;
   }
 
   beginRewind() {
+    if (!ENABLE_REWIND) { return; }
     this.rewind.beginRewind();
   }
 
   rewindToTicks(ticks) {
+    if (!ENABLE_REWIND) { return; }
     if (this.rewind.rewindToTicks(ticks)) {
       this.runUntil(ticks);
       this.video.renderTexture();
@@ -226,6 +238,7 @@ class Emulator {
   }
 
   endRewind() {
+    if (!ENABLE_REWIND) { return; }
     this.rewind.endRewind();
     this.lastRafSec = 0;
     this.leftoverTicks = 0;
@@ -233,6 +246,7 @@ class Emulator {
   }
 
   set autoRewind(enabled) {
+    if (!ENABLE_REWIND) { return; }
     if (enabled) {
       this.rewindIntervalId = setInterval(() => {
         const oldest = this.rewind.oldestTicks;
@@ -460,6 +474,7 @@ class Emulator {
   }
 
   keyRewind(isKeyDown) {
+    if (!ENABLE_REWIND) { return; }
     if (this.isRewinding !== isKeyDown) {
       if (isKeyDown) {
         vm.paused = true;
@@ -472,6 +487,7 @@ class Emulator {
   }
 
   keyPause(isKeyDown) {
+    if (!ENABLE_PAUSE) { return; }
     if (isKeyDown) vm.togglePause();
   }
 
