@@ -101,7 +101,7 @@ const vm = new VM();
 
 // Load a ROM.
 (async function go() {
-  let response = await fetch('sml.gb');
+  let response = await fetch('cpu_instrs.gb');
   let romBuffer = await response.arrayBuffer();
   const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
   Emulator.start(await binjgbPromise, romBuffer, extRam);
