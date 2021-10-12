@@ -59,9 +59,15 @@ A simple GB/GBC emulator.
 
 ## Embedding binjgb in your own web page
 
-Copy `docs/simple.html`, `docs/simple.js` and `docs/simple.css` and your `.gb`
-or `.gbc` file to your webserver. `simple.html` will fill the entire page, so
-if you don't want that, you should put it into an
+Copy the folowing files to your webserver:
+* `docs/binjgb.js`
+* `docs/binjgb.wasm`
+* `docs/simple.html`
+* `docs/simple.js`
+* `docs/simple.css`
+* your `.gb` or `.gbc` file
+
+`simple.html` will fill the entire page, so if you don't want that, you should put it into an
 [iframe](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe).
 
 The emulator will also display an on-screen gamepad if the device supports
