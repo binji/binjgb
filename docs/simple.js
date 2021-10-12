@@ -10,6 +10,7 @@
 "use strict";
 
 // User configurable.
+const ROM_FILENAME = 'porklike.gb';
 const ENABLE_REWIND = true;
 const ENABLE_PAUSE = false;
 const ENABLE_SWITCH_PALETTES = true;
@@ -123,7 +124,7 @@ const vm = new VM();
 
 // Load a ROM.
 (async function go() {
-  let response = await fetch('porklike.gb');
+  let response = await fetch(ROM_FILENAME);
   let romBuffer = await response.arrayBuffer();
   const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
   Emulator.start(await binjgbPromise, romBuffer, extRam);
