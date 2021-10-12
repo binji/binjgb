@@ -76,7 +76,7 @@ You can configure the emulator by editing `simple.js`:
 | ENABLE_PAUSE | Whether to enable pausing with the space bar |
 | ENABLE_SWITCH_PALETTES | Whether to enable switching palettes with `[` and `]` |
 | OSGP_DEADZONE | How wide to make the deadzone for the onscreen gamepad, as a decimal between between `0` and `1` |
-| CGB_COLOR_CURVE | How to tint the CGB colors so they look more like a real CGB. <ol><li>none</li><li>Use Sameboy's "Emulate Hardware" colors</li><li>Use Gambatte/Gameboy Online colors</li></ol> |
+| CGB_COLOR_CURVE | How to tint the CGB colors so they look more like a real CGB. <ul><li>0: none</li><li>1: Use Sameboy's "Emulate Hardware" colors</li><li>2: Use Gambatte/Gameboy Online colors</li></ul> |
 | DEFAULT_PALETTE_IDX | Which palette to use by default, as an index into `PALETTES` |
 | PALETTES | An array of built-in palette IDs, between `0` and `83`. Useful if you only want the player to switch between a few of the built-in palettes |
 
