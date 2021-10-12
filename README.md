@@ -57,6 +57,31 @@ A simple GB/GBC emulator.
 ![Tile Data](/images/tiledata-window.png)
 ![Breakpoints](/images/breakpoint.png)
 
+## Embedding binjgb in your own web page
+
+Copy `docs/simple.html`, `docs/simple.js` and `docs/simple.css` and your `.gb`
+or `.gbc` file to your webserver. `simple.html` will fill the entire page, so
+if you don't want that, you should put it into an
+[iframe](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe).
+
+The emulator will also display an on-screen gamepad if the device supports
+touch events.
+
+You can configure the emulator by editing `simple.js`:
+
+| Constant name | Description |
+| - | - |
+| ROM_FILENAME | The path to your `.gb` or `.gbc` file |
+| ENABLE_REWIND | Whether to enable rewinding with the backspace key |
+| ENABLE_PAUSE | Whether to enable pausing with the space bar |
+| ENABLE_SWITCH_PALETTES | Whether to enable switching palettes with `[` and `]` |
+| OSGP_DEADZONE | How wide to make the deadzone for the onscreen gamepad, as a decimal between between `0` and `1` |
+| CGB_COLOR_CURVE | How to tint the CGB colors so they look more like a real CGB. <ol><li>none</li><li>Use Sameboy's "Emulate Hardware" colors</li><li>Use Gambatte/Gameboy Online colors</li></ol> |
+| DEFAULT_PALETTE_IDX | Which palette to use by default, as an index into `PALETTES` |
+| PALETTES | An array of built-in palette IDs, between `0` and `83`. Useful if you only want the player to switch between a few of the built-in palettes |
+
+See `simple.js` for more info.
+
 ## Cloning
 
 Use a recursive clone, to include the submodules:
