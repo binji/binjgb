@@ -12,9 +12,31 @@
 // User configurable.
 const ENABLE_REWIND = true;
 const ENABLE_PAUSE = false;
+const ENABLE_SWITCH_PALETTES = true;
 const OSGP_DEADZONE = 0.1;    // On screen gamepad deadzone range
 const CGB_COLOR_CURVE = 2;    // 0: none, 1: Sameboy "Emulate Hardware" 2: Gambatte/Gameboy Online
-const BUILTIN_PALETTE = 83;   // Must be [0, 84) See builtin-palettes.def for list
+
+// List of DMG palettes to switch between. By default it includes all 84
+// built-in palettes. If you want to restrict this, change it to an array of
+// the palettes you want to use and change DEFAULT_PALETTE_IDX to the index of the
+// default palette in that list.
+//
+// Example: (only allow one palette with index 16):
+//   const DEFAULT_PALETTE_IDX = 0;
+//   const PALETTES = [16];
+//
+// Example: (allow three palettes, 16, 32, 64, with default 32):
+//   const DEFAULT_PALETTE_IDX = 1;
+//   const PALETTES = [16, 32, 64];
+//
+const DEFAULT_PALETTE_IDX = 79;
+const PALETTES = [
+  0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
+  17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+  34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+  51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+  68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83,
+];
 
 // It's probably OK to leave these alone. But you can tweak them to get better
 // rewind performance.
@@ -57,7 +79,7 @@ class VM {
     this.extRamUpdated = false;
     this.paused_ = false;
     this.volume = 0.5;
-    this.pal = BUILTIN_PALETTE;
+    this.palIdx = DEFAULT_PALETTE_IDX;
     this.rewind = {
       minTicks: 0,
       maxTicks: 0,
@@ -101,11 +123,11 @@ const vm = new VM();
 
 // Load a ROM.
 (async function go() {
-  let response = await fetch('cpu_instrs.gb');
+  let response = await fetch('porklike.gb');
   let romBuffer = await response.arrayBuffer();
   const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
   Emulator.start(await binjgbPromise, romBuffer, extRam);
-  emulator.setBuiltinPalette(vm.pal);
+  emulator.setBuiltinPalette(vm.palIdx);
 })();
 
 
@@ -216,8 +238,8 @@ class Emulator {
     }
   }
 
-  setBuiltinPalette(pal) {
-    this.module._emulator_set_builtin_palette(this.e, pal);
+  setBuiltinPalette(palIdx) {
+    this.module._emulator_set_builtin_palette(this.e, PALETTES[palIdx]);
   }
 
   get isRewinding() {
@@ -442,6 +464,8 @@ class Emulator {
       'Tab': this.setJoypSelect.bind(this),
       'Backspace': this.keyRewind.bind(this),
       'Space': this.keyPause.bind(this),
+      'BracketLeft': this.keyPrevPalette.bind(this),
+      'BracketRight': this.keyNextPalette.bind(this),
     };
     this.boundKeyDown = this.keyDown.bind(this);
     this.boundKeyUp = this.keyUp.bind(this);
@@ -489,6 +513,22 @@ class Emulator {
   keyPause(isKeyDown) {
     if (!ENABLE_PAUSE) { return; }
     if (isKeyDown) vm.togglePause();
+  }
+
+  keyPrevPalette(isKeyDown) {
+    if (!ENABLE_SWITCH_PALETTES) { return; }
+    if (isKeyDown) {
+      vm.palIdx = (vm.palIdx + PALETTES.length - 1) % PALETTES.length;
+      emulator.setBuiltinPalette(vm.palIdx);
+    }
+  }
+
+  keyNextPalette(isKeyDown) {
+    if (!ENABLE_SWITCH_PALETTES) { return; }
+    if (isKeyDown) {
+      vm.palIdx = (vm.palIdx + 1) % PALETTES.length;
+      emulator.setBuiltinPalette(vm.palIdx);
+    }
   }
 
   setJoypDown(set) { this.module._set_joyp_down(this.e, set); }
