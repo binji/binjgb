@@ -377,7 +377,9 @@ typedef struct {
 } Mbc1, Huc1, Mmm01;
 
 typedef struct {
-  Ticks offset_ticks;
+  u8 sec, min, hour;
+  u16 day;
+  Bool day_carry;
   Ticks latch_ticks;
   u8 rtc_reg;
   Bool rtc_halt;
@@ -1331,12 +1333,70 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       }
       break;
     case 3: { /* 6000-7fff */
-      Bool was_latched = MMAP_STATE.mbc3.latched;
+      Mbc3* mbc3 = &MMAP_STATE.mbc3;
+      Bool was_latched = mbc3->latched;
       Bool latched = value == 1;
-      if (!was_latched && latched) {
-        MMAP_STATE.mbc3.latch_ticks = TICKS;
+      if (!was_latched && latched && !mbc3->rtc_halt) {
+        // Update the clock by how much time has passed since it was last
+        // latched.
+        Ticks delta = TICKS - mbc3->latch_ticks;
+        // RTC ticks every second, so don't update unless at least a second
+        // has passed.
+        if (delta >= CPU_TICKS_PER_SECOND) {
+          u32 ms, sec, min, hour, day;
+          emulator_ticks_to_time(delta, &day, &hour, &min, &sec, &ms);
+
+          Bool secovf = FALSE;
+          if (mbc3->sec >= 60) {
+            mbc3->sec += sec;
+            if (mbc3->sec >= 64) {
+              mbc3->sec -= 64;
+              if (mbc3->sec >= 60) { mbc3->sec -= 60; ++min; secovf = TRUE; }
+            }
+          } else {
+            mbc3->sec += sec;
+            if (mbc3->sec >= 60) { mbc3->sec -= 60; ++min; secovf = TRUE; }
+          }
+
+          Bool minovf = FALSE;
+          if (min > 0 || secovf) {
+            if (mbc3->min >= 60) {
+              mbc3->min += min;
+              if (mbc3->min >= 64) {
+                mbc3->min -= 64;
+                if (mbc3->min >= 60) { mbc3->min -= 60; ++hour; minovf = TRUE; }
+              }
+            } else {
+              mbc3->min += min;
+              if (mbc3->min >= 60) { mbc3->min -= 60; ++hour; minovf = TRUE; }
+            }
+          }
+
+          Bool hourovf = FALSE;
+          if (hour > 0 || minovf) {
+            if (mbc3->hour >= 24) {
+              mbc3->hour += hour;
+              if (mbc3->hour >= 32) {
+                mbc3->hour -= 32;
+                if (mbc3->hour >= 24) { mbc3->hour -= 24; ++day; hourovf = TRUE; }
+              }
+            } else {
+              mbc3->hour += hour;
+              if (mbc3->hour >= 24) { mbc3->hour -= 24; ++day; hourovf = TRUE; }
+            }
+          }
+
+          if (day > 0 || hourovf) {
+            mbc3->day += day;
+            if (mbc3->day >= 512) {
+              mbc3->day_carry = TRUE;
+            }
+          }
+
+          mbc3->latch_ticks = TICKS;
+        }
       }
-      MMAP_STATE.mbc3.latched = latched;
+      mbc3->latched = latched;
       break;
     }
     default:
@@ -1358,24 +1418,19 @@ static u8 mbc3_read_ext_ram(Emulator* e, MaskedAddress addr) {
     return INVALID_READ_BYTE;
   }
 
-  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-  u32 ms, sec, min, hr, day;
-  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
-                         &sec, &ms);
   u8 result = INVALID_READ_BYTE;
   switch (mbc3->rtc_reg) {
-    case 8: result = sec; break;
-    case 9: result = min; break;
-    case 10: result = hr; break;
-    case 11: result = day & 0xff; break;
-    case 12: {
-      u8 day_carry = day >= 512;
-      result = PACK(day_carry, MBC3_RTC_DAY_CARRY) |
+    case 8: result = mbc3->sec; break;
+    case 9: result = mbc3->min; break;
+    case 10: result = mbc3->hour; break;
+    case 11: result = mbc3->day; break;
+    case 12:
+      result = PACK(mbc3->day_carry, MBC3_RTC_DAY_CARRY) |
                PACK(mbc3->rtc_halt, MBC3_RTC_HALT) |
-               PACK(day & 1, MBC3_RTC_DAY_HI);
+               PACK((mbc3->day >> 8) & 1, MBC3_RTC_DAY_HI);
       break;
-    }
   }
+
   return result;
 }
 
@@ -1394,33 +1449,36 @@ static void mbc3_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
     return;
   }
 
-  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-  u32 ms, sec, min, hr, day;
-  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
-                         &sec, &ms);
-  u8 day_lo = day & 0xff;
-  u8 day_hi = (day >> 8) & 1;
-  Bool carry = FALSE;
-
   switch (mbc3->rtc_reg) {
-    case 8: sec = value % 60; break;
-    case 9: min = value % 60; break;
-    case 10: hr = value % 24; break;
-    case 11: day_lo = value; break;
-    case 12:
-      day_hi = UNPACK(value, MBC3_RTC_DAY_HI);
-      mbc3->rtc_halt = UNPACK(value, MBC3_RTC_HALT);
-      latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-      carry = UNPACK(value, MBC3_RTC_DAY_CARRY);
+    case 8:
+      mbc3->sec = value & 63;
+      /* Reset the tick timer. Note that if the RTC timer is halted then
+       * latch_ticks is a previously stored delta, not an absolute tick timer.
+       * Once the timer is restarted then latch_ticks is an absolute timer
+       * again. */
+      mbc3->latch_ticks = mbc3->rtc_halt ? 0 : TICKS;
       break;
+    case 9: mbc3->min = value & 63; break;
+    case 10: mbc3->hour = value & 31; break;
+    case 11: mbc3->day = (mbc3->day & 0x100) | value; break;
+    case 12: {
+      mbc3->day = (UNPACK(value, MBC3_RTC_DAY_HI) << 8) | (mbc3->day & 0xff);
+      mbc3->day_carry = UNPACK(value, MBC3_RTC_DAY_CARRY);
+      Bool old_rtc_halt = mbc3->rtc_halt;
+      mbc3->rtc_halt = UNPACK(value, MBC3_RTC_HALT);
+      if (mbc3->rtc_halt != old_rtc_halt) {
+        // Update the tick timer; if the clock is halted, then store the
+        // previous delta before the clock was stopped. If the clock is
+        // restarted, then subtract that delta from the current tick timer to
+        // "add" in the delta that is not yet accounted for in the RTC
+        // registers.
+        mbc3->latch_ticks = TICKS - mbc3->latch_ticks;
+      }
+      break;
+    }
     default:
-      return;
+      break;
   }
-  day = (day_hi << 8) | day_lo;
-  u64 new_total =
-      ((((((((u64)carry * 512 + day) * 24) + hr) * 60) + min) * 60) + sec) *
-      CPU_TICKS_PER_SECOND;
-  mbc3->offset_ticks = new_total - latch_ticks;
 }
 
 static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
