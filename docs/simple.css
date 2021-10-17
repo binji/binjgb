@@ -13,7 +13,6 @@ body {
   margin: 0;  /* binjgb */
   padding: 0;  /* binjgb */
   touch-action: none;
-  text-align: center;
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;  /* binjgb */
@@ -27,7 +26,6 @@ body {
   width: 100%;
   height: 100%;
   touch-action: none;
-  text-align: center;
 }
 
 #game canvas {
@@ -180,83 +178,6 @@ body {
 
 .btnPressed {
   opacity: 0.5;
-}
-
-.spinner {
-  height: 50px;
-  width: 50px;
-  margin: 0px auto;
-  -webkit-animation: rotation 0.8s linear infinite;
-  -moz-animation: rotation 0.8s linear infinite;
-  -o-animation: rotation 0.8s linear infinite;
-  animation: rotation 0.8s linear infinite;
-  border-left: 10px solid #306850;
-  border-right: 10px solid #306850;
-  border-bottom: 10px solid #306850;
-  border-top: 10px solid #88c070;
-  border-radius: 100%;
-  background-color: #031921;
-}
-@-webkit-keyframes rotation {
-  from {
-    -webkit-transform: rotate(0deg);
-  }
-  to {
-    -webkit-transform: rotate(360deg);
-  }
-}
-@-moz-keyframes rotation {
-  from {
-    -moz-transform: rotate(0deg);
-  }
-  to {
-    -moz-transform: rotate(360deg);
-  }
-}
-@-o-keyframes rotation {
-  from {
-    -o-transform: rotate(0deg);
-  }
-  to {
-    -o-transform: rotate(360deg);
-  }
-}
-@keyframes rotation {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media only screen and (max-width: 640px) {
-  #game canvas {
-    margin-top: 0px;
-    width: 100%;
-    max-width: 480px;
-    border: 0px;
-    border-radius: 0px;
-  }
-}
-
-@media only screen and (max-device-width: 812px) and (orientation: portrait) {
-  body {
-    margin: 0;
-  }
-
-  #game {
-    width: 100%;
-    position: fixed;
-    touch-action: none;
-  }
-
-  #game canvas {
-    margin: 0;
-    display: block;
-    width: 100% !important;
-    height: auto !important;
-  }
 }
 
 @media only screen and (max-device-width: 320px) and (orientation: portrait) {
