@@ -799,7 +799,7 @@ PaletteRGBA emulator_get_cgb_palette_rgba(Emulator* e, CgbPaletteType type,
 }
 
 PaletteRGBA emulator_get_sgb_palette_rgba(Emulator* e, int index) {
-  return e->state.sgb.screen_pal[index];
+  return e->sgb_pal[index];
 }
 
 void emulator_get_tile_data(Emulator* e, TileData out_tile_data) {
@@ -844,6 +844,11 @@ void emulator_get_tile_map_attr(Emulator* e, TileMapSelect map_select,
   assert(emulator_is_cgb(e));
   size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
   memcpy(out_tile_map, &e->state.vram.data[offset + 0x2000], TILE_MAP_SIZE);
+}
+
+void emulator_get_sgb_attr_map(Emulator* e, u8 out_attr_map[90]) {
+  assert(emulator_is_sgb(e));
+  memcpy(out_attr_map, &e->state.sgb.attr_map[0], 90);
 }
 
 

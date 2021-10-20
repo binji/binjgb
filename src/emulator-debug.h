@@ -148,6 +148,7 @@ PaletteRGBA emulator_get_sgb_palette_rgba(Emulator*, int index);
 void emulator_get_tile_data(Emulator*, TileData);
 void emulator_get_tile_map(Emulator*, TileMapSelect, TileMap);
 void emulator_get_tile_map_attr(Emulator*, TileMapSelect, TileMap);
+void emulator_get_sgb_attr_map(Emulator*, u8[90]);
 void emulator_get_bg_scroll(Emulator*, u8* x, u8* y);
 void emulator_get_window_scroll(Emulator*, u8* x, u8* y);
 

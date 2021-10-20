@@ -765,12 +765,6 @@ struct Emulator {
 #define HOOK0_FALSE(name) FALSE
 #endif
 
-/* Configurable constants */
-#define RGBA_WHITE 0xffffffffu
-#define RGBA_LIGHT_GRAY 0xffaaaaaau
-#define RGBA_DARK_GRAY 0xff555555u
-#define RGBA_BLACK 0xff000000u
-
 /* ROM header stuff */
 #define LOGO_START_ADDR 0x104
 #define LOGO_END_ADDR 0x133

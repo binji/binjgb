@@ -38,6 +38,11 @@ extern "C" {
 
 #define BUILTIN_PALETTE_COUNT 84
 
+#define RGBA_WHITE 0xffffffffu
+#define RGBA_LIGHT_GRAY 0xffaaaaaau
+#define RGBA_DARK_GRAY 0xff555555u
+#define RGBA_BLACK 0xff000000u
+
 typedef struct Emulator Emulator;
 
 enum {
