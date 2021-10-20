@@ -61,6 +61,7 @@ if (NOT EMSCRIPTEN)
     add_executable(binjgb-debugger
       third_party/imgui/imgui.cpp
       third_party/imgui/imgui_draw.cpp
+      third_party/imgui/imgui_tables.cpp
       third_party/imgui/imgui_widgets.cpp
       src/memory.c
       src/common.c
@@ -94,6 +95,7 @@ if (NOT EMSCRIPTEN)
       set_source_files_properties(
         third_party/imgui/imgui.cpp
         third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp
         third_party/imgui/imgui_widgets.cpp
         PROPERTIES
         COMPILE_FLAGS "${IMGUI_EXTRA_FLAGS} -Wno-extra -Wno-unused-but-set-variable  -Wno-maybe-uninitialized"

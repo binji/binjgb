@@ -244,7 +244,7 @@ void Debugger::Run() {
       // Initialize default dock layout.
       if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
         ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGui::GetIO().DisplaySize);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_None);
 
         ImGuiID left, mid, right;
         ImGuiID left_top, left_bottom;

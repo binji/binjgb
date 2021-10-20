@@ -32,7 +32,6 @@ struct HostUI {
   void set_palette(RGBA palette[4]);
   void enable_palette(bool enabled);
 
-  static void render_draw_lists_thunk(ImDrawData*);
   static void set_clipboard_text(void* user_data, const char* text);
   static const char* get_clipboard_text(void* user_data);
 
@@ -111,7 +110,6 @@ Result HostUI::init() {
   io.KeyMap[ImGuiKey_Y] = SDL_SCANCODE_Y;
   io.KeyMap[ImGuiKey_Z] = SDL_SCANCODE_Z;
 
-  io.RenderDrawListsFn = render_draw_lists_thunk;
   io.SetClipboardTextFn = set_clipboard_text;
   io.GetClipboardTextFn = get_clipboard_text;
   io.ClipboardUserData = nullptr;
@@ -314,11 +312,12 @@ void HostUI::begin_frame() {
 
 void HostUI::end_frame() {
   ImGuiIO& io = ImGui::GetIO();
+  ImGui::Render();
   glViewport(0, 0, io.DisplaySize.x * io.DisplayFramebufferScale.x,
              io.DisplaySize.y * io.DisplayFramebufferScale.y);
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
-  ImGui::Render();
+  s_ui->render_draw_lists(ImGui::GetDrawData());
   SDL_GL_SwapWindow(window);
   update_mouse_cursor();
 }
@@ -356,10 +355,6 @@ void HostUI::set_palette(RGBA palette[4]) {
 void HostUI::enable_palette(bool enabled) {
   glUseProgram(program);
   glUniform1i(uUsePalette, enabled ? 1 : 0);
-}
-
-void HostUI::render_draw_lists_thunk(ImDrawData* draw_data) {
-  s_ui->render_draw_lists(draw_data);
 }
 
 void HostUI::render_draw_lists(ImDrawData* draw_data) {
