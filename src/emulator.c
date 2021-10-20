@@ -4875,6 +4875,14 @@ Result emulator_read_state(Emulator* e, const FileData* file_data) {
             SAVE_STATE_HEADER);
   memcpy(&e->state, new_state, sizeof(EmulatorState));
   set_cart_info(e, e->state.cart_info_index);
+
+  if (IS_SGB) {
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP0, &SGB.screen_pal[0]);
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP1, &SGB.screen_pal[0]);
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
+  update_bw_palette_rgba(e, PALETTE_TYPE_OBP0);
+  update_bw_palette_rgba(e, PALETTE_TYPE_OBP1);
   return OK;
   ON_ERROR_RETURN;
 }
