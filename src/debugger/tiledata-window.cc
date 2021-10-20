@@ -168,43 +168,54 @@ void Debugger::TiledataWindow::CalculateAutoTilePaletteIndex(
   TileMap tile_map;
   emulator_get_tile_map(d->e, map_select, tile_map);
 
+  u8 left, right, top, bottom;
+  if (layer_type == LAYER_TYPE_BG) {
+    u8 scx, scy;
+    emulator_get_bg_scroll(d->e, &scx, &scy);
+    left = scx >> 3;
+    right = (SCREEN_WIDTH + scx + 7) >> 3;
+    top = scy >> 3;
+    bottom = (SCREEN_HEIGHT + scy + 7) >> 3;
+  } else {
+    u8 wx, wy;
+    assert(layer_type == LAYER_TYPE_WINDOW);
+    emulator_get_window_scroll(d->e, &wx, &wy);
+    left = top = 0;
+    right = (SCREEN_WIDTH - wx + 7) >> 3;
+    bottom = (SCREEN_HEIGHT - wy + 7) >> 3;
+  }
+
   TileMap tile_map_attr;
   u8 sgb_attr_map[90];
-  u8 scx, scy;
   if (d->is_cgb) {
     emulator_get_tile_map_attr(d->e, map_select, tile_map_attr);
   } else if (d->is_sgb) {
     emulator_get_sgb_attr_map(d->e, sgb_attr_map);
-    if (layer_type == LAYER_TYPE_BG) {
-      emulator_get_bg_scroll(d->e, &scx, &scy);
-    } else if (layer_type == LAYER_TYPE_WINDOW) {
-      emulator_get_window_scroll(d->e, &scx, &scy);
-    }
   }
 
-  for (int map_index = 0; map_index < TILE_MAP_WIDTH * TILE_MAP_HEIGHT;
-       ++map_index) {
-    int tile_index = tile_map[map_index];
-    if (data_select == TILE_DATA_8800_97FF) {
-      tile_index = 256 + (s8)tile_index;
-    }
-
-    if (d->is_cgb) {
-      u8 attr = tile_map_attr[map_index];
-      if (attr & 0x08) {
-        tile_index += 0x180;
+  for (u8 tiley = top; tiley < bottom; ++tiley) {
+    for (u8 tilex = left; tilex < right; ++tilex) {
+      u8 x = tilex << 3;
+      u8 y = tiley << 3;
+      int map_index = (y >> 3) * TILE_MAP_WIDTH + (x >> 3);
+      int tile_index = tile_map[map_index];
+      if (data_select == TILE_DATA_8800_97FF) {
+        tile_index = 256 + (s8)tile_index;
       }
-      tile_palette_index[tile_index] = 1 + (attr & 7);
-    } else if (d->is_sgb) {
-      u8 mapx = map_index & 31, mapy = map_index >> 5;
-      u8 x = mapx * 8 - scx, y = mapy * 8 - scy;
-      if (x < SCREEN_WIDTH && y < SCREEN_HEIGHT) {
+
+      if (d->is_cgb) {
+        u8 attr = tile_map_attr[map_index];
+        if (attr & 0x08) {
+          tile_index += 0x180;
+        }
+        tile_palette_index[tile_index] = 1 + (attr & 7);
+      } else if (d->is_sgb) {
         int idx = (y >> 3) * (SCREEN_WIDTH >> 3) + (x >> 3);
         u8 palidx = (sgb_attr_map[idx >> 2] >> (2 * (3 - (idx & 3)))) & 3;
         tile_palette_index[tile_index] = 1 + palidx;
+      } else {
+        tile_palette_index[tile_index] = 1;
       }
-    } else {
-      tile_palette_index[tile_index] = 1;
     }
   }
 }
