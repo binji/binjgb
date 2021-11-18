@@ -11,6 +11,7 @@
 
 // User configurable.
 const ROM_FILENAME = 'porklike.gb';
+const ENABLE_FAST_FORWARD = true;
 const ENABLE_REWIND = true;
 const ENABLE_PAUSE = false;
 const ENABLE_SWITCH_PALETTES = true;
@@ -171,6 +172,7 @@ class Emulator {
     this.lastRafSec = 0;
     this.leftoverTicks = 0;
     this.fps = 60;
+    this.fastForward = false;
 
     if (extRamBuffer) {
       this.loadExtRam(extRamBuffer);
@@ -328,11 +330,25 @@ class Emulator {
     if (!this.isRewinding) {
       const startSec = startMs / 1000;
       deltaSec = Math.max(startSec - (this.lastRafSec || startSec), 0);
-      const startTicks = this.ticks;
+
+      const startTimeMs = performance.now();
       const deltaTicks =
           Math.min(deltaSec, MAX_UPDATE_SEC) * CPU_TICKS_PER_SECOND;
-      const runUntilTicks = (startTicks + deltaTicks - this.leftoverTicks);
+      let runUntilTicks = this.ticks + deltaTicks - this.leftoverTicks;
       this.runUntil(runUntilTicks);
+      const deltaTimeMs = performance.now() - startTimeMs;
+      const deltaTimeSec = deltaTimeMs / 1000;
+
+      if (this.fastForward) {
+        // Estimate how much faster we can run in fast-forward, keeping the
+        // same rAF update rate.
+        const speedUp = (deltaTicks / CPU_TICKS_PER_SECOND) / deltaTimeSec;
+        const extraFrames = Math.floor(speedUp - deltaTimeSec);
+        const extraTicks = extraFrames * deltaTicks;
+        runUntilTicks = this.ticks + extraTicks - this.leftoverTicks;
+        this.runUntil(runUntilTicks);
+      }
+
       this.leftoverTicks = (this.ticks - runUntilTicks) | 0;
       this.lastRafSec = startSec;
     }
@@ -467,6 +483,7 @@ class Emulator {
       'Space': this.keyPause.bind(this),
       'BracketLeft': this.keyPrevPalette.bind(this),
       'BracketRight': this.keyNextPalette.bind(this),
+      'ShiftLeft': this.setFastForward.bind(this),
     };
     this.boundKeyDown = this.keyDown.bind(this);
     this.boundKeyUp = this.keyUp.bind(this);
@@ -530,6 +547,11 @@ class Emulator {
       vm.palIdx = (vm.palIdx + 1) % PALETTES.length;
       emulator.setBuiltinPalette(vm.palIdx);
     }
+  }
+
+  setFastForward(isKeyDown) {
+    if (!ENABLE_FAST_FORWARD) { return; }
+    this.fastForward = isKeyDown;
   }
 
   setJoypDown(set) { this.module._set_joyp_down(this.e, set); }
