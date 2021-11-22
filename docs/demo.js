@@ -644,18 +644,17 @@ class Gamepad {
   }
 
   getCurrent() {
-    // Chrome requires retrieving a new gamepad object
-    // every time button state is queried (the existing object
-    // will have stale button state). Just do that for all browsers
-    let gamepad = navigator.getGamepads()[this.gp.apiID];
+    if (typeof navigator.getGamepads == 'function') {
+      // Chrome requires retrieving a new gamepad object
+      // every time button state is queried (the existing object
+      // will have stale button state). Just do that for all browsers
+      let gamepad = navigator.getGamepads()[this.gp.apiID];
 
-    if (gamepad) {
-      if (gamepad.connected) {
+      if (gamepad && gamepad.connected) {
         return gamepad;
       }
+      return undefined;
     }
-
-    return undefined;
   }
 
   update() {
