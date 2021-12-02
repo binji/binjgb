@@ -124,6 +124,9 @@ let vm = new Vue({
     isFilesListEmpty: function() {
       return this.files.list.length == 0;
     },
+    cantDownloadSave: function() {
+      return this.isFilesListEmpty || this.selectedFile.extRam === undefined;
+    },
     loadedFileName: function() {
       return this.loadedFile ? this.loadedFile.name : '';
     },
@@ -213,10 +216,10 @@ let vm = new Vue({
         Emulator.stop();
       }
     },
-    uploadClicked: function() {
-      $('#upload').click();
+    uploadRomClicked: function() {
+      $('#uploadRom').click();
     },
-    uploadFile: async function(event) {
+    uploadRom: async function(event) {
       const file = event.target.files[0];
       const [db, buffer] = await Promise.all([dbPromise, readFile(file)]);
       const sha1 = SHA1Digest(buffer);
@@ -227,6 +230,32 @@ let vm = new Vue({
       tx.objectStore('games').add(data)
       await tx.complete;
       this.files.list.push(data);
+    },
+    downloadSave: async function(file) {
+      if (file.extRam) {
+        const el = $('#downloadEl');
+        el.href = URL.createObjectURL(file.extRam);
+        el.download = file.name + '.sav';
+        el.click();
+      }
+    },
+    uploadSaveClicked: function() {
+      $('#uploadSave').click();
+    },
+    uploadSave: async function(event) {
+      const file = event.target.files[0];
+      const [db, buffer] = await Promise.all([dbPromise, readFile(file)]);
+      const extRamBlob = new Blob([buffer]);
+      const tx = db.transaction('games', 'readwrite');
+      const cursor = await tx.objectStore('games').openCursor(
+          this.selectedFile.sha1);
+      if (!cursor) return;
+      Object.assign(this.selectedFile, cursor.value);
+      this.selectedFile.extRam = extRamBlob;
+      this.selectedFile.image = undefined;
+      this.selectedFile.modified = new Date;
+      cursor.update(this.selectedFile);
+      return tx.complete;
     },
     updateExtRam: async function() {
       if (!emulator) return;

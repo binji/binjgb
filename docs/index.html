@@ -196,8 +196,8 @@
         </div>
       </div>
       <div class="files-footer top-line">
-        <button @click="uploadClicked">upload</button>
-        <input type="file" id="upload" hidden @change="uploadFile">
+        <button @click="uploadRomClicked">upload</button>
+        <input type="file" id="uploadRom" hidden @change="uploadRom">
         <button
             v-bind:disabled="isFilesListEmpty"
             @click="playFile(selectedFile)">
@@ -208,6 +208,18 @@
             @click="deleteFile(selectedFile)">
           delete
         </button>
+        <button
+            v-bind:disabled="cantDownloadSave"
+            @click="downloadSave(selectedFile)">
+          download save
+        </button>
+        <a id="downloadEl" hidden download="game.sav"></a>
+        <button
+            v-bind:disabled="isFilesListEmpty"
+            @click="uploadSaveClicked">
+          upload save
+        </button>
+        <input type="file" id="uploadSave" hidden @change="uploadSave">
         <img class="file-image"
             v-show="selectedFileHasImage"
             :src="selectedFileImageSrc"></img>
