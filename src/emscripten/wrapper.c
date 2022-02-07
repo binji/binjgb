@@ -23,6 +23,7 @@ typedef struct {
 
 static Emulator* e;
 
+static EmulatorConfig s_config;
 static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
@@ -188,3 +189,20 @@ void file_data_delete(FileData* file_data) {
   xfree(file_data->data);
   xfree(file_data);
 }
+
+void set_log_apu_writes(Emulator* e, Bool set) {
+  s_config.log_apu_writes = set;
+  emulator_set_config(e, &s_config);
+}
+
+size_t get_apu_log_data_size(Emulator* e) {
+  ApuLog* apu_log = emulator_get_apu_log(e);
+  return apu_log->write_count * sizeof(apu_log->writes[0]);
+}
+
+void* get_apu_log_data_ptr(Emulator* e) {
+  ApuLog* apu_log = emulator_get_apu_log(e);
+  return &apu_log->writes[0];
+}
+
+void reset_apu_log(Emulator* e) { return emulator_reset_apu_log(e); }

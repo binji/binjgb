@@ -213,7 +213,6 @@
             @click="downloadSave(selectedFile)">
           download save
         </button>
-        <a id="downloadEl" hidden download="game.sav"></a>
         <button
             v-bind:disabled="isFilesListEmpty"
             @click="uploadSaveClicked">
@@ -252,6 +251,9 @@
           <input id="colorOptions" v-if="loaded" type="checkbox"
             v-model:checked="colorOptions"></input>
           <label v-if="loaded" for="colorOptions">color options...</label>
+          <button
+              v-show="loaded"
+              @click="toggleRecordVGM">{{vgmLabel}}</button>
         </div>
         <div class="right">
           <span>{{fps.toFixed(1)}}</span> FPS
@@ -287,6 +289,7 @@
         </div>
       </div>
     </div>
+    <a id="downloadEl" hidden download="game.sav"></a>
   </div>
   <script src="sha1.js"></script>
   <script src="binjgb.js"></script>

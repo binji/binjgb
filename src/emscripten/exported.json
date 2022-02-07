@@ -4,14 +4,16 @@
 "_emulator_new_simple",
 "_emulator_read_ext_ram",
 "_emulator_run_until_f64",
-"_emulator_set_default_joypad_callback",
 "_emulator_set_builtin_palette",
 "_emulator_set_bw_palette_simple",
+"_emulator_set_default_joypad_callback",
 "_emulator_set_rewind_joypad_callback",
 "_emulator_was_ext_ram_updated",
 "_emulator_write_ext_ram",
 "_ext_ram_file_data_new",
 "_file_data_delete",
+"_get_apu_log_data_ptr",
+"_get_apu_log_data_size",
 "_get_audio_buffer_capacity",
 "_get_audio_buffer_ptr",
 "_get_file_data_ptr",
@@ -22,6 +24,7 @@
 "_get_sgb_frame_buffer_size",
 "_joypad_delete",
 "_joypad_new",
+"_reset_apu_log",
 "_rewind_append",
 "_rewind_begin",
 "_rewind_delete",
@@ -37,4 +40,6 @@
 "_set_joyp_right",
 "_set_joyp_select",
 "_set_joyp_start",
-"_set_joyp_up"]
+"_set_joyp_up",
+"_set_log_apu_writes"
+]

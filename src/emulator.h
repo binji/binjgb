@@ -43,6 +43,8 @@ extern "C" {
 #define RGBA_DARK_GRAY 0xff555555u
 #define RGBA_BLACK 0xff000000u
 
+#define MAX_APU_LOG_FRAME_WRITES 1024
+
 typedef struct Emulator Emulator;
 
 enum {
@@ -172,7 +174,18 @@ typedef struct EmulatorConfig {
   Bool disable_window;
   Bool disable_obj;
   Bool allow_simulataneous_dpad_opposites;
+  Bool log_apu_writes;
 } EmulatorConfig;
+
+typedef struct {
+  u8 addr;
+  u8 value;
+} ApuWrite;
+
+typedef struct {
+  ApuWrite writes[MAX_APU_LOG_FRAME_WRITES];
+  size_t write_count;
+} ApuLog;
 
 typedef u32 EmulatorEvent;
 enum {
@@ -222,6 +235,9 @@ Result emulator_write_ext_ram_to_file(Emulator*, const char* filename);
 
 EmulatorEvent emulator_step(Emulator*);
 EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
+
+ApuLog* emulator_get_apu_log(Emulator*);
+void emulator_reset_apu_log(Emulator*);
 
 #ifdef __cplusplus
 }

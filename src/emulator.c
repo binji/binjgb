@@ -709,6 +709,7 @@ struct Emulator {
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
   PaletteRGBA sgb_pal[4];
   CgbColorCurve cgb_color_curve;
+  ApuLog apu_log;
 };
 
 
@@ -2999,6 +3000,14 @@ static void write_noise_period(Emulator* e) {
 }
 
 static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
+  if (e->config.log_apu_writes || !APU.initialized) {
+    if (e->apu_log.write_count < MAX_APU_LOG_FRAME_WRITES) {
+      ApuWrite* write = &e->apu_log.writes[e->apu_log.write_count++];
+      write->addr = addr;
+      write->value = value;
+    }
+  }
+
   if (!APU.enabled) {
     if (!IS_CGB && (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
                     addr == APU_NR31_ADDR || addr == APU_NR41_ADDR)) {
@@ -5013,4 +5022,12 @@ void emulator_set_builtin_palette(Emulator* e, u32 index) {
     SGB.screen_pal[i] = pals[index][0];
   }
   update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
+}
+
+ApuLog* emulator_get_apu_log(Emulator* e) {
+  return &e->apu_log;
+}
+
+void emulator_reset_apu_log(Emulator* e) {
+  e->apu_log.write_count = 0;
 }

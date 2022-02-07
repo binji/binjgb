@@ -20,6 +20,8 @@ const AUDIO_FRAMES = 4096;
 const AUDIO_LATENCY_SEC = 0.1;
 const MAX_UPDATE_SEC = 5 / 60;
 const CPU_TICKS_PER_SECOND = 4194304;
+const CPU_TICKS_PER_60HZ = Math.floor(CPU_TICKS_PER_SECOND / 60);
+const CPU_TICK_FRACTION_PER_60HZ = CPU_TICKS_PER_SECOND - CPU_TICKS_PER_60HZ * 60;
 const EVENT_NEW_FRAME = 1;
 const EVENT_AUDIO_BUFFER_FULL = 2;
 const EVENT_UNTIL_TICKS = 4;
@@ -76,6 +78,7 @@ let data = {
   cgbColorCurve: 2, // Gambatte/Gameboy Online
   colorOptions: false,
   needsReload: false,
+  recordingVGM: false,
 };
 
 let vm = new Vue({
@@ -140,6 +143,9 @@ let vm = new Vue({
     selectedFileImageSrc: function() {
       if (!this.selectedFileHasImage) return '';
       return this.selectedFile.image;
+    },
+    vgmLabel: function() {
+      return this.recordingVGM ? 'stop recording VGM' : 'record VGM';
     },
   },
   watch: {
@@ -234,9 +240,11 @@ let vm = new Vue({
     downloadSave: async function(file) {
       if (file.extRam) {
         const el = $('#downloadEl');
-        el.href = URL.createObjectURL(file.extRam);
+        const url = URL.createObjectURL(file.extRam);
+        el.href = url;
         el.download = file.name + '.sav';
         el.click();
+        URL.revokeObjectURL(url);
       }
     },
     uploadSaveClicked: function() {
@@ -309,6 +317,23 @@ let vm = new Vue({
       };
       return date.toLocaleDateString(undefined, options);
     },
+    toggleRecordVGM: function() {
+      this.recordingVGM = !this.recordingVGM;
+      if (this.recordingVGM) {
+        emulator.vgmWriter.enabled = true;
+      } else {
+        emulator.vgmWriter.enabled = false;
+        const buffer = emulator.vgmWriter.write();
+        const blob = new Blob([buffer]);
+
+        const el = $('#downloadEl');
+        const url = URL.createObjectURL(blob);
+        el.href = url;
+        el.download = this.loadedFile.name + '.vgm';
+        el.click();
+        URL.revokeObjectURL(url);
+      }
+    },
   }
 });
 
@@ -347,6 +372,7 @@ class Emulator {
     this.video = new Video(module, this.e, $('canvas'));
     this.rewind = new Rewind(module, this.e);
     this.rewindIntervalId = 0;
+    this.vgmWriter = new VGMWriter(module, this.e);
 
     this.lastRafSec = 0;
     this.leftoverTicks = 0;
@@ -476,9 +502,23 @@ class Emulator {
     return this.module._emulator_get_ticks_f64(this.e);
   }
 
-  runUntil(ticks) {
+  getNext60HzTicks(currentTicks) {
+    // Modulus to 1 second.
+    const mod1SecTicks = currentTicks -
+        Math.floor(currentTicks / CPU_TICKS_PER_SECOND) * CPU_TICKS_PER_SECOND;
+    // Round up to next 60Hz interval. Add 1 to ensure we go to the next 60Hz
+    // interval, in case we're on the boundary.
+    const next1SecTicks = Math.ceil(
+        Math.ceil((mod1SecTicks + 1) / CPU_TICKS_PER_60HZ) *
+        CPU_TICKS_PER_60HZ);
+    return currentTicks + (next1SecTicks - mod1SecTicks);
+  }
+
+  runUntil(untilTicks) {
+    let next60hzTicks = this.getNext60HzTicks(this.ticks);
     while (true) {
-      const event = this.module._emulator_run_until_f64(this.e, ticks);
+      const event = this.module._emulator_run_until_f64(
+          this.e, Math.min(untilTicks, next60hzTicks));
       if (event & EVENT_NEW_FRAME) {
         this.rewind.pushBuffer();
         this.video.uploadTexture();
@@ -487,7 +527,13 @@ class Emulator {
         this.audio.pushBuffer();
       }
       if (event & EVENT_UNTIL_TICKS) {
-        break;
+        const currentTicks = this.ticks;
+        if (currentTicks >= next60hzTicks) {  // Hit the 60Hz mark.
+          this.vgmWriter.onFrame();
+          next60hzTicks = this.getNext60HzTicks(currentTicks);
+        } else {  // Ran for the requested time.
+          break;
+        }
       }
     }
     if (this.module._emulator_was_ext_ram_updated(this.e)) {
@@ -1085,5 +1131,78 @@ class Rewind {
         this.e, this.joypadBufferPtr);
     this.module._rewind_end(this.statePtr);
     this.statePtr = 0;
+  }
+}
+
+class VGMWriter {
+  constructor(module, e) {
+    this.module = module;
+    this.e = e;
+    this.frames = [];
+    this.isEnabled = false;
+  }
+
+  get enabled() {
+    return this.isEnabled;
+  }
+
+  set enabled(set) {
+    this.isEnabled = set;
+    this.module._set_log_apu_writes(this.e, set);
+  }
+
+  onFrame() {
+    if (!this.isEnabled) return;
+    const buffer = makeWasmBuffer(
+        this.module, this.module._get_apu_log_data_ptr(this.e),
+        this.module._get_apu_log_data_size(this.e));
+    const frame = buffer.slice();  // Copy out data.
+    this.frames.push(frame);
+    this.module._reset_apu_log(this.e);
+  }
+
+  write() {
+    // The only commands used are:
+    //   $62:       Wait for 1/60th of a second
+    //   $66:       End of sound data
+    //   $B3 aa dd: Write DMG register
+    const HeaderSize = 256;
+    let size = HeaderSize + 1; // $66 End of sound data
+    for (let frame of this.frames) {
+      // $B3 count
+      size += (frame.length >>> 1) * 3;
+      // $62 count
+      size += 1;
+    }
+    const buffer = new ArrayBuffer(size);
+    const data = new Uint8Array(buffer);
+    const dv = new DataView(buffer);
+    // Write magic
+    data[0] = 0x56;
+    data[1] = 0x67;
+    data[2] = 0x6d;
+    data[3] = 0x20;
+    // Write EOF offset
+    dv.setUint32(0x04, size - 4, true);
+    // Write version 1.61
+    dv.setUint32(0x08, 0x161, true);
+    // Write total # samples (1/60th of a second = 735 samples)
+    dv.setUint32(0x18, this.frames.length * 735, true);
+    // Write offset to data stream
+    dv.setUint32(0x34, HeaderSize - 0x34, true);
+    // Write DMG clock
+    dv.setUint32(0x80, 4194304, true);
+    // Write data stream
+    let offset = HeaderSize;
+    for (let frame of this.frames) {
+      for (let i = 0; i < frame.length; i += 2) {
+        data[offset++] = 0xb3; // DMG write command.
+        data[offset++] = frame[i];
+        data[offset++] = frame[i + 1];
+      }
+      data[offset++] = 0x62; // Frame wait command.
+    }
+    data[offset++] = 0x66; // End of data stream command.
+    return buffer;
   }
 }
