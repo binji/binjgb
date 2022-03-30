@@ -11,8 +11,6 @@
 
 #include "emulator.h"
 
-#define MAXIMUM_ROM_SIZE MEGABYTES(8)
-#define MINIMUM_ROM_SIZE KILOBYTES(32)
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
 #define VIDEO_RAM_SIZE KILOBYTES(16)
 #define WORK_RAM_SIZE KILOBYTES(32)
@@ -1115,7 +1113,7 @@ static void set_cart_info(Emulator* e, u8 index) {
 }
 
 static Result get_cart_info(FileData* file_data, size_t offset,
-                            CartInfo* cart_info) {
+                            CartInfo* cart_info, Bool require_logo_checksum) {
   /* Simple checksum on logo data so we don't have to include it here. :) */
   u8* data = file_data->data + offset;
   size_t i;
@@ -1123,14 +1121,14 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
     logo_checksum = (logo_checksum << 1) ^ data[i];
   }
-  CHECK(logo_checksum == 0xe06c8834);
+  CHECK(!require_logo_checksum || logo_checksum == 0xe06c8834);
   cart_info->offset = offset;
   cart_info->data = data;
   cart_info->rom_size = data[ROM_SIZE_ADDR];
   /* HACK(binji): The mooneye-gb multicart test doesn't set any of the header
    * bits, even though multicart games all seem to. Just force the values in
    * reasonable defaults in that case. */
-  if (offset != 0 && !is_rom_size_valid(cart_info->rom_size)) {
+  if (!is_rom_size_valid(cart_info->rom_size)) {
     cart_info->rom_size = ROM_SIZE_32K;
     cart_info->cgb_flag = CGB_FLAG_NONE;
     cart_info->sgb_flag = SGB_FLAG_NONE;
@@ -1165,7 +1163,8 @@ static Result get_cart_infos(Emulator* e) {
   for (i = 0; i < MAX_CART_INFOS; ++i) {
     size_t offset = i << CART_INFO_SHIFT;
     if (offset + MINIMUM_ROM_SIZE > e->file_data.size) break;
-    if (SUCCESS(get_cart_info(&e->file_data, offset, &e->cart_infos[i]))) {
+    if (SUCCESS(
+            get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE))) {
       if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
           MBC_TYPE_MMM01) {
         /* MMM01 has the cart header at the end. */
@@ -1174,6 +1173,11 @@ static Result get_cart_infos(Emulator* e) {
       }
       e->cart_info_count++;
     }
+  }
+  // Maybe the logo checksum failed; try again without it required.
+  if (e->cart_info_count == 0 &&
+      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE))) {
+    e->cart_info_count++;
   }
   CHECK_MSG(e->cart_info_count != 0, "Invalid ROM.\n");
   set_cart_info(e, 0);
@@ -4647,11 +4651,18 @@ static const char* get_result_string(Result value) {
 }
 
 static void log_cart_info(CartInfo* cart_info) {
+  unsigned char title[TITLE_MAX_LENGTH + 1] = {0};
   char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
   char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
   int title_length =
       (int)(title_end ? title_end - title_start : TITLE_MAX_LENGTH);
-  printf("title: \"%.*s\"\n", title_length, title_start);
+  memcpy(title, title_start, title_length);
+  // Change all non-ascii characters to ' '.
+  int i;
+  for (i = 0; i < title_length; ++i) {
+    if (title[i] < 32 || title[i] >= 128) { title[i] = ' '; }
+  }
+  printf("title: \"%s\"\n", title);
   printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
   printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
   printf("cart type: %s\n", get_cart_type_string(cart_info->cart_type));

@@ -109,6 +109,7 @@ typedef struct JoypadButtons {
 
 const char* replace_extension(const char* filename, const char* extension);
 Result file_read(const char* filename, FileData* out);
+Result file_read_aligned(const char* filename, size_t align, FileData* out);
 Result file_write(const char* filename, const FileData*);
 void file_data_delete(FileData*);
 

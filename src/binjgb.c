@@ -489,7 +489,7 @@ int main(int argc, char** argv) {
   parse_arguments(argc, argv);
 
   FileData rom;
-  CHECK(SUCCESS(file_read(s_rom_filename, &rom)));
+  CHECK(SUCCESS(file_read_aligned(s_rom_filename, MINIMUM_ROM_SIZE, &rom)));
 
   EmulatorInit emulator_init;
   ZERO_MEMORY(emulator_init);

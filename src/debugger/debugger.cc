@@ -117,7 +117,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
                     u32 builtin_palette, bool force_dmg, bool use_sgb_border,
                     CgbColorCurve cgb_color_curve) {
   FileData rom;
-  if (!SUCCESS(file_read(filename, &rom))) {
+  if (!SUCCESS(file_read_aligned(filename, MINIMUM_ROM_SIZE, &rom))) {
     return false;
   }
 

@@ -357,12 +357,15 @@ class Emulator {
 
   constructor(module, romBuffer, extRamBuffer) {
     this.module = module;
-    this.romDataPtr = this.module._malloc(romBuffer.byteLength);
-    makeWasmBuffer(this.module, this.romDataPtr, romBuffer.byteLength)
+    // Align size up to 32k.
+    const size = (romBuffer.byteLength + 0x7fff) & ~0x7fff;
+    this.romDataPtr = this.module._malloc(size);
+    makeWasmBuffer(this.module, this.romDataPtr, size)
+        .fill(0)
         .set(new Uint8Array(romBuffer));
     this.e = this.module._emulator_new_simple(
-        this.romDataPtr, romBuffer.byteLength, Audio.ctx.sampleRate,
-        AUDIO_FRAMES, vm.cgbColorCurve);
+        this.romDataPtr, size, Audio.ctx.sampleRate, AUDIO_FRAMES,
+        vm.cgbColorCurve);
     if (this.e == 0) {
       throw new Error('Invalid ROM.');
     }
