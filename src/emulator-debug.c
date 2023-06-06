@@ -65,6 +65,8 @@ static int s_breakpoint_max_id;
   X(A, V, write_nrx2_initial_volume_abi, "(%#04x, %#02x) initial_volume=%u")   \
   X(A, V, write_nrx2_zombie_mode_abii,                                         \
     "(%#04x, %#02x) zombie mode: volume %u -> %u")                             \
+  X(A, V, write_nrx2_zombie_mode_hack_abi,                                     \
+    "(%#04x, %#02x) zombie mode hack: step %u")                                \
   X(A, D, write_nrx4_disable_channel_ab, "(%#04x, %#02x) disabling channel")   \
   X(A, D, write_nrx4_extra_length_clock_abi,                                   \
     "(%#04x, %#02x) extra length clock = %u")                                  \

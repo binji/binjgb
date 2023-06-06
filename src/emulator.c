@@ -499,6 +499,7 @@ typedef struct {
   u8 volume;      /* 0..15 */
   u32 timer;      /* 0..period */
   Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
+  u8 zombie_step; /* HACK: support zombie volume decrease */
 } Envelope;
 
 /* Channel 1 and 2 */
@@ -2893,6 +2894,27 @@ static void write_nrx2_reg(Emulator* e, Channel* channel, Address addr,
       HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
            new_volume);
       channel->envelope.volume = new_volume;
+      // Super ugly hack to support decreasing volume in zombie mode.
+      channel->envelope.zombie_step = value == 9;
+      if (value == 9) {
+        HOOK(write_nrx2_zombie_mode_hack_abi, addr, value,
+             channel->envelope.zombie_step);
+      }
+    } else if (UNLIKELY(channel->envelope.zombie_step > 0)) {
+      if (channel->envelope.zombie_step == 1 && value == 0x11) {
+        channel->envelope.zombie_step++;
+        HOOK(write_nrx2_zombie_mode_hack_abi, addr, value,
+             channel->envelope.zombie_step);
+      } else if (channel->envelope.zombie_step == 2 && value == 0x18) {
+        channel->envelope.zombie_step++;
+        u8 new_volume = (channel->envelope.volume + ENVELOPE_MAX_VOLUME - 1) &
+                        ENVELOPE_MAX_VOLUME;
+        HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
+             new_volume);
+        channel->envelope.volume = new_volume;
+      } else {
+        channel->envelope.zombie_step = 0;
+      }
     }
   }
   channel->envelope.direction = UNPACK(value, NRX2_ENVELOPE_DIRECTION);
