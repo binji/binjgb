@@ -114,9 +114,10 @@ Debugger::~Debugger() {
 
 bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
                     int font_scale, bool paused_at_start, u32 random_seed,
-                    u32 builtin_palette, bool force_dmg) {
+                    u32 builtin_palette, bool force_dmg, bool use_sgb_border,
+                    CgbColorCurve cgb_color_curve) {
   FileData rom;
-  if (!SUCCESS(file_read(filename, &rom))) {
+  if (!SUCCESS(file_read_aligned(filename, MINIMUM_ROM_SIZE, &rom))) {
     return false;
   }
 
@@ -136,6 +137,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   emulator_init.random_seed = random_seed;
   emulator_init.builtin_palette = builtin_palette;
   emulator_init.force_dmg = force_dmg ? TRUE : FALSE;
+  emulator_init.cgb_color_curve = cgb_color_curve;
   e = emulator_new(&emulator_init);
   if (e == nullptr) {
     return false;
@@ -163,6 +165,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   // TODO: make these configurable?
   host_init.rewind.frames_per_base_state = 45;
   host_init.rewind.buffer_capacity = MEGABYTES(32);
+  host_init.use_sgb_border = use_sgb_border ? TRUE : FALSE;
   host = host_new(&host_init, e);
   if (host == nullptr) {
     return false;
@@ -178,6 +181,7 @@ bool Debugger::Init(const char* filename, int audio_frequency, int audio_frames,
   rom_usage_filename = replace_extension(filename, ROM_USAGE_EXTENSION);
 
   is_cgb = emulator_is_cgb(e);
+  is_sgb = emulator_is_sgb(e);
 
   return true;
 }
@@ -240,7 +244,7 @@ void Debugger::Run() {
       // Initialize default dock layout.
       if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
         ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGui::GetIO().DisplaySize);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_None);
 
         ImGuiID left, mid, right;
         ImGuiID left_top, left_bottom;

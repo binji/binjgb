@@ -19,6 +19,8 @@ static bool s_paused_at_start;
 static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static bool s_force_dmg;
+static u32 s_cgb_color_curve;
+static bool s_use_sgb_border;
 
 static void usage(int argc, char** argv) {
   PRINT_ERROR(
@@ -30,7 +32,12 @@ static void usage(int argc, char** argv) {
       "  -p,--pause         pause at start\n"
       "  -s,--seed=SEED     random seed used for initializing RAM\n"
       "  -P,--palette PAL   use a builtin palette for DMG\n"
-      "     --force-dmg     force running as a DMG (original gameboy)\n",
+      "  -C,--cgb-color COLOR    cgb color curve to use\n"
+      "                            0: none\n"
+      "                            1: Sameboy (Emulate Hardware)\n"
+      "                            2: Gambatte/Gameboy Online\n"
+      "     --force-dmg     force running as a DMG (original gameboy)\n"
+      "     --sgb-border    draw the super gameboy border\n",
       argv[0]);
 
   emulator_print_log_systems();
@@ -45,7 +52,9 @@ void parse_arguments(int argc, char** argv) {
     {'p', "pause", 0},
     {'s', "seed", 1},
     {'P', "palette", 1},
+    {'C', "cgb-color", 1},
     {0, "force-dmg", 0},
+    {0, "sgb-border", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -114,9 +123,15 @@ void parse_arguments(int argc, char** argv) {
             s_builtin_palette = atoi(result.value);
             break;
 
+          case 'C':
+            s_cgb_color_curve = atoi(result.value);
+            break;
+
           default:
             if (strcmp(result.option->long_name, "force-dmg") == 0) {
               s_force_dmg = TRUE;
+            } else if (strcmp(result.option->long_name, "sgb-border") == 0) {
+              s_use_sgb_border = TRUE;
             } else {
               abort();
             }
@@ -158,7 +173,8 @@ int main(int argc, char** argv) {
   Debugger debugger;
   if (!debugger.Init(s_rom_filename, audio_frequency, audio_frames,
                      s_font_scale, s_paused_at_start, s_random_seed,
-                     s_builtin_palette, s_force_dmg)) {
+                     s_builtin_palette, s_force_dmg, s_use_sgb_border,
+                     static_cast<CgbColorCurve>(s_cgb_color_curve))) {
     return 1;
   }
   debugger.Run();

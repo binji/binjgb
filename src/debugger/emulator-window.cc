@@ -19,12 +19,14 @@ void Debugger::EmulatorWindow::Tick() {
   if (!is_open) return;
 
   if (ImGui::Begin(s_emulator_window_name, &is_open)) {
+    int fb_width = d->host_init.use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+    int fb_height = d->host_init.use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     HostTexture* fb_texture = host_get_frame_buffer_texture(d->host);
     ImVec2 avail_size = ImGui::GetContentRegionAvail();
     f32 w = avail_size.x, h = avail_size.y;
     f32 aspect = w / h;
-    f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+    f32 want_aspect = (f32)fb_width / fb_height;
     ImVec2 image_size(aspect < want_aspect ? w : h * want_aspect,
                       aspect < want_aspect ? w / want_aspect : h);
 
@@ -34,14 +36,14 @@ void Debugger::EmulatorWindow::Tick() {
     draw_list->PushClipRect(image_ul, image_br);
 
     ImVec2 ul_uv(0, 0);
-    ImVec2 br_uv((f32)SCREEN_WIDTH / fb_texture->width,
-                 (f32)SCREEN_HEIGHT / fb_texture->height);
+    ImVec2 br_uv((f32)fb_width / fb_texture->width,
+                 (f32)fb_height / fb_texture->height);
 
     draw_list->AddImage((ImTextureID)fb_texture->handle, image_ul, image_br,
                         ul_uv, br_uv);
 
     if (d->highlight_obj) {
-      f32 scale = image_size.x / SCREEN_WIDTH;
+      f32 scale = image_size.x / fb_width;
       ObjSize obj_size = emulator_get_obj_size(d->e);
       Obj obj = emulator_get_obj(d->e, d->highlight_obj_index);
 

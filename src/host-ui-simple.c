@@ -10,6 +10,10 @@
 #include "host.h"
 #include "host-gl.h"
 
+static const GLuint s_sgb_contents_vertex_start = 0;
+static const GLuint s_sgb_border_vertex_start = 4;
+static const GLuint s_fb_only_vertex_start = 8;
+
 typedef struct {
   f32 pos[2];
   f32 tex_coord[2];
@@ -18,15 +22,37 @@ typedef struct {
 typedef struct HostUI {
   SDL_Window* window;
   GLuint vao;
-  GLuint vbo;
   GLuint program;
   GLint uSampler;
   GLint uUsePalette;
   GLint uPalette;
+  int width, height;
+  Bool use_sgb_border;
 } HostUI;
 
-static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
-  static Vertex s_vertex_buffer[4] = {
+static f32 InvLerpClipSpace(f32 x, f32 max) { return 2 * (x / max) - 1; }
+
+static Result host_ui_init(struct HostUI* ui, SDL_Window* window,
+                           Bool use_sgb_border) {
+  const f32 left = InvLerpClipSpace(SGB_SCREEN_LEFT, SGB_SCREEN_WIDTH);
+  const f32 right = InvLerpClipSpace(SGB_SCREEN_RIGHT, SGB_SCREEN_WIDTH);
+  const f32 top = -InvLerpClipSpace(SGB_SCREEN_TOP, SGB_SCREEN_HEIGHT);
+  const f32 bottom = -InvLerpClipSpace(SGB_SCREEN_BOTTOM, SGB_SCREEN_HEIGHT);
+
+  const Vertex vertex_buffer[] = {
+    // SGB contents
+    {{left, top}, {0, 0}},
+    {{left, bottom}, {0, SCREEN_HEIGHT / 256.0f}},
+    {{right, top}, {SCREEN_WIDTH / 256.0f, 0}},
+    {{right, bottom}, {SCREEN_WIDTH / 256.0f, SCREEN_HEIGHT / 256.0f}},
+
+    // SGB border
+    {{-1, +1}, {0, 0}},
+    {{-1, -1}, {0, SGB_SCREEN_HEIGHT / 256.0f}},
+    {{+1, +1}, {SGB_SCREEN_WIDTH / 256.0f, 0}},
+    {{+1, -1}, {SGB_SCREEN_WIDTH / 256.0f, SGB_SCREEN_HEIGHT / 256.0f}},
+
+    // FB only
     {{-1, +1}, {0, 0}},
     {{-1, -1}, {0, SCREEN_HEIGHT / 256.0f}},
     {{+1, +1}, {SCREEN_WIDTH / 256.0f, 0}},
@@ -57,12 +83,15 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
       "}\n";
 
   ui->window = window;
+  ui->use_sgb_border = use_sgb_border;
+  ui->width = use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+  ui->height = use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
 
-  glGenBuffers(1, &ui->vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, ui->vbo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(s_vertex_buffer), s_vertex_buffer,
+  GLuint vbo;
+  glGenBuffers(1, &vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer), vertex_buffer,
                GL_STATIC_DRAW);
-
   GLuint vs, fs;
   CHECK(SUCCESS(host_gl_shader(GL_VERTEX_SHADER, s_vertex_shader, &vs)));
   CHECK(SUCCESS(host_gl_shader(GL_FRAGMENT_SHADER, s_fragment_shader, &fs)));
@@ -86,9 +115,9 @@ static Result host_ui_init(struct HostUI* ui, SDL_Window* window) {
   ON_ERROR_RETURN;
 }
 
-struct HostUI* host_ui_new(struct SDL_Window* window) {
+struct HostUI* host_ui_new(struct SDL_Window* window, Bool use_sgb_border) {
   HostUI* ui = xcalloc(1, sizeof(HostUI));
-  CHECK(SUCCESS(host_ui_init(ui, window)));
+  CHECK(SUCCESS(host_ui_init(ui, window, use_sgb_border)));
   return ui;
 error:
   xfree(ui);
@@ -107,7 +136,7 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
     SDL_GL_GetDrawableSize(ui->window, &iw, &ih);
     f32 w = iw, h = ih;
     f32 aspect = w / h;
-    f32 want_aspect = (f32)SCREEN_WIDTH / SCREEN_HEIGHT;
+    f32 want_aspect = (f32)ui->width / ui->height;
     f32 new_w = aspect < want_aspect ? w : h * want_aspect;
     f32 new_h = aspect < want_aspect ? w / want_aspect : h;
     f32 new_left = (w - new_w) * 0.5f;
@@ -116,18 +145,30 @@ void host_ui_event(struct HostUI* ui, union SDL_Event* event) {
   }
 }
 
-static void render_screen_texture(struct HostUI* ui, HostTexture* tex) {
+static void render_screen_texture(struct HostUI* ui, HostTexture* tex,
+                                  GLuint start) {
   glUseProgram(ui->program);
   glUniform1i(ui->uSampler, 0);
   glBindVertexArray(ui->vao);
   glBindTexture(GL_TEXTURE_2D, tex->handle);
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glDrawArrays(GL_TRIANGLE_STRIP, start, 4);
 }
 
-void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture) {
+void host_ui_begin_frame(struct HostUI* ui, HostTexture* fb_texture,
+                         HostTexture* sgb_fb_texture) {
   glClearColor(0.1f, 0.1f, 0.1f, 1);
   glClear(GL_COLOR_BUFFER_BIT);
-  render_screen_texture(ui, fb_texture);
+
+  if (ui->use_sgb_border) {
+    render_screen_texture(ui, fb_texture, s_sgb_contents_vertex_start);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    render_screen_texture(ui, sgb_fb_texture, s_sgb_border_vertex_start);
+    glDisable(GL_BLEND);
+  } else {
+    render_screen_texture(ui, fb_texture, s_fb_only_vertex_start);
+  }
 }
 
 void host_ui_end_frame(struct HostUI* ui) {
@@ -155,7 +196,9 @@ void host_ui_enable_palette(struct HostUI* ui, Bool enabled) {
 void host_ui_render_screen_overlay(struct HostUI* ui, HostTexture* tex) {
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  render_screen_texture(ui, tex);
+  render_screen_texture(ui, tex,
+                        ui->use_sgb_border ? s_sgb_contents_vertex_start
+                                           : s_fb_only_vertex_start);
   glDisable(GL_BLEND);
 }
 

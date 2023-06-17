@@ -32,4 +32,10 @@ void* xcalloc_(const char* file, int line, size_t count, size_t size) {
   return p;
 }
 
+char* xstrdup_(const char* file, int line, const char* s) {
+  char* p = strdup(s);
+  printf("%s:%d: %s(%p) => %p\n", file, line, __func__, s, p);
+  return p;
+}
+
 #endif

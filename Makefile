@@ -38,7 +38,7 @@ $(eval $(call EMSCRIPTEN_BUILD,Wasm,wasm,-DWASM=true))
 
 .PHONY: demo
 demo: wasm
-	cp src/emscripten/binjgb.js demo/
-	cp out/Wasm/binjgb.wasm demo/
+	cp out/Wasm/binjgb.js docs/
+	cp out/Wasm/binjgb.wasm docs/
 
 emscripten: js

@@ -105,21 +105,40 @@ void TextRegBits(Emulator* e, u8 v, EnumArg<T> arg, Args... args) {
   TextRegBits(e, v, args...);
 }
 
-struct SwatchArg {
+struct DmgSwatchArg {
   PaletteType pal;
-  int index;
+  int color_index;
 };
 
-SwatchArg Swatch(PaletteType pal, int index) {
-  return SwatchArg{pal, index};
+struct SgbSwatchArg {
+  int palette_index;
+  int color_index;
+};
+
+struct CgbSwatchArg {
+  CgbPaletteType type;
+  int palette_index;
+  int color_index;
+};
+
+DmgSwatchArg Swatch(PaletteType pal, int index) {
+  return DmgSwatchArg{pal, index};
+}
+
+SgbSwatchArg SgbSwatch(int palette_index, int color_index) {
+  return SgbSwatchArg{palette_index, color_index};
+}
+
+CgbSwatchArg CgbSwatch(CgbPaletteType type, int palette_index, int color_index) {
+  return CgbSwatchArg{type, palette_index, color_index};
 }
 
 template <typename... Args>
-void TextRegBits(Emulator* e, u8 v, SwatchArg arg, Args... args) {
+void ColorSwatchTextRegBits(Emulator* e, u8 v, PaletteRGBA pal_rgba,
+                            int color_index, Args... args) {
   ImGui::SameLine();
-  ImGui::Text("%d:", arg.index);
-  PaletteRGBA pal_rgba = emulator_get_palette_rgba(e, arg.pal);
-  u8 color = (v >> (arg.index * 2)) & 3;
+  ImGui::Text("%d:", color_index);
+  u8 color = (v >> (color_index * 2)) & 3;
   RGBA color_rgba = pal_rgba.color[color];
   float sz = ImGui::GetTextLineHeight();
   ImGui::SameLine();
@@ -128,6 +147,26 @@ void TextRegBits(Emulator* e, u8 v, SwatchArg arg, Args... args) {
                                             color_rgba);
   ImGui::Dummy(ImVec2(sz, sz));
   TextRegBits(e, v, args...);
+}
+
+template <typename... Args>
+void TextRegBits(Emulator* e, u8 v, DmgSwatchArg arg, Args... args) {
+  ColorSwatchTextRegBits(e, v, emulator_get_palette_rgba(e, arg.pal),
+                         arg.color_index, args...);
+}
+
+template <typename... Args>
+void TextRegBits(Emulator* e, u8 v, SgbSwatchArg arg, Args... args) {
+  ColorSwatchTextRegBits(e, v,
+                         emulator_get_sgb_palette_rgba(e, arg.palette_index),
+                         arg.color_index, args...);
+}
+
+template <typename... Args>
+void TextRegBits(Emulator* e, u8 v, CgbSwatchArg arg, Args... args) {
+  ColorSwatchTextRegBits(
+      e, v, emulator_get_cgb_palette_rgba(e, arg.type, arg.palette_index),
+      arg.color_index, args...);
 }
 
 template <typename... Args>
@@ -142,6 +181,31 @@ void TextReg(Emulator* e, Address addr, const char* name, Args... args) {
   ImGui::TextColored(kRegColor, "%02X ", v);
   TextRegBits(e, v, args...);
 }
+
+template <typename... Args>
+void TextSgbPal(Emulator* e, const char* name, Args... args) {
+  const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+
+  char buf[15];
+  u8 v = emulator_read_u8_raw(e, 0xff47);
+  snprintf(buf, sizeof(buf), "[%s]", name);
+  ImGui::Text("   %8s:   ", buf);
+  ImGui::SameLine();
+  TextRegBits(e, v, args...);
+}
+
+template <typename... Args>
+void TextCgbPal(Emulator* e, const char* name, Args... args) {
+  const ImVec4 kRegColor(1.f, 0.75f, 0.3f, 1.f);
+
+  char buf[15];
+  u8 v = 0xE4; // Always use normal order.
+  snprintf(buf, sizeof(buf), "[%s]", name);
+  ImGui::Text("   %8s:   ", buf);
+  ImGui::SameLine();
+  TextRegBits(e, v, args...);
+}
+
 
 }  // namespace
 
@@ -213,6 +277,84 @@ void Debugger::IOWindow::Tick() {
 
     TextReg(d->e, 0xffff, "IE", Bit0(0x10, "JOYP "), Bit0(0x8, "SERIAL "),
             Bit0(0x4, "TIMER "), Bit0(0x2, "STAT "), Bit0(0x1, "VBLANK "));
+
+    if (d->is_cgb) {
+      ImGui::NewLine();
+      TextCgbPal(d->e, "CGB BG Pal 0", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 0, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 0, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 0, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 0, 3));
+      TextCgbPal(d->e, "CGB BG Pal 1", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 1, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 1, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 1, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 1, 3));
+      TextCgbPal(d->e, "CGB BG Pal 2", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 2, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 2, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 2, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 2, 3));
+      TextCgbPal(d->e, "CGB BG Pal 3", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 3, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 3, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 3, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 3, 3));
+      TextCgbPal(d->e, "CGB BG Pal 4", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 4, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 4, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 4, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 4, 3));
+      TextCgbPal(d->e, "CGB BG Pal 5", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 5, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 5, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 5, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 5, 3));
+      TextCgbPal(d->e, "CGB BG Pal 6", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 6, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 6, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 6, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 6, 3));
+      TextCgbPal(d->e, "CGB BG Pal 7", CgbSwatch(CGB_PALETTE_TYPE_BGCP, 7, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 7, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 7, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_BGCP, 7, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 0", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 0, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 0, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 0, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 0, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 1", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 1, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 1, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 1, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 1, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 2", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 2, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 2, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 2, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 2, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 3", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 3, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 3, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 3, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 3, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 4", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 4, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 4, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 4, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 4, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 5", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 5, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 5, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 5, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 5, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 6", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 6, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 6, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 6, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 6, 3));
+      TextCgbPal(d->e, "CGB OBJ Pal 7", CgbSwatch(CGB_PALETTE_TYPE_OBCP, 7, 0),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 7, 1),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 7, 2),
+                 CgbSwatch(CGB_PALETTE_TYPE_OBCP, 7, 3));
+    } else if (d->is_sgb) {
+      ImGui::NewLine();
+      TextSgbPal(d->e, "SGB Pal 0", SgbSwatch(0, 0), SgbSwatch(0, 1),
+                 SgbSwatch(0, 2), SgbSwatch(0, 3));
+      TextSgbPal(d->e, "SGB Pal 1", SgbSwatch(1, 0), SgbSwatch(1, 1),
+                 SgbSwatch(1, 2), SgbSwatch(1, 3));
+      TextSgbPal(d->e, "SGB Pal 2", SgbSwatch(2, 0), SgbSwatch(2, 1),
+                 SgbSwatch(2, 2), SgbSwatch(2, 3));
+      TextSgbPal(d->e, "SGB Pal 3", SgbSwatch(3, 0), SgbSwatch(3, 1),
+                 SgbSwatch(3, 2), SgbSwatch(3, 3));
+    }
   }
   ImGui::End();
 }

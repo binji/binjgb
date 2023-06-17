@@ -34,16 +34,22 @@ static Result get_file_size(FILE* f, long* out_size) {
 }
 
 Result file_read(const char* filename, FileData* out_file_data) {
+  return file_read_aligned(filename, 1, out_file_data);
+}
+
+Result file_read_aligned(const char* filename, size_t align,
+                         FileData* out_file_data) {
   FILE* f = fopen(filename, "rb");
   CHECK_MSG(f, "unable to open file \"%s\".\n", filename);
   long size;
   CHECK(SUCCESS(get_file_size(f, &size)));
-  u8* data = xmalloc(size);
+  long aligned_size = ALIGN_UP(size, align);
+  u8* data = xcalloc(1, aligned_size);
   CHECK_MSG(data, "allocation failed.\n");
   CHECK_MSG(fread(data, size, 1, f) == 1, "fread failed.\n");
   fclose(f);
   out_file_data->data = data;
-  out_file_data->size = size;
+  out_file_data->size = aligned_size;
   return OK;
   ON_ERROR_CLOSE_FILE_AND_RETURN;
 }

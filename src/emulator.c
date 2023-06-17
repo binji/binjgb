@@ -12,8 +12,6 @@
 
 #include "emulator.h"
 
-#define MAXIMUM_ROM_SIZE MEGABYTES(8)
-#define MINIMUM_ROM_SIZE KILOBYTES(32)
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
 #define VIDEO_RAM_SIZE KILOBYTES(16)
 #define WORK_RAM_SIZE KILOBYTES(32)
@@ -260,6 +258,11 @@ typedef enum {
   JOYPAD_SELECT_BUTTONS = 1,
   JOYPAD_SELECT_DPAD = 2,
   JOYPAD_SELECT_NONE = 3,
+
+  JOYPAD_SGB_BOTH_LOW = 0,
+  JOYPAD_SGB_P15_LOW = 1,
+  JOYPAD_SGB_P14_LOW = 2,
+  JOYPAD_SGB_BOTH_HIGH = 3,
 } JoypadSelect;
 
 typedef enum {
@@ -334,6 +337,21 @@ typedef enum {
   SPEED_DOUBLE = 1,
 } Speed;
 
+typedef enum {
+  SGB_MASK_CANCEL = 0,
+  SGB_MASK_FREEZE = 1,
+  SGB_MASK_BLACK = 2,
+  SGB_MASK_COLOR0 = 3,
+} SgbMask;
+
+typedef enum {
+  SGB_STATE_IDLE,
+  SGB_STATE_WAIT_BIT,
+  SGB_STATE_READ_BIT,
+  SGB_STATE_STOP_BIT,
+  SGB_STATE_STOP_WAIT,
+} SgbState;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -358,7 +376,9 @@ typedef struct {
 } Mbc1, Huc1, Mmm01;
 
 typedef struct {
-  Ticks offset_ticks;
+  u8 sec, min, hour;
+  u16 day;
+  Bool day_carry;
   Ticks latch_ticks;
   u8 rtc_reg;
   Bool rtc_halt;
@@ -400,6 +420,24 @@ typedef struct {
   u8 last_p10_p13;
   Ticks last_callback; /* The last time joypad callback was called. */
 } Joypad;
+
+typedef struct {
+  u8 chr_ram[8192];
+  u8 pal_ram[4096];
+  u8 attr_ram[4050];
+  u8 attr_map[90];
+  PaletteRGBA screen_pal[4];
+  RGBA border_pal[4][16];
+  SgbMask mask;
+  SgbState state;
+  u8 data[16 * 7];
+  u8 bits_read;
+  u8 current_packet;
+  u8 packet_count;
+  u8 current_player;
+  u8 player_mask;
+  Bool player_incremented;
+} SGB;
 
 typedef enum {
   CPU_STATE_NORMAL = 0,
@@ -462,6 +500,7 @@ typedef struct {
   u8 volume;      /* 0..15 */
   u32 timer;      /* 0..period */
   Bool automatic; /* TRUE when MAX/MIN has not yet been reached. */
+  u8 zombie_step; /* HACK: support zombie volume decrease */
 } Envelope;
 
 /* Channel 1 and 2 */
@@ -631,6 +670,7 @@ typedef struct {
   Interrupt interrupt;
   Obj oam[OBJ_COUNT];
   Joypad joyp;
+  SGB sgb;
   Serial serial;
   Infrared infrared;
   Timer timer;
@@ -644,6 +684,7 @@ typedef struct {
   Ticks cpu_tick;
   Ticks next_intr_ticks; /* For Timer, Serial, or PPU interrupts. */
   Bool is_cgb;
+  Bool is_sgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
 } EmulatorState;
@@ -659,12 +700,17 @@ struct Emulator {
   MemoryMap memory_map;
   EmulatorState state;
   FrameBuffer frame_buffer;
+  SgbFrameBuffer sgb_frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallbackInfo joypad_info;
   /* color_to_rgba stores mappings from 4 DMG colors to RGBA colors. pal is a
    * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
   PaletteRGBA pal[PALETTE_TYPE_COUNT];
+  PaletteRGBA sgb_pal[4];
+  CgbColorCurve cgb_color_curve;
+  ApuLog apu_log;
+
   Bool breakpoint[0x10000];
 };
 
@@ -685,7 +731,9 @@ struct Emulator {
 #define INFRARED (e->state.infrared)
 #define INTR (e->state.interrupt)
 #define IS_CGB (e->state.is_cgb)
+#define IS_SGB (e->state.is_sgb)
 #define JOYP (e->state.joyp)
+#define SGB (e->state.sgb)
 #define LCDC (PPU.lcdc)
 #define MMAP_STATE (e->state.memory_map_state)
 #define NOISE (APU.noise)
@@ -719,12 +767,6 @@ struct Emulator {
 #ifndef HOOK0_FALSE
 #define HOOK0_FALSE(name) FALSE
 #endif
-
-/* Configurable constants */
-#define RGBA_WHITE 0xffffffffu
-#define RGBA_LIGHT_GRAY 0xffaaaaaau
-#define RGBA_DARK_GRAY 0xff555555u
-#define RGBA_BLACK 0xff000000u
 
 /* ROM header stuff */
 #define LOGO_START_ADDR 0x104
@@ -1075,7 +1117,7 @@ static void set_cart_info(Emulator* e, u8 index) {
 }
 
 static Result get_cart_info(FileData* file_data, size_t offset,
-                            CartInfo* cart_info) {
+                            CartInfo* cart_info, Bool require_logo_checksum) {
   /* Simple checksum on logo data so we don't have to include it here. :) */
   u8* data = file_data->data + offset;
   size_t i;
@@ -1083,14 +1125,14 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
     logo_checksum = (logo_checksum << 1) ^ data[i];
   }
-  if (offset != 0) CHECK(logo_checksum == 0xe06c8834);
+  if (offset != 0) CHECK(!require_logo_checksum || logo_checksum == 0xe06c8834);
   cart_info->offset = offset;
   cart_info->data = data;
   cart_info->rom_size = data[ROM_SIZE_ADDR];
   /* HACK(binji): The mooneye-gb multicart test doesn't set any of the header
    * bits, even though multicart games all seem to. Just force the values in
    * reasonable defaults in that case. */
-  if (offset != 0 && !is_rom_size_valid(cart_info->rom_size)) {
+  if (!is_rom_size_valid(cart_info->rom_size)) {
     cart_info->rom_size = ROM_SIZE_32K;
     cart_info->cgb_flag = CGB_FLAG_NONE;
     cart_info->sgb_flag = SGB_FLAG_NONE;
@@ -1125,7 +1167,8 @@ static Result get_cart_infos(Emulator* e) {
   for (i = 0; i < MAX_CART_INFOS; ++i) {
     size_t offset = i << CART_INFO_SHIFT;
     if (offset + MINIMUM_ROM_SIZE > e->file_data.size) break;
-    if (SUCCESS(get_cart_info(&e->file_data, offset, &e->cart_infos[i]))) {
+    if (SUCCESS(
+            get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE))) {
       if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
           MBC_TYPE_MMM01) {
         /* MMM01 has the cart header at the end. */
@@ -1134,6 +1177,11 @@ static Result get_cart_infos(Emulator* e) {
       }
       e->cart_info_count++;
     }
+  }
+  // Maybe the logo checksum failed; try again without it required.
+  if (e->cart_info_count == 0 &&
+      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE))) {
+    e->cart_info_count++;
   }
   CHECK_MSG(e->cart_info_count != 0, "Invalid ROM.\n");
   set_cart_info(e, 0);
@@ -1236,23 +1284,16 @@ static void mbc1m_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
 }
 
 static void mbc2_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
-  switch (addr >> 13) {
-    case 0: /* 0000-1fff */
-      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) == 0) {
-        MMAP_STATE.ext_ram_enabled =
-            (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
+  if (addr < 0x4000) {
+    if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
+      u16 rom1_bank = value & MBC2_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+      if (rom1_bank == 0) {
+        rom1_bank++;
       }
-      break;
-    case 1: { /* 2000-3fff */
-      u16 rom1_bank;
-      if ((addr & MBC2_ADDR_SELECT_BIT_MASK) != 0) {
-        rom1_bank = value & MBC2_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
-        if (rom1_bank == 0) {
-          rom1_bank++;
-        }
-        set_rom_bank(e, 1, rom1_bank);
-      }
-      break;
+      set_rom_bank(e, 1, rom1_bank);
+    } else {
+      MMAP_STATE.ext_ram_enabled =
+          (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
     }
   }
 }
@@ -1281,7 +1322,11 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
           (value & MBC_RAM_ENABLED_MASK) == MBC_RAM_ENABLED_VALUE;
       break;
     case 1: { /* 2000-3fff */
-      set_rom_bank(e, 1, value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e));
+      u16 rom1_bank = value & MBC3_ROM_BANK_SELECT_MASK & ROM_BANK_MASK(e);
+      if (rom1_bank == 0) {
+        rom1_bank++;
+      }
+      set_rom_bank(e, 1, rom1_bank);
       break;
     }
     case 2: /* 4000-5fff */
@@ -1291,12 +1336,70 @@ static void mbc3_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
       }
       break;
     case 3: { /* 6000-7fff */
-      Bool was_latched = MMAP_STATE.mbc3.latched;
+      Mbc3* mbc3 = &MMAP_STATE.mbc3;
+      Bool was_latched = mbc3->latched;
       Bool latched = value == 1;
-      if (!was_latched && latched) {
-        MMAP_STATE.mbc3.latch_ticks = TICKS;
+      if (!was_latched && latched && !mbc3->rtc_halt) {
+        // Update the clock by how much time has passed since it was last
+        // latched.
+        Ticks delta = TICKS - mbc3->latch_ticks;
+        // RTC ticks every second, so don't update unless at least a second
+        // has passed.
+        if (delta >= CPU_TICKS_PER_SECOND) {
+          u32 ms, sec, min, hour, day;
+          emulator_ticks_to_time(delta, &day, &hour, &min, &sec, &ms);
+
+          Bool secovf = FALSE;
+          if (mbc3->sec >= 60) {
+            mbc3->sec += sec;
+            if (mbc3->sec >= 64) {
+              mbc3->sec -= 64;
+              if (mbc3->sec >= 60) { mbc3->sec -= 60; ++min; secovf = TRUE; }
+            }
+          } else {
+            mbc3->sec += sec;
+            if (mbc3->sec >= 60) { mbc3->sec -= 60; ++min; secovf = TRUE; }
+          }
+
+          Bool minovf = FALSE;
+          if (min > 0 || secovf) {
+            if (mbc3->min >= 60) {
+              mbc3->min += min;
+              if (mbc3->min >= 64) {
+                mbc3->min -= 64;
+                if (mbc3->min >= 60) { mbc3->min -= 60; ++hour; minovf = TRUE; }
+              }
+            } else {
+              mbc3->min += min;
+              if (mbc3->min >= 60) { mbc3->min -= 60; ++hour; minovf = TRUE; }
+            }
+          }
+
+          Bool hourovf = FALSE;
+          if (hour > 0 || minovf) {
+            if (mbc3->hour >= 24) {
+              mbc3->hour += hour;
+              if (mbc3->hour >= 32) {
+                mbc3->hour -= 32;
+                if (mbc3->hour >= 24) { mbc3->hour -= 24; ++day; hourovf = TRUE; }
+              }
+            } else {
+              mbc3->hour += hour;
+              if (mbc3->hour >= 24) { mbc3->hour -= 24; ++day; hourovf = TRUE; }
+            }
+          }
+
+          if (day > 0 || hourovf) {
+            mbc3->day += day;
+            if (mbc3->day >= 512) {
+              mbc3->day_carry = TRUE;
+            }
+          }
+
+          mbc3->latch_ticks = TICKS;
+        }
       }
-      MMAP_STATE.mbc3.latched = latched;
+      mbc3->latched = latched;
       break;
     }
     default:
@@ -1318,24 +1421,19 @@ static u8 mbc3_read_ext_ram(Emulator* e, MaskedAddress addr) {
     return INVALID_READ_BYTE;
   }
 
-  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-  u32 ms, sec, min, hr, day;
-  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
-                         &sec, &ms);
   u8 result = INVALID_READ_BYTE;
   switch (mbc3->rtc_reg) {
-    case 8: result = sec; break;
-    case 9: result = min; break;
-    case 10: result = hr; break;
-    case 11: result = day & 0xff; break;
-    case 12: {
-      u8 day_carry = day >= 512;
-      result = PACK(day_carry, MBC3_RTC_DAY_CARRY) |
+    case 8: result = mbc3->sec; break;
+    case 9: result = mbc3->min; break;
+    case 10: result = mbc3->hour; break;
+    case 11: result = mbc3->day; break;
+    case 12:
+      result = PACK(mbc3->day_carry, MBC3_RTC_DAY_CARRY) |
                PACK(mbc3->rtc_halt, MBC3_RTC_HALT) |
-               PACK(day & 1, MBC3_RTC_DAY_HI);
+               PACK((mbc3->day >> 8) & 1, MBC3_RTC_DAY_HI);
       break;
-    }
   }
+
   return result;
 }
 
@@ -1354,33 +1452,36 @@ static void mbc3_write_ext_ram(Emulator* e, MaskedAddress addr, u8 value) {
     return;
   }
 
-  u64 latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-  u32 ms, sec, min, hr, day;
-  emulator_ticks_to_time(mbc3->offset_ticks + latch_ticks, &day, &hr, &min,
-                         &sec, &ms);
-  u8 day_lo = day & 0xff;
-  u8 day_hi = (day >> 8) & 1;
-  Bool carry = FALSE;
-
   switch (mbc3->rtc_reg) {
-    case 8: sec = value % 60; break;
-    case 9: min = value % 60; break;
-    case 10: hr = value % 24; break;
-    case 11: day_lo = value; break;
-    case 12:
-      day_hi = UNPACK(value, MBC3_RTC_DAY_HI);
-      mbc3->rtc_halt = UNPACK(value, MBC3_RTC_HALT);
-      latch_ticks = mbc3->rtc_halt ? 0 : mbc3->latch_ticks;
-      carry = UNPACK(value, MBC3_RTC_DAY_CARRY);
+    case 8:
+      mbc3->sec = value & 63;
+      /* Reset the tick timer. Note that if the RTC timer is halted then
+       * latch_ticks is a previously stored delta, not an absolute tick timer.
+       * Once the timer is restarted then latch_ticks is an absolute timer
+       * again. */
+      mbc3->latch_ticks = mbc3->rtc_halt ? 0 : TICKS;
       break;
+    case 9: mbc3->min = value & 63; break;
+    case 10: mbc3->hour = value & 31; break;
+    case 11: mbc3->day = (mbc3->day & 0x100) | value; break;
+    case 12: {
+      mbc3->day = (UNPACK(value, MBC3_RTC_DAY_HI) << 8) | (mbc3->day & 0xff);
+      mbc3->day_carry = UNPACK(value, MBC3_RTC_DAY_CARRY);
+      Bool old_rtc_halt = mbc3->rtc_halt;
+      mbc3->rtc_halt = UNPACK(value, MBC3_RTC_HALT);
+      if (mbc3->rtc_halt != old_rtc_halt) {
+        // Update the tick timer; if the clock is halted, then store the
+        // previous delta before the clock was stopped. If the clock is
+        // restarted, then subtract that delta from the current tick timer to
+        // "add" in the delta that is not yet accounted for in the RTC
+        // registers.
+        mbc3->latch_ticks = TICKS - mbc3->latch_ticks;
+      }
+      break;
+    }
     default:
-      return;
+      break;
   }
-  day = (day_hi << 8) | day_lo;
-  u64 new_total =
-      ((((((((u64)carry * 512 + day) * 24) + hr) * 60) + min) * 60) + sec) *
-      CPU_TICKS_PER_SECOND;
-  mbc3->offset_ticks = new_total - latch_ticks;
 }
 
 static void mbc5_write_rom(Emulator* e, MaskedAddress addr, u8 value) {
@@ -1573,6 +1674,11 @@ static u8 read_oam(Emulator* e, MaskedAddress addr) {
 }
 
 static u8 read_joyp_p10_p13(Emulator* e) {
+  if (JOYP.joypad_select == JOYPAD_SELECT_NONE) {
+    return ~(SGB.current_player & 3);
+  }
+  if (SGB.current_player != 0) { return ~0; }  // Ignore other controllers.
+
   u8 result = 0;
   if (JOYP.joypad_select == JOYPAD_SELECT_BUTTONS ||
       JOYP.joypad_select == JOYPAD_SELECT_BOTH) {
@@ -2078,10 +2184,394 @@ static void check_joyp_intr(Emulator* e) {
 }
 
 static void update_bw_palette_rgba(Emulator* e, PaletteType type) {
-  int i;
-  for (i = 0; i < 4; ++i) {
+  for (int i = 0; i < 4; ++i) {
     e->pal[type].color[i] =
         e->color_to_rgba[type].color[PPU.pal[type].color[i]];
+  }
+  if (type == PALETTE_TYPE_BGP) {
+    for (int pal = 0; pal < 4; ++pal) {
+      for (int i = 0; i < 4; ++i) {
+        e->sgb_pal[pal].color[i] =
+            SGB.screen_pal[pal].color[PPU.pal[PALETTE_TYPE_BGP].color[i]];
+      }
+    }
+  }
+}
+
+static RGBA unpack_cgb_color(Emulator* e, u16 color) {
+  u8 r = UNPACK(color, XCPD_RED_INTENSITY);
+  u8 g = UNPACK(color, XCPD_GREEN_INTENSITY);
+  u8 b = UNPACK(color, XCPD_BLUE_INTENSITY);
+
+  switch (e->cgb_color_curve) {
+    default:
+    case CGB_COLOR_CURVE_NONE:
+      return MAKE_RGBA(r << 3, g << 3, b << 3, 255);
+
+    case CGB_COLOR_CURVE_SAMEBOY_EMULATE_HARDWARE: {
+      // Using Sameboy's color curves, see
+      // https://github.com/LIJI32/SameBoy/blob/345e51647f2a7ce1ea39f21497f5a6dc75a587c8/Core/display.c#L239
+      static const u8 curve[] = {
+          0,   6,   12,  20,  28,  36,  45,  56,  66,  76,  88,
+          100, 113, 125, 137, 149, 161, 172, 182, 192, 202, 210,
+          218, 225, 232, 238, 243, 247, 250, 252, 254, 255,
+      };
+      r = curve[r];
+      g = curve[g];
+      b = curve[b];
+      g = (g * 3 + b) / 4;
+      return MAKE_RGBA(r, g, b, 255);
+    }
+
+    case CGB_COLOR_CURVE_GAMBATTE:
+      // Using gambatte's color curves, according to Gameboy Online, see
+      // https://github.com/taisel/GameBoy-Online/blob/47f9f638a8a9445aaa75050f634e437baa34aae0/js/GameBoyCore.js#L6453
+      return MAKE_RGBA((r * 13 + g * 2 + b) >> 1, (g * 3 + b) << 1,
+                       (r * 3 + g * 2 + b * 11) >> 1, 255);
+  }
+}
+
+static RGBA unpack_cgb_color8(Emulator* e, u8 lo, u8 hi) {
+  return unpack_cgb_color(e, (hi << 8) | lo);
+}
+
+static void set_sgb_palette(Emulator* e, int pal, u8 lo0, u8 hi0, u8 lo1,
+                               u8 hi1, u8 lo2, u8 hi2, u8 lo3, u8 hi3) {
+  for (int i = 0; i < 4; ++i) {
+    SGB.screen_pal[i].color[0] = unpack_cgb_color8(e, lo0, hi0);
+  }
+  SGB.screen_pal[pal].color[1] = unpack_cgb_color8(e, lo1, hi1);
+  SGB.screen_pal[pal].color[2] = unpack_cgb_color8(e, lo2, hi2);
+  SGB.screen_pal[pal].color[3] = unpack_cgb_color8(e, lo3, hi3);
+  if (pal == 0) {
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP0, &SGB.screen_pal[0]);
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP1, &SGB.screen_pal[0]);
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
+}
+
+static void unpack_sgb_palette_ram(Emulator* e, int pal, u8 idx_lo, u8 idx_hi) {
+  u16 idx = (idx_hi << 8) | idx_lo;
+  u8* data = SGB.pal_ram + 8 * (idx & 0x1ff);
+  set_sgb_palette(e, pal, data[0], data[1], data[2], data[3], data[4], data[5],
+                  data[6], data[7]);
+}
+
+static void clear_frame_buffer(Emulator* e, RGBA color) {
+  for (size_t i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; ++i) {
+    e->frame_buffer[i] = color;
+  }
+}
+
+static void update_sgb_mask(Emulator* e) {
+  RGBA color = RGBA_BLACK;
+  Bool should_clear = TRUE;
+  switch (SGB.mask) {
+    case SGB_MASK_CANCEL: should_clear = FALSE; break;
+    case SGB_MASK_FREEZE: should_clear = FALSE; break;
+    case SGB_MASK_BLACK:  color = RGBA_BLACK; break;
+    case SGB_MASK_COLOR0: color = SGB.screen_pal[0].color[0]; break;
+  }
+  if (should_clear) {
+    clear_frame_buffer(e, color);
+  }
+}
+
+static void set_sgb_attr(Emulator* e, u8 byte) {
+  u8 file = byte & 0x3f;
+  if (file < 0x2D) {
+    memcpy(SGB.attr_map, SGB.attr_ram + file * 90, sizeof(SGB.attr_map));
+  }
+  if (byte & 0x40) {
+    SGB.mask = SGB_MASK_CANCEL;
+    update_sgb_mask(e);
+  }
+}
+
+static void set_sgb_attr_block(Emulator* e, int x0, int y0, int x1, int y1,
+                               u8 pal) {
+  for (int y = y0; y <= y1; ++y) {
+    for (int x = x0; x <= x1; ++x) {
+      int index = y * 20 + x;
+      u8 *byte = &SGB.attr_map[index >> 2];
+      u8 mask = ~(0xc0 >> (2 * (x & 3)));
+      *byte = (*byte & mask) | (pal << (2 * (3 - (x & 3))));
+    }
+  }
+}
+
+static u8 reverse_bits_u8(u8 x) {
+  x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
+  x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
+  x = ((x << 1) & 0xaa) | ((x >> 1) & 0x55);
+  return x;
+}
+
+static u16 map_select_to_address(TileMapSelect map_select) {
+  return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
+}
+
+static void do_sgb(Emulator* e) {
+  if (!IS_SGB) { return; }
+
+  Bool do_command = FALSE;
+
+  switch (SGB.state) {
+    case SGB_STATE_IDLE:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW) {
+        SGB.bits_read = 0;
+        if (++SGB.current_packet >= SGB.packet_count) {
+          SGB.current_packet = 0;
+          SGB.packet_count = 0;
+          ZERO_MEMORY(SGB.data);
+        }
+        SGB.state = SGB_STATE_WAIT_BIT;
+      }
+      break;
+    case SGB_STATE_WAIT_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+        SGB.state =
+            SGB.bits_read >= 128 ? SGB_STATE_STOP_BIT : SGB_STATE_READ_BIT;
+      } else {
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+    case SGB_STATE_READ_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_P15_LOW) {
+        int curbyte = (SGB.current_packet << 4) | (SGB.bits_read >> 3);
+        u8 curbit = SGB.bits_read & 7;
+        SGB.data[curbyte] |= 1 << curbit;
+        SGB.bits_read++;
+        SGB.state = SGB_STATE_WAIT_BIT;
+      } else if (JOYP.joypad_select == JOYPAD_SGB_P14_LOW) {
+        SGB.bits_read++;
+        SGB.state = SGB_STATE_WAIT_BIT;
+      }
+      break;
+    case SGB_STATE_STOP_BIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_P14_LOW) {
+        SGB.state = SGB_STATE_STOP_WAIT;
+      } else {
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+    case SGB_STATE_STOP_WAIT:
+      if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+        do_command = TRUE;
+        SGB.state = SGB_STATE_IDLE;
+      }
+      break;
+  }
+
+  if ((JOYP.joypad_select == JOYPAD_SGB_BOTH_LOW ||
+       JOYP.joypad_select == JOYPAD_SGB_P15_LOW) &&
+      !SGB.player_incremented) {
+    SGB.player_incremented = TRUE;
+  } else if (JOYP.joypad_select == JOYPAD_SGB_BOTH_HIGH) {
+    if (SGB.player_incremented) {
+      SGB.current_player = (SGB.current_player + 1) & SGB.player_mask;
+    }
+    SGB.player_incremented = FALSE;
+  }
+
+  if (do_command) {
+    if (SGB.current_packet == 0) {
+      SGB.packet_count = SGB.data[0] & 7;
+    }
+
+    if (SGB.current_packet == SGB.packet_count - 1) {
+      // Assume we can just read the data directly from VRAM. Cheat by reading
+      // the upper-left tile and assuming that the rest of the data is in
+      // order.
+      int code = SGB.data[0] >> 3;
+      u8* xfer_src = NULL;
+      if (code == 0x0b || code == 0x13 || code == 0x14 || code == 0x15) {
+        u16 map_base = map_select_to_address(LCDC.bg_tile_map_select);
+        u16 tile_index = VRAM.data[map_base];
+        if (LCDC.bg_tile_data_select == TILE_DATA_8800_97FF) {
+          // Copy the data into the temporary buffer so it can be used
+          // contiguously.
+          static u8 s_temp_xfer_buffer[4096];
+          u16 start_offset = (256 + (s8)tile_index) * 16;
+          u16 len = 0x1800 - start_offset;
+          memcpy(s_temp_xfer_buffer, VRAM.data + start_offset, len);
+          memcpy(s_temp_xfer_buffer + len, VRAM.data + 0x800, 0x1000 - len);
+          xfer_src = s_temp_xfer_buffer;
+        } else {
+          xfer_src = VRAM.data + tile_index * 16;
+        }
+      }
+
+      switch (code) {
+        case 0x00:   // PAL01
+        case 0x01:   // PAL23
+        case 0x02:   // PAL03
+        case 0x03: { // PAL12
+          static struct {
+            int pal0, pal1;
+          } s_pals[] = {{0, 1}, {2, 3}, {0, 3}, {1, 2}};
+          set_sgb_palette(e, s_pals[code].pal0, SGB.data[1], SGB.data[2],
+                          SGB.data[3], SGB.data[4], SGB.data[5], SGB.data[6],
+                          SGB.data[7], SGB.data[8]);
+          set_sgb_palette(e, s_pals[code].pal1, SGB.data[1], SGB.data[2],
+                          SGB.data[9], SGB.data[10], SGB.data[11], SGB.data[12],
+                          SGB.data[13], SGB.data[14]);
+          break;
+        }
+        case 0x04: { // ATTR_BLK
+          int datasets = MIN(SGB.data[1], (SGB.packet_count * 16 - 2) / 6);
+          for (int i = 0; i < datasets; ++i) {
+            u8 info = SGB.data[2 + i * 6];
+            u8 pal = SGB.data[3 + i * 6];
+            u8 palin = pal & 3, palon = (pal >> 2) & 3, palout = (pal >> 4) & 3;
+            u8 l = SGB.data[4 + i * 6], t = SGB.data[5 + i * 6],
+               r = SGB.data[6 + i * 6], b = SGB.data[7 + i * 6];
+            if (info & 1) {  // colors inside region
+              set_sgb_attr_block(e, l, t, r, b, palin);
+            }
+            if (info & 2) { // colors on region border
+              set_sgb_attr_block(e, l, t, r, t, palon);  // top
+              set_sgb_attr_block(e, l, t, l, b, palon);  // left
+              set_sgb_attr_block(e, l, b, r, b, palon);  // bottom
+              set_sgb_attr_block(e, r, t, r, b, palon);  // right
+            }
+            if (info & 4) { // colors outside region
+              set_sgb_attr_block(e, 0, 0, 19, t - 1, palout);   // top
+              set_sgb_attr_block(e, 0, t, l - 1, b, palout);    // left
+              set_sgb_attr_block(e, 0, b + 1, 19, 17, palout);  // bottom
+              set_sgb_attr_block(e, r + 1, t, 19, b, palout);   // right
+            }
+          }
+          break;
+        }
+        case 0x05: { // ATTR_LIN
+          int datasets = MIN(SGB.data[1], SGB.packet_count * 16 - 2);
+          for (int i = 0; i < datasets; ++i) {
+            u8 info = SGB.data[2 + i];
+            u8 line = info & 0x1f;
+            u8 pal = (info >> 5) & 3;
+            if (info & 0x80) {  // horizontal
+              set_sgb_attr_block(e, 0, line, 19, line, pal);
+            } else { // vertical
+              set_sgb_attr_block(e, line, 0, line, 17, pal);
+            }
+          }
+          break;
+        }
+        case 0x06: { // ATTR_DIV
+          u8 pal = SGB.data[1];
+          u8 pallo = pal & 3, palon = (pal >> 2) & 3, palhi = (pal >> 4) & 3;
+          u8 line = SGB.data[2];
+          if (pal & 0x40) {  // above/below
+            set_sgb_attr_block(e, 0, 0, 19, line - 1, palhi);   // top
+            set_sgb_attr_block(e, 0, line, 19, line, palon);    // on
+            set_sgb_attr_block(e, 0, line + 1, 19, 17, pallo);  // bottom
+          } else { // left/right
+            set_sgb_attr_block(e, 0, 0, line - 1, 17, palhi);   // left
+            set_sgb_attr_block(e, line, 0, line, 17, palon);    // on
+            set_sgb_attr_block(e, line + 1, 0, 19, 17, pallo);  // right
+          }
+          break;
+        }
+        case 0x07: { // ATTR_CHR
+          u8 x = SGB.data[1], y = SGB.data[2];
+          u8 dx = 0, dy = 0;
+          if (SGB.data[5] == 0) { dx = 1; } else { dy = 1; }
+          int datasets = MIN(MIN((SGB.data[4] << 8) | SGB.data[3],
+                                 (SGB.packet_count * 16 - 6) * 4),
+                             360);
+          for (int i = 0; i < datasets; i += 4) {
+            u8 byte = SGB.data[6 + (i >> 2)];
+            for (int j = 0; j < MIN(datasets, 4); ++j) {
+              set_sgb_attr_block(e, x, y, x, y, byte >> ((3 - j) * 2));
+              x += dx;
+              y += dy;
+              if (x >= 20) { x = 0; y++; }
+              if (y >= 18) { y = 0; x++; if (x >= 20) { x = 0; } }
+            }
+          }
+          break;
+        }
+        case 0x0a: // PAL_SET
+          unpack_sgb_palette_ram(e, 3, SGB.data[7], SGB.data[8]);
+          unpack_sgb_palette_ram(e, 2, SGB.data[5], SGB.data[6]);
+          unpack_sgb_palette_ram(e, 1, SGB.data[3], SGB.data[4]);
+          unpack_sgb_palette_ram(e, 0, SGB.data[1], SGB.data[2]);
+          if (SGB.data[9] & 0x80) {  // Use attr file
+            set_sgb_attr(e, SGB.data[9] & 0x7f);
+          }
+          break;
+        case 0x0b: // PAL_TRN
+          memcpy(SGB.pal_ram, xfer_src, sizeof(SGB.pal_ram));
+          break;
+        case 0x11: // MLT_REQ
+          SGB.player_mask = SGB.data[1] & 3;
+          break;
+        case 0x13: // CHR_TRN
+          memcpy(SGB.chr_ram + ((SGB.data[1] & 1) << 12), xfer_src, 4096);
+          break;
+        case 0x14: // PCT_TRN
+          for (int pal = 0; pal < 4; ++pal) {
+            SGB.border_pal[pal][0] = 0;
+            for (int col = 1; col < 16; ++col) {
+              int idx = 0x800 + (pal * 16 + col) * 2;
+              u8 lo = xfer_src[idx], hi = xfer_src[idx + 1];
+              SGB.border_pal[pal][col] = unpack_cgb_color8(e, lo, hi);
+            }
+          }
+          RGBA* dst = e->sgb_frame_buffer;
+          for (int col = 0; col < 28; ++col) {
+            for (int row = 0; row < 32; ++row) {
+              int idx = (col * 32 + row) * 2;
+              u8 tile = xfer_src[idx];
+              u8 info = xfer_src[idx + 1];
+              u8 pal = (info >> 2) & 3;
+              u8* src = SGB.chr_ram + tile * 32;
+              int dsrc = 2;
+              if (info & 0x80) {
+                dsrc = -2;
+                src += 14;
+              }
+              for (int y = 0; y < 8; ++y, src += dsrc) {
+                u8 p0 = src[0], p1 = src[1], p2 = src[16], p3 = src[17];
+                if (!(info & 0x40)) {
+                  p0 = reverse_bits_u8(p0);
+                  p1 = reverse_bits_u8(p1);
+                  p2 = reverse_bits_u8(p2);
+                  p3 = reverse_bits_u8(p3);
+                }
+                for (int x = 0; x < 8; ++x) {
+                  int palidx = ((p3 & 1) << 3) | ((p2 & 1) << 2) |
+                               ((p1 & 1) << 1) | (p0 & 1);
+                  dst[(col * 8 + y) * SGB_SCREEN_WIDTH + (row * 8 + x)] =
+                      SGB.border_pal[pal][palidx];
+                  p0 >>= 1;
+                  p1 >>= 1;
+                  p2 >>= 1;
+                  p3 >>= 1;
+                }
+              }
+            }
+          }
+          // Update the mask in case we overwrote the center area.
+          update_sgb_mask(e);
+          break;
+        case 0x15: // ATTR_TRN
+          memcpy(SGB.attr_ram, xfer_src, sizeof(SGB.attr_ram));
+          break;
+        case 0x16: // ATTR_SET
+          set_sgb_attr(e, SGB.data[1]);
+          break;
+        case 0x17: // MASK_EN
+          if (SGB.data[1] <= 3) {
+            SGB.mask = (SgbMask)(SGB.data[1]);
+            update_sgb_mask(e);
+          }
+          break;
+        case 0x1e: case 0x1f:
+          return;  // Invalid
+      }
+    }
   }
 }
 
@@ -2090,6 +2580,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
   switch (addr) {
     case IO_JOYP_ADDR:
       JOYP.joypad_select = UNPACK(value, JOYP_JOYPAD_SELECT);
+      do_sgb(e);
       check_joyp_intr(e);
       break;
     case IO_SB_ADDR:
@@ -2193,9 +2684,10 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         } else {
           HOOK0(disable_display_v);
           /* Clear the framebuffer. */
-          size_t i;
-          for (i = 0; i < ARRAY_SIZE(e->frame_buffer); ++i) {
-            e->frame_buffer[i] = RGBA_WHITE;
+          if (IS_SGB) {
+            update_sgb_mask(e);
+          } else {
+            clear_frame_buffer(e, RGBA_WHITE);
           }
           e->state.event |= EMULATOR_EVENT_NEW_FRAME;
         }
@@ -2360,9 +2852,7 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
         u8 palette_index = (cp->index >> 3) & 7;
         u8 color_index = (cp->index >> 1) & 3;
         u16 color16 = (cp->data[cp->index | 1] << 8) | cp->data[cp->index & ~1];
-        RGBA color = MAKE_RGBA(UNPACK(color16, XCPD_RED_INTENSITY) << 3,
-                               UNPACK(color16, XCPD_GREEN_INTENSITY) << 3,
-                               UNPACK(color16, XCPD_BLUE_INTENSITY) << 3, 255);
+        RGBA color = unpack_cgb_color(e, color16);
         cp->palettes[palette_index].color[color_index] = color;
         if (cp->auto_increment) {
           cp->index = (cp->index + 1) & 0x3f;
@@ -2408,6 +2898,27 @@ static void write_nrx2_reg(Emulator* e, Channel* channel, Address addr,
       HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
            new_volume);
       channel->envelope.volume = new_volume;
+      // Super ugly hack to support decreasing volume in zombie mode.
+      channel->envelope.zombie_step = value == 9;
+      if (value == 9) {
+        HOOK(write_nrx2_zombie_mode_hack_abi, addr, value,
+             channel->envelope.zombie_step);
+      }
+    } else if (UNLIKELY(channel->envelope.zombie_step > 0)) {
+      if (channel->envelope.zombie_step == 1 && value == 0x11) {
+        channel->envelope.zombie_step++;
+        HOOK(write_nrx2_zombie_mode_hack_abi, addr, value,
+             channel->envelope.zombie_step);
+      } else if (channel->envelope.zombie_step == 2 && value == 0x18) {
+        channel->envelope.zombie_step++;
+        u8 new_volume = (channel->envelope.volume + ENVELOPE_MAX_VOLUME - 1) &
+                        ENVELOPE_MAX_VOLUME;
+        HOOK(write_nrx2_zombie_mode_abii, addr, value, channel->envelope.volume,
+             new_volume);
+        channel->envelope.volume = new_volume;
+      } else {
+        channel->envelope.zombie_step = 0;
+      }
     }
   }
   channel->envelope.direction = UNPACK(value, NRX2_ENVELOPE_DIRECTION);
@@ -2519,6 +3030,14 @@ static void write_noise_period(Emulator* e) {
 }
 
 static void write_apu(Emulator* e, MaskedAddress addr, u8 value) {
+  if (e->config.log_apu_writes || !APU.initialized) {
+    if (e->apu_log.write_count < MAX_APU_LOG_FRAME_WRITES) {
+      ApuWrite* write = &e->apu_log.writes[e->apu_log.write_count++];
+      write->addr = addr;
+      write->value = value;
+    }
+  }
+
   if (!APU.enabled) {
     if (!IS_CGB && (addr == APU_NR11_ADDR || addr == APU_NR21_ADDR ||
                     addr == APU_NR31_ADDR || addr == APU_NR41_ADDR)) {
@@ -2830,17 +3349,6 @@ static u32 mode3_tick_count(Emulator* e) {
   return ticks;
 }
 
-static u8 reverse_bits_u8(u8 x) {
-  x = ((x << 4) & 0xf0) | ((x >> 4) & 0x0f);
-  x = ((x << 2) & 0xcc) | ((x >> 2) & 0x33);
-  x = ((x << 1) & 0xaa) | ((x >> 1) & 0x55);
-  return x;
-}
-
-static u16 map_select_to_address(TileMapSelect map_select) {
-  return map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
-}
-
 static void ppu_mode3_synchronize(Emulator* e) {
   u8 x = PPU.render_x;
   const u8 y = PPU.line_y;
@@ -2860,7 +3368,13 @@ static void ppu_mode3_synchronize(Emulator* e) {
   u8 my = PPU.scy + y;
   u16 map_base = map_select_to_address(LCDC.bg_tile_map_select) |
                  ((my >> 3) * TILE_MAP_WIDTH);
-  RGBA* pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
+  RGBA* pixel;
+  if (SGB.mask != SGB_MASK_CANCEL) {
+    static RGBA s_dummy_frame_buffer_line[SCREEN_WIDTH];
+    pixel = s_dummy_frame_buffer_line;
+  } else {
+    pixel = &e->frame_buffer[y * SCREEN_WIDTH + x];
+  }
 
   /* Cache map_addr info. */
   u16 map_addr = 0;
@@ -2909,7 +3423,13 @@ static void ppu_mode3_synchronize(Emulator* e) {
               hi = reverse_bits_u8(hi);
             }
           } else {
-            pal = &e->pal[PALETTE_TYPE_BGP];
+            if (IS_SGB) {
+              int idx = (y >> 3) * (SCREEN_WIDTH >> 3) + (x >> 3);
+              u8 palidx = (SGB.attr_map[idx >> 2] >> (2 * (3 - (idx & 3)))) & 3;
+              pal = &e->sgb_pal[palidx];
+            } else {
+              pal = &e->pal[PALETTE_TYPE_BGP];
+            }
             priority = FALSE;
             u16 tile_addr = (tile_index * TILE_HEIGHT + my7) * TILE_ROW_BYTES;
             lo = VRAM.data[tile_addr];
@@ -2923,6 +3443,14 @@ static void ppu_mode3_synchronize(Emulator* e) {
         pixel[i] = pal->color[palette_index];
         bg_is_zero[i] = palette_index == 0;
         bg_priority[i] = priority;
+      } else {
+        if (IS_CGB) {
+          pixel[i] = PPU.bgcp.palettes[0].color[0];
+        } else if (IS_SGB) {
+          pixel[i] = e->sgb_pal[0].color[0];
+        } else {
+          pixel[i] = e->color_to_rgba[0].color[0];
+        }
       }
     }
 
@@ -4152,11 +4680,18 @@ static const char* get_result_string(Result value) {
 }
 
 static void log_cart_info(CartInfo* cart_info) {
+  unsigned char title[TITLE_MAX_LENGTH + 1] = {0};
   char* title_start = (char*)cart_info->data + TITLE_START_ADDR;
   char* title_end = memchr(title_start, '\0', TITLE_MAX_LENGTH);
   int title_length =
       (int)(title_end ? title_end - title_start : TITLE_MAX_LENGTH);
-  printf("title: \"%.*s\"\n", title_length, title_start);
+  memcpy(title, title_start, title_length);
+  // Change all non-ascii characters to ' '.
+  int i;
+  for (i = 0; i < title_length; ++i) {
+    if (title[i] < 32 || title[i] >= 128) { title[i] = ' '; }
+  }
+  printf("title: \"%s\"\n", title);
   printf("cgb flag: %s\n", get_cgb_flag_string(cart_info->cgb_flag));
   printf("sgb flag: %s\n", get_sgb_flag_string(cart_info->sgb_flag));
   printf("cart type: %s\n", get_cart_type_string(cart_info->cart_type));
@@ -4220,6 +4755,8 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   MMAP_STATE.rom_base[1] = 1 << ROM_BANK_SHIFT;
   IS_CGB = !init->force_dmg && (e->cart_info->cgb_flag == CGB_FLAG_SUPPORTED ||
                                 e->cart_info->cgb_flag == CGB_FLAG_REQUIRED);
+  IS_SGB = !init->force_dmg && !IS_CGB &&
+           e->cart_info->sgb_flag == SGB_FLAG_SUPPORTED;
   set_af_reg(e, 0xb0);
   REG.A = IS_CGB ? 0x11 : 0x01;
   REG.BC = 0x0013;
@@ -4256,8 +4793,11 @@ Result init_emulator(Emulator* e, const EmulatorInit* init) {
   write_io(e, IO_IE_ADDR, 0x0);
   HDMA.blocks = 0xff;
 
-  /* Set initial DMG palettes */
+  /* Set initial DMG/SGB palettes */
   emulator_set_builtin_palette(e, init->builtin_palette);
+
+  /* Set up cgb color curve */
+  e->cgb_color_curve = init->cgb_color_curve;
 
   /* Set initial CGB palettes to white. */
   int pal_index;
@@ -4308,6 +4848,10 @@ EmulatorConfig emulator_get_config(Emulator* e) {
 
 FrameBuffer* emulator_get_frame_buffer(Emulator* e) {
   return &e->frame_buffer;
+}
+
+SgbFrameBuffer* emulator_get_sgb_frame_buffer(Emulator* e) {
+  return &e->sgb_frame_buffer;
 }
 
 AudioBuffer* emulator_get_audio_buffer(Emulator* e) {
@@ -4374,6 +4918,14 @@ Result emulator_read_state(Emulator* e, const FileData* file_data) {
             SAVE_STATE_HEADER);
   memcpy(&e->state, new_state, sizeof(EmulatorState));
   set_cart_info(e, e->state.cart_info_index);
+
+  if (IS_SGB) {
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP0, &SGB.screen_pal[0]);
+    emulator_set_bw_palette(e, PALETTE_TYPE_OBP1, &SGB.screen_pal[0]);
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
+  update_bw_palette_rgba(e, PALETTE_TYPE_OBP0);
+  update_bw_palette_rgba(e, PALETTE_TYPE_OBP1);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -4506,6 +5058,18 @@ void emulator_set_builtin_palette(Emulator* e, u32 index) {
   emulator_set_bw_palette(e, 0, &pals[index][0]);
   emulator_set_bw_palette(e, 1, &pals[index][1]);
   emulator_set_bw_palette(e, 2, &pals[index][2]);
+  for (int i = 0; i < 4; ++i) {
+    SGB.screen_pal[i] = pals[index][0];
+  }
+  update_bw_palette_rgba(e, PALETTE_TYPE_BGP);
+}
+
+ApuLog* emulator_get_apu_log(Emulator* e) {
+  return &e->apu_log;
+}
+
+void emulator_reset_apu_log(Emulator* e) {
+  e->apu_log.write_count = 0;
 }
 
 u16 emulator_get_PC(Emulator* e) {

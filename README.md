@@ -1,4 +1,4 @@
-[![Travis](https://travis-ci.org/binji/binjgb.svg?branch=master)](https://travis-ci.org/binji/binjgb) [![AppVeyor](https://ci.appveyor.com/api/projects/status/github/binji/binjgb?branch=master&svg=true)](https://ci.appveyor.com/project/binji/binjgb/branch/master)
+[![Github CI Status](https://github.com/binji/binjgb/workflows/CI/badge.svg)](https://github.com/binji/binjgb)
 
 # binjgb
 
@@ -8,6 +8,7 @@ A simple GB/GBC emulator.
 
 * [Runs in the browser using WebAssembly](https://binji.github.io/binjgb)
 * Hacky-but-passable **CGB support**!
+* Mostly-there **Super GB support**!
 * Cycle accurate, passes many timing tests (see below)
 * Supports MBC1, MBC1M, MMM01, MBC2, MBC3, MBC5 and HuC1
 * Save/load battery backup
@@ -42,6 +43,12 @@ A simple GB/GBC emulator.
 ![Toki Tori](/images/toki.png)
 ![Wario 3](/images/wario3.png)
 
+## SGB Screenshots
+
+![Donkey Kong](/images/dk-sgb.png)
+![Kirby's Dreamland 2](/images/kirby2-sgb.png)
+![Mole Mania](/images/mole-sgb.png)
+
 ## Debugger Screenshots
 
 ![Debugger](/images/debugger.png)
@@ -49,6 +56,37 @@ A simple GB/GBC emulator.
 ![Map](/images/map-window.png)
 ![Tile Data](/images/tiledata-window.png)
 ![Breakpoints](/images/breakpoint.png)
+
+## Embedding binjgb in your own web page
+
+Copy the folowing files to your webserver:
+* `docs/binjgb.js`
+* `docs/binjgb.wasm`
+* `docs/simple.html`
+* `docs/simple.js`
+* `docs/simple.css`
+* your `.gb` or `.gbc` file
+
+`simple.html` will fill the entire page, so if you don't want that, you should put it into an
+[iframe](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe).
+
+The emulator will also display an on-screen gamepad if the device supports
+touch events.
+
+You can configure the emulator by editing `simple.js`:
+
+| Constant name | Description |
+| - | - |
+| ROM_FILENAME | The path to your `.gb` or `.gbc` file |
+| ENABLE_REWIND | Whether to enable rewinding with the backspace key |
+| ENABLE_PAUSE | Whether to enable pausing with the space bar |
+| ENABLE_SWITCH_PALETTES | Whether to enable switching palettes with `[` and `]` |
+| OSGP_DEADZONE | How wide to make the deadzone for the onscreen gamepad, as a decimal between between `0` and `1` |
+| CGB_COLOR_CURVE | How to tint the CGB colors so they look more like a real CGB. <ul><li>0: none</li><li>1: Use Sameboy's "Emulate Hardware" colors</li><li>2: Use Gambatte/Gameboy Online colors</li></ul> |
+| DEFAULT_PALETTE_IDX | Which palette to use by default, as an index into `PALETTES` |
+| PALETTES | An array of built-in palette IDs, between `0` and `83`. Useful if you only want the player to switch between a few of the built-in palettes |
+
+See `simple.js` for more info.
 
 ## Cloning
 
@@ -114,6 +152,10 @@ Put a symlink to Emscripten in the `emscripten` directory, then run make.
 $ ln -s ${PATH_TO_EMSCRIPTEN} emscripten
 $ make wasm
 ```
+Or set Makefile variables via command line:
+```
+$ make wasm EMSCRIPTEN_CMAKE="/path/to/Emscripten.cmake"
+```
 
 ### Changing the Build Configuration
 
@@ -156,6 +198,64 @@ Keys:
 | Rewind | <kbd>Backspace</kbd> |
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
+
+## INI file
+
+Binjgb tries to read from `binjgb.ini` on startup for configuration. The
+following keys are supported:
+
+```
+# Load this file automatically on startup
+autoload=filename.gb
+
+# Set the audio frequency in Hz
+audio-frequency=44100
+
+# Set the number of audio frames per buffer
+# lower=better latency, more pops/clicks
+# higher=worse latency, fewer pops/clicks
+audio-frames=2048
+
+# Set to the index of a builtin palette
+# (valid numbers are 0..82)
+builtin-palette=0
+
+# Force the emulator to run in DMG (original gameboy) mode.
+# 0=Don't force DMG
+# 1=Force DMG
+force-dmg=0
+
+# The number of video frames to display before storing a full dump of
+# the emulator state in the rewind buffer. Probably best to leave this
+# alone
+rewind-frames-per-base-state=45
+
+# The number of megabytes to allocate to the rewind buffer.
+# lower=less memory usage, less rewind time
+# higher=more memory usage, more rewind time
+rewind-buffer-capacity-megabytes=32
+
+# The speed at which to rewind the game, as a scale.
+# 1=rewind at 1x
+# 2=rewind at 2x
+# etc.
+rewind-scale=1.5
+
+# How much to scale the emulator window at startup.
+render-scale=4
+
+# What to set the random seed to when initializing memory. Using 0
+# disables memory randomization.
+random-seed=0
+
+# Whether to display the SGB border or not.
+# 0=Don't display SGB border
+# 1=Display SGB border, even if it doesn't exist.
+sgb-border=0
+```
+
+The INI file is loaded before parsing the command line flags, so you can use
+the command line to override the values in the INI file.
 
 ## Running tests
 

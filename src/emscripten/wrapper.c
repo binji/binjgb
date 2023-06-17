@@ -23,16 +23,19 @@ typedef struct {
 
 static Emulator* e;
 
+static EmulatorConfig s_config;
 static EmulatorInit s_init;
 static JoypadButtons s_buttons;
 
 Emulator* emulator_new_simple(void* rom_data, size_t rom_size,
-                              int audio_frequency, int audio_frames) {
+                              int audio_frequency, int audio_frames,
+                              CgbColorCurve cgb_color_curve) {
   s_init.rom.data = rom_data;
   s_init.rom.size = rom_size;
   s_init.audio_frequency = audio_frequency;
   s_init.audio_frames = audio_frames;
   s_init.random_seed = 0xcabba6e5;
+  s_init.cgb_color_curve = cgb_color_curve;
 
   e = emulator_new(&s_init);
 
@@ -148,6 +151,12 @@ void* get_frame_buffer_ptr(Emulator* e) {
 
 size_t get_frame_buffer_size(Emulator* e) { return sizeof(FrameBuffer); }
 
+void* get_sgb_frame_buffer_ptr(Emulator* e) {
+  return *emulator_get_sgb_frame_buffer(e);
+}
+
+size_t get_sgb_frame_buffer_size(Emulator* e) { return sizeof(SgbFrameBuffer); }
+
 void* get_audio_buffer_ptr(Emulator* e) {
   return emulator_get_audio_buffer(e)->data;
 }
@@ -180,3 +189,20 @@ void file_data_delete(FileData* file_data) {
   xfree(file_data->data);
   xfree(file_data);
 }
+
+void set_log_apu_writes(Emulator* e, Bool set) {
+  s_config.log_apu_writes = set;
+  emulator_set_config(e, &s_config);
+}
+
+size_t get_apu_log_data_size(Emulator* e) {
+  ApuLog* apu_log = emulator_get_apu_log(e);
+  return apu_log->write_count * sizeof(apu_log->writes[0]);
+}
+
+void* get_apu_log_data_ptr(Emulator* e) {
+  ApuLog* apu_log = emulator_get_apu_log(e);
+  return &apu_log->writes[0];
+}
+
+void reset_apu_log(Emulator* e) { return emulator_reset_apu_log(e); }

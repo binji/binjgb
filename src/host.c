@@ -69,6 +69,7 @@ typedef struct Host {
   u64 performance_frequency;
   struct HostUI* ui;
   HostTexture* fb_texture;
+  HostTexture* sgb_fb_texture;
   JoypadBuffer* joypad_buffer;
   RewindBuffer* rewind_buffer;
   RewindState rewind_state;
@@ -82,13 +83,16 @@ static Emulator* host_get_emulator(Host* host) {
 }
 
 static Result host_init_video(Host* host) {
+  Emulator* e = host_get_emulator(host);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+  int width = host->init.use_sgb_border ? SGB_SCREEN_WIDTH : SCREEN_WIDTH;
+  int height = host->init.use_sgb_border ? SGB_SCREEN_HEIGHT : SCREEN_HEIGHT;
+
   host->window = SDL_CreateWindow(
       "binjgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-      SCREEN_WIDTH * host->init.render_scale,
-      SCREEN_HEIGHT * host->init.render_scale,
+      width * host->init.render_scale, height * host->init.render_scale,
       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
   CHECK_MSG(host->window != NULL, "SDL_CreateWindow failed.\n");
 
@@ -99,9 +103,13 @@ static Result host_init_video(Host* host) {
   CHECK_MSG(major >= 2, "Unable to create GL context at version 2.\n");
   host_gl_init_procs();
 
-  host->ui = host_ui_new(host->window);
+  host->ui = host_ui_new(host->window, host->init.use_sgb_border);
   host->fb_texture = host_create_texture(host, SCREEN_WIDTH, SCREEN_HEIGHT,
                                          HOST_TEXTURE_FORMAT_RGBA);
+  if (host->init.use_sgb_border) {
+    host->sgb_fb_texture = host_create_texture(
+        host, SGB_SCREEN_WIDTH, SGB_SCREEN_HEIGHT, HOST_TEXTURE_FORMAT_RGBA);
+  }
   return OK;
 error:
   SDL_Quit();
@@ -191,7 +199,7 @@ Bool host_poll_events(Host* host) {
 }
 
 void host_begin_video(Host* host) {
-  host_ui_begin_frame(host->ui, host->fb_texture);
+  host_ui_begin_frame(host->ui, host->fb_texture, host->sgb_fb_texture);
 }
 
 void host_end_video(Host* host) {
@@ -335,6 +343,10 @@ static void host_handle_event(Host* host, EmulatorEvent event) {
   if (event & EMULATOR_EVENT_NEW_FRAME) {
     host_upload_texture(host, host->fb_texture, SCREEN_WIDTH, SCREEN_HEIGHT,
                         *emulator_get_frame_buffer(e));
+    if (host->init.use_sgb_border) {
+      host_upload_texture(host, host->sgb_fb_texture, SGB_SCREEN_WIDTH,
+                          SGB_SCREEN_HEIGHT, *emulator_get_sgb_frame_buffer(e));
+    }
 
     append_rewind_state(host);
   }
@@ -458,6 +470,9 @@ error:
 
 void host_delete(Host* host) {
   if (host) {
+    if (host->init.use_sgb_border) {
+      host_destroy_texture(host, host->sgb_fb_texture);
+    }
     host_destroy_texture(host, host->fb_texture);
     SDL_GL_DeleteContext(host->gl_context);
     SDL_DestroyWindow(host->window);

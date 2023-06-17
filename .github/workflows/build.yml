@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  create:
+    tags:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+
+    - name: install packages (linux)
+      run: |
+        sudo apt-get update
+        sudo apt-get install ninja-build libsdl2-dev
+      if: matrix.os == 'ubuntu-latest'
+
+    - name: install packages (macos)
+      run: brew install ninja SDL2
+      if: matrix.os == 'macos-latest'
+
+    - name: mkdir bin
+      run: mkdir -p bin
+      if: matrix.os == 'windows-latest'
+
+    - name: download sdl2 (windows)
+      uses: albin-johansson/download-sdl2@v1
+      with:
+        version: 2.0.14
+        sources_destination: .
+        binaries_destination: bin
+      if: matrix.os == 'windows-latest'
+
+    - name: mkdir out
+      run: mkdir -p out
+
+    - name: cmake (linux + macos)
+      run: cmake -S . -B out -G Ninja
+      if: matrix.os != 'windows-latest'
+
+    - name: cmake (windows)
+      run: cmake -S . -B out "-DSDL2_ROOT_DIR=SDL2-2.0.14"
+      if: matrix.os == 'windows-latest'
+
+    - name: build
+      run: cmake --build out
+
+    - name: tests
+      run: |
+        python scripts/build_tests.py
+        python scripts/tester.py -vv --exe bin/binjgb-tester
+      if: matrix.os != 'windows-latest'
+
+  build-wasm:
+    name: build-wasm
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+
+    - name: install packages
+      run: sudo apt-get install ninja-build
+
+    - name: emsdk install
+      run: |
+        mkdir $HOME/emsdk
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git $HOME/emsdk
+        $HOME/emsdk/emsdk update-tags
+        $HOME/emsdk/emsdk install tot
+        $HOME/emsdk/emsdk activate tot
+
+    - name: update path
+      run:  echo "PATH=$PATH:$HOME/emsdk" >> $GITHUB_ENV
+
+    - name: mkdir
+      run: mkdir -p out
+
+    - name: cmake
+      run: cmake -S . -B out -G Ninja -DCMAKE_TOOLCHAIN_FILE=$HOME/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_BUILD_TYPE=Release -DWASM=true
+
+    - name: build
+      run: |
+        source $HOME/emsdk/emsdk_env.sh
+        cmake --build out

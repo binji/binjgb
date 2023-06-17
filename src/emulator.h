@@ -13,9 +13,18 @@
 extern "C" {
 #endif
 
+#define MAXIMUM_ROM_SIZE MEGABYTES(8)
+#define MINIMUM_ROM_SIZE KILOBYTES(32)
+
 #define SCREEN_WIDTH 160
 #define SCREEN_HEIGHT 144
 #define SCREEN_HEIGHT_WITH_VBLANK 154
+#define SGB_SCREEN_WIDTH 256
+#define SGB_SCREEN_HEIGHT 224
+#define SGB_SCREEN_LEFT ((SGB_SCREEN_WIDTH - SCREEN_WIDTH) / 2)
+#define SGB_SCREEN_RIGHT ((SGB_SCREEN_WIDTH + SCREEN_WIDTH) / 2)
+#define SGB_SCREEN_TOP ((SGB_SCREEN_HEIGHT - SCREEN_HEIGHT) / 2)
+#define SGB_SCREEN_BOTTOM ((SGB_SCREEN_HEIGHT + SCREEN_HEIGHT) / 2)
 
 #define CPU_TICKS_PER_SECOND 4194304
 #define APU_TICKS_PER_SECOND 2097152
@@ -30,7 +39,14 @@ extern "C" {
 #define OBJ_X_OFFSET 8
 #define OBJ_Y_OFFSET 16
 
-#define BUILTIN_PALETTE_COUNT 83
+#define BUILTIN_PALETTE_COUNT 84
+
+#define RGBA_WHITE 0xffffffffu
+#define RGBA_LIGHT_GRAY 0xffaaaaaau
+#define RGBA_DARK_GRAY 0xff555555u
+#define RGBA_BLACK 0xff000000u
+
+#define MAX_APU_LOG_FRAME_WRITES 1024
 
 typedef struct Emulator Emulator;
 
@@ -50,6 +66,7 @@ typedef struct JoypadCallbackInfo {
 } JoypadCallbackInfo;
 
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
+typedef RGBA SgbFrameBuffer[SGB_SCREEN_WIDTH * SGB_SCREEN_HEIGHT];
 
 typedef enum Color {
   COLOR_WHITE = 0,
@@ -138,6 +155,12 @@ typedef struct AudioBuffer {
   u8* position;
 } AudioBuffer;
 
+typedef enum CgbColorCurve {
+  CGB_COLOR_CURVE_NONE,
+  CGB_COLOR_CURVE_SAMEBOY_EMULATE_HARDWARE,
+  CGB_COLOR_CURVE_GAMBATTE,
+} CgbColorCurve;
+
 typedef struct EmulatorInit {
   FileData rom;
   int audio_frequency;
@@ -145,6 +168,7 @@ typedef struct EmulatorInit {
   u32 random_seed;
   u32 builtin_palette;
   Bool force_dmg;
+  CgbColorCurve cgb_color_curve;
 } EmulatorInit;
 
 typedef struct EmulatorConfig {
@@ -153,7 +177,18 @@ typedef struct EmulatorConfig {
   Bool disable_window;
   Bool disable_obj;
   Bool allow_simulataneous_dpad_opposites;
+  Bool log_apu_writes;
 } EmulatorConfig;
+
+typedef struct {
+  u8 addr;
+  u8 value;
+} ApuWrite;
+
+typedef struct {
+  ApuWrite writes[MAX_APU_LOG_FRAME_WRITES];
+  size_t write_count;
+} ApuLog;
 
 typedef u32 EmulatorEvent;
 enum {
@@ -175,6 +210,7 @@ JoypadCallbackInfo emulator_get_joypad_callback(Emulator*);
 void emulator_set_config(Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(Emulator*);
 FrameBuffer* emulator_get_frame_buffer(Emulator*);
+SgbFrameBuffer* emulator_get_sgb_frame_buffer(Emulator*);
 AudioBuffer* emulator_get_audio_buffer(Emulator*);
 Ticks emulator_get_ticks(Emulator*);
 u32 emulator_get_ppu_frame(Emulator*);
@@ -202,6 +238,9 @@ Result emulator_write_ext_ram_to_file(Emulator*, const char* filename);
 
 EmulatorEvent emulator_step(Emulator*);
 EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
+
+ApuLog* emulator_get_apu_log(Emulator*);
+void emulator_reset_apu_log(Emulator*);
 
 #ifdef __cplusplus
 }

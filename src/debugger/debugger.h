@@ -32,7 +32,8 @@ class Debugger {
 
   bool Init(const char* filename, int audio_frequency, int audio_frames,
             int font_scale, bool paused_at_start, u32 random_seed,
-            u32 builtin_palette, bool force_dmg);
+            u32 builtin_palette, bool force_dmg, bool use_sgb_border,
+            CgbColorCurve cgb_color_curve);
   void Run();
 
  private:
@@ -111,6 +112,7 @@ class Debugger {
   HostTexture* tile_data_texture;
 
   bool is_cgb = false;
+  bool is_sgb = false;
 
   f32 audio_volume = 0.5f;
 
@@ -212,7 +214,11 @@ class Debugger {
   struct TiledataWindow : Window {
     explicit TiledataWindow(Debugger*);
     void Tick();
+    void CalculateAutoPaletteColors();
+    void CalculateAutoTilePaletteIndex(LayerType);
+    void CalculateAutoObjPaletteIndex();
 
+    bool color_auto = true;
     int scale = 3;
     int palette_type = PALETTE_TYPE_BGP;
     int color_set = PALETTE_TYPE_BGP;
@@ -224,6 +230,10 @@ class Debugger {
 
     int wrap_width = 16;
     bool size8x16 = false;
+
+    static const u32 kMaxTileCount = 384 * 2;
+    PaletteRGBA palette_rgba[17]; // 1 default color + 8 bg + 8 obj
+    u8 tile_palette_index[kMaxTileCount];
   };
 
   ImGuiID dockspace_id;

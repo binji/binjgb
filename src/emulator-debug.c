@@ -65,6 +65,8 @@ static int s_breakpoint_max_id;
   X(A, V, write_nrx2_initial_volume_abi, "(%#04x, %#02x) initial_volume=%u")   \
   X(A, V, write_nrx2_zombie_mode_abii,                                         \
     "(%#04x, %#02x) zombie mode: volume %u -> %u")                             \
+  X(A, V, write_nrx2_zombie_mode_hack_abi,                                     \
+    "(%#04x, %#02x) zombie mode hack: step %u")                                \
   X(A, D, write_nrx4_disable_channel_ab, "(%#04x, %#02x) disabling channel")   \
   X(A, D, write_nrx4_extra_length_clock_abi,                                   \
     "(%#04x, %#02x) extra length clock = %u")                                  \
@@ -745,6 +747,7 @@ void emulator_print_log_systems(void) {
 }
 
 Bool emulator_is_cgb(Emulator* e) { return e->state.is_cgb; }
+Bool emulator_is_sgb(Emulator* e) { return e->state.is_sgb; }
 
 int emulator_get_rom_size(Emulator* e) {
   return s_rom_bank_count[e->cart_info->rom_size] << ROM_BANK_SHIFT;
@@ -797,6 +800,10 @@ PaletteRGBA emulator_get_cgb_palette_rgba(Emulator* e, CgbPaletteType type,
   }
 }
 
+PaletteRGBA emulator_get_sgb_palette_rgba(Emulator* e, int index) {
+  return e->sgb_pal[index];
+}
+
 void emulator_get_tile_data(Emulator* e, TileData out_tile_data) {
   assert((TILE_DATA_TEXTURE_WIDTH % TILE_WIDTH) == 0);
   assert((TILE_DATA_TEXTURE_HEIGHT % TILE_HEIGHT) == 0);
@@ -839,6 +846,11 @@ void emulator_get_tile_map_attr(Emulator* e, TileMapSelect map_select,
   assert(emulator_is_cgb(e));
   size_t offset = map_select == TILE_MAP_9800_9BFF ? 0x1800 : 0x1c00;
   memcpy(out_tile_map, &e->state.vram.data[offset + 0x2000], TILE_MAP_SIZE);
+}
+
+void emulator_get_sgb_attr_map(Emulator* e, u8 out_attr_map[90]) {
+  assert(emulator_is_sgb(e));
+  memcpy(out_attr_map, &e->state.sgb.attr_map[0], 90);
 }
 
 

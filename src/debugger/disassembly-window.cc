@@ -180,7 +180,8 @@ void Debugger::DisassemblyWindow::Tick() {
     bool did_mouse_scroll = scroll_y != last_scroll_y;
     last_scroll_y = scroll_y;
 
-    f32 line_height = ImGui::GetTextLineHeightWithSpacing();
+    f32 line_height = ImGui::GetTextLineHeight();
+    f32 line_height_with_spacing = ImGui::GetTextLineHeightWithSpacing();
     f32 avail_y = ImGui::GetContentRegionAvail().y;
 
     if (!did_mouse_scroll) {
@@ -193,14 +194,14 @@ void Debugger::DisassemblyWindow::Tick() {
         int got_line = iter - instrs.begin();
         f32 view_min_y = scroll_y;
         f32 view_max_y = view_min_y + avail_y;
-        f32 item_y = got_line * line_height + scroll_addr_offset;
+        f32 item_y = got_line * line_height_with_spacing + scroll_addr_offset;
 
         if (scroll_delta) {
-          item_y += scroll_delta * line_height;
+          item_y += scroll_delta * line_height_with_spacing;
         }
 
-        bool is_in_view =
-            item_y >= view_min_y && item_y + line_height < view_max_y;
+        bool is_in_view = item_y >= view_min_y &&
+                          item_y + line_height_with_spacing < view_max_y;
         bool should_center = !(track_pc && is_in_view);
 
         if (should_center) {
@@ -218,16 +219,16 @@ void Debugger::DisassemblyWindow::Tick() {
 
     if (!track_pc) {
       f32 center = last_scroll_y + avail_y * 0.5f;
-      int center_index = (int)(center / line_height);
+      int center_index = (int)(center / line_height_with_spacing);
       if (center_index < instr_count) {
         scroll_addr = instrs[center_index];
-        scroll_addr_offset = center - center_index * line_height;
+        scroll_addr_offset = center - center_index * line_height_with_spacing;
         track_pc = false;
       }
     }
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    ImGuiListClipper clipper(instr_count, line_height);
+    ImGuiListClipper clipper(instr_count, line_height_with_spacing);
 
     while (clipper.Step()) {
       for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {

@@ -127,6 +127,7 @@ typedef struct HostInit {
   f32 audio_volume;
   RewindInit rewind;
   const char* joypad_filename;
+  Bool use_sgb_border;
 } HostInit;
 
 typedef struct HostConfig {

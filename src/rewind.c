@@ -470,7 +470,7 @@ void rewind_sanity_check(RewindBuffer* buffer, Emulator* e) {
   assert(SUCCESS(result));
 
   void* last_data_end = NULL;
-  Cycles last_cycles = 0;
+  Ticks last_ticks = 0;
 
   int i;
   for (i = 0; i < 2; ++i) {
@@ -493,8 +493,8 @@ void rewind_sanity_check(RewindBuffer* buffer, Emulator* e) {
 
     RewindInfo* info;
     for (info = info_range->end - 1; info >= info_range->begin; --info) {
-      assert(last_cycles <= info->cycles);
-      last_cycles = info->cycles;
+      assert(last_ticks <= info->ticks);
+      last_ticks = info->ticks;
 
       FileData* fd = NULL;
       if (info->kind == RewindInfoKind_Base) {
@@ -512,7 +512,7 @@ void rewind_sanity_check(RewindBuffer* buffer, Emulator* e) {
 
       if (fd) {
         emulator_read_state(e, fd);
-        assert(info->cycles == emulator_get_cycles(e));
+        assert(info->ticks == emulator_get_ticks(e));
       }
     }
   }
