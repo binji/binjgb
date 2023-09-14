@@ -25,7 +25,7 @@ out/$1:
 	mkdir -p out/$1
 out/$1/Makefile: | out/$1
 	cd out/$1 && \
-		cmake ../.. -DCMAKE_TOOLCHAIN_FILE=$(EMSCRIPTEN_CMAKE) \
+		cmake ../.. ${CMAKEFLAGS} -DCMAKE_TOOLCHAIN_FILE=$(EMSCRIPTEN_CMAKE) \
 								-DCMAKE_BUILD_TYPE=Release \
 								-DWERROR=ON $3
 .PHONY: $2
