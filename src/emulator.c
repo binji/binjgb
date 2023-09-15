@@ -1120,7 +1120,8 @@ static void set_cart_info(Emulator* e, u8 index) {
 }
 
 static Result get_cart_info(FileData* file_data, size_t offset,
-                            CartInfo* cart_info, Bool require_logo_checksum) {
+                            CartInfo* cart_info, Bool require_logo_checksum,
+                            size_t* max_file_size) {
   /* Simple checksum on logo data so we don't have to include it here. :) */
   u8* data = file_data->data + offset;
   size_t i;
@@ -1159,38 +1160,46 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   }
 
   u32 rom_byte_size = s_rom_bank_count[cart_info->rom_size] << ROM_BANK_SHIFT;
-  cart_info->size = rom_byte_size;
-  CHECK_MSG(file_data->size >= offset + rom_byte_size,
-            "File size too small (required %ld, got %ld)\n",
-            (long)(offset + rom_byte_size), (long)file_data->size);
+  *max_file_size = MAX(*max_file_size, offset + rom_byte_size);
 
   return OK;
   ON_ERROR_RETURN;
 }
 
 static Result get_cart_infos(Emulator* e) {
+  size_t file_size = e->file_data.size;
+  size_t max_file_size = file_size;
   u32 i;
   for (i = 0; i < MAX_CART_INFOS; ++i) {
     size_t offset = i << CART_INFO_SHIFT;
     if (offset + MINIMUM_ROM_SIZE > e->file_data.size) break;
-    if (SUCCESS(
-            get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE))) {
+    if (SUCCESS(get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE,
+                              &max_file_size))) {
       if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
           MBC_TYPE_MMM01) {
         /* MMM01 has the cart header at the end. */
-        set_cart_info(e, i);
-        return OK;
+        goto done;
       }
       e->cart_info_count++;
     }
   }
   // Maybe the logo checksum failed; try again without it required.
   if (e->cart_info_count == 0 &&
-      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE))) {
+      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE,
+                            &max_file_size))) {
     e->cart_info_count++;
   }
   CHECK_MSG(e->cart_info_count != 0, "Invalid ROM.\n");
-  set_cart_info(e, 0);
+  i = 0;
+done:
+  if (max_file_size > file_size) {
+    file_data_resize(&e->file_data, max_file_size);
+    // Fix cart_info data pointers.
+    for (u32 j = 0; j < e->cart_info_count; ++j) {
+      e->cart_infos[j].data = e->file_data.data + e->cart_infos[j].offset;
+    }
+  }
+  set_cart_info(e, i);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -4970,6 +4979,7 @@ Result emulator_write_ext_ram(Emulator* e, FileData* file_data) {
   ON_ERROR_RETURN;
 }
 
+#ifndef __wasm__
 Result emulator_read_ext_ram_from_file(Emulator* e, const char* filename) {
   if (EXT_RAM.battery_type != BATTERY_TYPE_WITH_BATTERY)
     return OK;
@@ -5023,6 +5033,7 @@ error:
   file_data_delete(&file_data);
   return result;
 }
+#endif
 
 Emulator* emulator_new(const EmulatorInit* init) {
   Emulator* e = xcalloc(1, sizeof(Emulator));
@@ -5039,6 +5050,7 @@ error:
 void emulator_delete(Emulator* e) {
   if (e) {
     xfree(e->audio_buffer.data);
+    file_data_delete(&e->file_data);
     xfree(e);
   }
 }

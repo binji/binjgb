@@ -140,6 +140,7 @@ if (NOT EMSCRIPTEN)
 else (EMSCRIPTEN)
   add_executable(binjgb
     src/memory.c
+    src/common.c
     src/emulator.c
     src/joypad.c
     src/rewind.c

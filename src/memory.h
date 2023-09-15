@@ -19,12 +19,14 @@ extern "C" {
 #if TRACE_MEMORY
 
 #define xmalloc(size) xmalloc_(__FILE__, __LINE__, size)
+#define xrealloc(size) xrealloc_(__FILE__, __LINE__, p, size)
 #define xfree(p) xfree_(__FILE__, __LINE__, p)
 #define xcalloc(count, size) xcalloc_(__FILE__, __LINE__, count, size)
 #define xstrdup(s) xstrdup_(__FILE__, __LINE__, s)
 
 /* Use these instead to make it easier to track memory usage. */
 void* xmalloc_(const char* file, int line, size_t);
+void* xrealloc_(const char* file, int line, void*, size_t);
 void xfree_(const char* file, int line, void*);
 void* xcalloc_(const char* file, int line, size_t, size_t);
 char* xstrdup_(const char* file, int line, const char*);
@@ -32,6 +34,7 @@ char* xstrdup_(const char* file, int line, const char*);
 #else
 
 #define xmalloc malloc
+#define xrealloc realloc
 #define xfree free
 #define xcalloc calloc
 #define xstrdup strdup

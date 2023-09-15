@@ -20,6 +20,13 @@ void* xmalloc_(const char* file, int line, size_t size) {
   return p;
 }
 
+void* xrealloc_(const char* file, int line, void* p, size_t size) {
+  void* newp = realloc(size);
+  printf("%s:%d: %s(%p, %" PRIu64 ") => %p\n", file, line, __func__, p,
+         (uint64_t)size, newp);
+  return newp;
+}
+
 void xfree_(const char* file, int line, void* p) {
   printf("%s:%d: %s(%p)\n", file, line, __func__, p);
   free(p);

@@ -108,9 +108,12 @@ typedef struct JoypadButtons {
 } JoypadButtons;
 
 const char* replace_extension(const char* filename, const char* extension);
+#ifndef __wasm__
 Result file_read(const char* filename, FileData* out);
 Result file_read_aligned(const char* filename, size_t align, FileData* out);
 Result file_write(const char* filename, const FileData*);
+#endif
+void file_data_resize(FileData*, size_t new_size);
 void file_data_delete(FileData*);
 
 #ifdef __cplusplus
