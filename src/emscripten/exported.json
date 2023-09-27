@@ -25,6 +25,7 @@
 "_joypad_delete",
 "_joypad_new",
 "_malloc",
+"_free",
 "_reset_apu_log",
 "_rewind_append",
 "_rewind_begin",
