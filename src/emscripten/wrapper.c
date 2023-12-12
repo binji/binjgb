@@ -185,11 +185,6 @@ size_t get_file_data_size(FileData* file_data) {
   return file_data->size;
 }
 
-void file_data_delete(FileData* file_data) {
-  xfree(file_data->data);
-  xfree(file_data);
-}
-
 void set_log_apu_writes(Emulator* e, Bool set) {
   s_config.log_apu_writes = set;
   emulator_set_config(e, &s_config);

@@ -33,6 +33,7 @@ static Result get_file_size(FILE* f, long* out_size) {
   ON_ERROR_RETURN;
 }
 
+#ifndef __wasm__
 Result file_read(const char* filename, FileData* out_file_data) {
   return file_read_aligned(filename, 1, out_file_data);
 }
@@ -62,6 +63,16 @@ Result file_write(const char* filename, const FileData* file_data) {
   fclose(f);
   return OK;
   ON_ERROR_CLOSE_FILE_AND_RETURN;
+}
+#endif
+
+void file_data_resize(FileData* file_data, size_t new_size) {
+  size_t old_size = file_data->size;
+  file_data->data = xrealloc(file_data->data, new_size);
+  if (new_size > old_size) {
+    memset(file_data->data + old_size, 0, new_size - old_size);
+  }
+  file_data->size = new_size;
 }
 
 void file_data_delete(FileData* file_data) {

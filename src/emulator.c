@@ -8,7 +8,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#if RGBDS_LIVE
 #include <emscripten.h>
+#endif
 
 #include "emulator.h"
 
@@ -711,7 +714,9 @@ struct Emulator {
   CgbColorCurve cgb_color_curve;
   ApuLog apu_log;
 
+#ifdef RGBDS_LIVE
   Bool breakpoint[0x10000];
+#endif
 };
 
 
@@ -1117,7 +1122,8 @@ static void set_cart_info(Emulator* e, u8 index) {
 }
 
 static Result get_cart_info(FileData* file_data, size_t offset,
-                            CartInfo* cart_info, Bool require_logo_checksum) {
+                            CartInfo* cart_info, Bool require_logo_checksum,
+                            size_t* max_file_size) {
   /* Simple checksum on logo data so we don't have to include it here. :) */
   u8* data = file_data->data + offset;
   size_t i;
@@ -1125,7 +1131,12 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   for (i = LOGO_START_ADDR; i <= LOGO_END_ADDR; ++i) {
     logo_checksum = (logo_checksum << 1) ^ data[i];
   }
-  if (offset != 0) CHECK(!require_logo_checksum || logo_checksum == 0xe06c8834);
+
+#if RGBDS_LIVE
+  if (offset == 0) { require_logo_checksum = FALSE; }
+#endif
+  CHECK(!require_logo_checksum || logo_checksum == 0xe06c8834);
+
   cart_info->offset = offset;
   cart_info->data = data;
   cart_info->rom_size = data[ROM_SIZE_ADDR];
@@ -1153,38 +1164,46 @@ static Result get_cart_info(FileData* file_data, size_t offset,
   }
 
   u32 rom_byte_size = s_rom_bank_count[cart_info->rom_size] << ROM_BANK_SHIFT;
-  cart_info->size = rom_byte_size;
-  CHECK_MSG(file_data->size >= offset + rom_byte_size,
-            "File size too small (required %ld, got %ld)\n",
-            (long)(offset + rom_byte_size), (long)file_data->size);
+  *max_file_size = MAX(*max_file_size, offset + rom_byte_size);
 
   return OK;
   ON_ERROR_RETURN;
 }
 
 static Result get_cart_infos(Emulator* e) {
+  size_t file_size = e->file_data.size;
+  size_t max_file_size = file_size;
   u32 i;
   for (i = 0; i < MAX_CART_INFOS; ++i) {
     size_t offset = i << CART_INFO_SHIFT;
     if (offset + MINIMUM_ROM_SIZE > e->file_data.size) break;
-    if (SUCCESS(
-            get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE))) {
+    if (SUCCESS(get_cart_info(&e->file_data, offset, &e->cart_infos[i], TRUE,
+                              &max_file_size))) {
       if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
           MBC_TYPE_MMM01) {
         /* MMM01 has the cart header at the end. */
-        set_cart_info(e, i);
-        return OK;
+        goto done;
       }
       e->cart_info_count++;
     }
   }
   // Maybe the logo checksum failed; try again without it required.
   if (e->cart_info_count == 0 &&
-      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE))) {
+      SUCCESS(get_cart_info(&e->file_data, 0, &e->cart_infos[0], FALSE,
+                            &max_file_size))) {
     e->cart_info_count++;
   }
   CHECK_MSG(e->cart_info_count != 0, "Invalid ROM.\n");
-  set_cart_info(e, 0);
+  i = 0;
+done:
+  if (max_file_size > file_size) {
+    file_data_resize(&e->file_data, max_file_size);
+    // Fix cart_info data pointers.
+    for (u32 j = 0; j < e->cart_info_count; ++j) {
+      e->cart_infos[j].data = e->file_data.data + e->cart_infos[j].offset;
+    }
+  }
+  set_cart_info(e, i);
   return OK;
   ON_ERROR_RETURN;
 }
@@ -2586,7 +2605,11 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
     case IO_SB_ADDR:
       serial_synchronize(e);
       SERIAL.sb = value;
+
+#if RGBDS_LIVE
       EM_ASM({emulator.serialCallback($0);}, value);
+#endif
+
       break;
     case IO_SC_ADDR:
       serial_synchronize(e);
@@ -4625,9 +4648,13 @@ static void emulator_step_internal(Emulator* e) {
       return;
     }
     execute_instruction(e);
+
+#ifdef RGBDS_LIVE
     if (e->breakpoint[REG.PC]) {
-        e->state.event |= EMULATOR_EVENT_BREAKPOINT;
+      e->state.event |= EMULATOR_EVENT_BREAKPOINT;
     }
+#endif
+
   } else {
     tick(e);
     hdma_copy_byte(e);
@@ -4960,6 +4987,7 @@ Result emulator_write_ext_ram(Emulator* e, FileData* file_data) {
   ON_ERROR_RETURN;
 }
 
+#ifndef __wasm__
 Result emulator_read_ext_ram_from_file(Emulator* e, const char* filename) {
   if (EXT_RAM.battery_type != BATTERY_TYPE_WITH_BATTERY)
     return OK;
@@ -5013,6 +5041,7 @@ error:
   file_data_delete(&file_data);
   return result;
 }
+#endif
 
 Emulator* emulator_new(const EmulatorInit* init) {
   Emulator* e = xcalloc(1, sizeof(Emulator));
@@ -5029,6 +5058,7 @@ error:
 void emulator_delete(Emulator* e) {
   if (e) {
     xfree(e->audio_buffer.data);
+    file_data_delete(&e->file_data);
     xfree(e);
   }
 }
@@ -5093,7 +5123,10 @@ u16 emulator_get_HL(Emulator* e) {
 }
 
 u8 emulator_get_F(Emulator* e) {
-  return PACK(REG.F.Z, CPU_FLAG_Z) | PACK(REG.F.N, CPU_FLAG_N) | PACK(REG.F.H, CPU_FLAG_H) | PACK(REG.F.C, CPU_FLAG_C);
+
+  return PACK(REG.F.Z, CPU_FLAG_Z) | PACK(REG.F.N, CPU_FLAG_N) |
+         PACK(REG.F.H, CPU_FLAG_H) | PACK(REG.F.C, CPU_FLAG_C);
+
 }
 
 u16 emulator_get_SP(Emulator* e) {
@@ -5104,125 +5137,6 @@ void emulator_set_PC(Emulator* e, u16 pc) {
   REG.PC = pc;
 }
 
-void emulator_set_breakpoint(Emulator* e, u16 pc) {
-  e->breakpoint[pc] = TRUE;
-}
-
-void emulator_clear_breakpoints(Emulator* e) {
-  for(int n=0; n<0x10000; n++)
-    e->breakpoint[n] = FALSE;
-}
-
-void emulator_render_vram(Emulator* e, u32* buffer) {
-  memset(buffer, 0, 4 * 256 * 256);
-  for(int ty=0; ty<24; ty++)
-  {
-    for(int bank=0; bank<2; bank++)
-    {
-      for(int tx=0; tx<16; tx++)
-      {
-        for(int row=0; row<8; row++)
-        {
-          int n = tx * 16 + ty * 16 * 16 + row * 2 + (bank << 13);
-          u8 a = VRAM.data[n];
-          u8 b = VRAM.data[n+1];
-          for(int x=0; x<8; x++)
-          {
-            u32 color = 0xFFC2F0C4;
-            u8 bit = (0x80 >> x);
-            if ((a & bit) && (b & bit))
-              color = 0xFF001B2D;
-            else if (a & bit)
-              color = 0xFFA8B95A;
-            else if (b & bit)
-              color = 0xFF6E601E;
-            else if (x == 7 || row == 7)
-              color = 0xFFB2E0B4;
-            buffer[(tx * 8 + x + bank * 128) + (ty * 8 + row) * 256] = color;
-          }
-        }
-      }
-    }
-  }
-  if(IS_CGB)
-  {
-    for(int idx=0; idx<8; idx++)
-    {
-      for(int col=0; col<PALETTE_COLOR_COUNT; col++)
-      {
-        for(int x=0; x<8; x++)
-        {
-          for(int y=0; y<8; y++)
-          {
-            buffer[x + idx * 8 + (200 + col * 8 + y) * 256] = PPU.bgcp.palettes[idx].color[col];
-            buffer[x + idx * 8 + (200 + col * 8 + y) * 256 + 128] = PPU.obcp.palettes[idx].color[col];
-          }
-        }
-      }
-    }
-  }
-  else
-  {
-    for(int type=0; type<PALETTE_TYPE_COUNT; type++)
-    {
-      for(int col=0; col<PALETTE_COLOR_COUNT; col++)
-      {
-        for(int x=0; x<8; x++)
-        {
-          for(int y=0; y<8; y++)
-          {
-            buffer[x + type * 8 + (200 + col * 8 + y) * 256] = e->pal[type].color[col];
-          }
-        }
-      }
-    }
-  }
-}
-
-void emulator_render_background(Emulator* e, u32* buffer, int type) {
-  memset(buffer, 0, 4 * 256 * 256);
-  int bank = 0;
-  int tile_map = (type & 1) ? 0x400 : 0;
-  for(int ty=0; ty<32; ty++)
-  {
-    for(int tx=0; tx<32; tx++)
-    {
-      for(int row=0; row<8; row++)
-      {
-        int tile = VRAM.data[0x1800 + tile_map + tx + ty * 32];
-        //TODO: LCDC bit 4
-        int n = tile * 16 + row * 2;
-        u8 a = VRAM.data[n];
-        u8 b = VRAM.data[n+1];
-        for(int x=0; x<8; x++)
-        {
-          u32 color = 0xFFC2F0C4;
-          u8 bit = (0x80 >> x);
-          if ((a & bit) && (b & bit))
-            color = 0xFF001B2D;
-          else if (a & bit)
-            color = 0xFFA8B95A;
-          else if (b & bit)
-            color = 0xFF6E601E;
-          else if (x == 7 || row == 7)
-            color = 0xFFB2E0B4;
-          buffer[(tx * 8 + x) + (ty * 8 + row) * 256] = color;
-        }
-      }
-    }
-  }
-  for(int x=0;x<160; x++)
-  {
-    buffer[((PPU.scx + x) % 256) + (PPU.scy * 256)] &= 0xFF7F7F7F;
-    buffer[((PPU.scx + x) % 256) + ((PPU.scy + 143) % 256) * 256] &= 0xFF7F7F7F;
-  }
-  for(int y=0;y<144; y++)
-  {
-    buffer[PPU.scx + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
-    buffer[((PPU.scx + 160) % 256) + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
-  }
-}
-
 u8* emulator_get_wram_ptr(Emulator* e) {
   return WRAM.data;
 }
@@ -5231,12 +5145,126 @@ u8* emulator_get_hram_ptr(Emulator* e) {
   return HRAM;
 }
 
-u8 emulator_read_mem(Emulator* e, u16 addr)
-{
-    return read_u8_raw(e, addr);
+u8 emulator_read_mem(Emulator* e, u16 addr) {
+  return read_u8_raw(e, addr);
 }
 
-void emulator_write_mem(Emulator* e, u16 addr, u8 data)
-{
-    write_u8_raw(e, addr, data);
+void emulator_write_mem(Emulator* e, u16 addr, u8 data) {
+  write_u8_raw(e, addr, data);
 }
+
+#ifdef RGBDS_LIVE
+void emulator_set_breakpoint(Emulator* e, Address addr) {
+  e->breakpoint[addr] = TRUE;
+}
+
+void emulator_clear_breakpoints(Emulator* e) {
+  ZERO_MEMORY(e->breakpoint);
+}
+
+void emulator_render_vram(Emulator* e, u32* buffer) {
+  memset(buffer, 0, sizeof(u32) * 256 * 256);
+  for (int ty = 0; ty < 24; ty++) {
+    for (int bank = 0; bank < 2; bank++) {
+      for (int tx = 0; tx < 16; tx++) {
+        for (int row = 0; row < 8; row++) {
+          int n = tx * 16 + ty * 16 * 16 + row * 2 + (bank << 13);
+          u8 a = VRAM.data[n];
+          u8 b = VRAM.data[n + 1];
+          for (int x = 0; x < 8; x++) {
+            u32 color = 0xFFC2F0C4;
+            u8 bit = (0x80 >> x);
+            if ((a & bit) && (b & bit)) {
+              color = 0xFF001B2D;
+            } else if (a & bit) {
+              color = 0xFFA8B95A;
+            } else if (b & bit) {
+              color = 0xFF6E601E;
+            } else if (x == 7 || row == 7) {
+              color = 0xFFB2E0B4;
+            }
+            buffer[(tx * 8 + x + bank * 128) + (ty * 8 + row) * 256] = color;
+          }
+        }
+      }
+    }
+  }
+  if (IS_CGB) {
+    for (int idx = 0; idx < 8; idx++) {
+      for (int col = 0; col < PALETTE_COLOR_COUNT; col++) {
+        for (int x = 0; x < 8; x++) {
+          for (int y = 0; y < 8; y++) {
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256] =
+                PPU.bgcp.palettes[idx].color[col];
+            buffer[x + idx * 8 + (200 + col * 8 + y) * 256 + 128] =
+                PPU.obcp.palettes[idx].color[col];
+          }
+        }
+      }
+    }
+  } else {
+    for (int type = 0; type < PALETTE_TYPE_COUNT; type++) {
+      for (int col = 0; col < PALETTE_COLOR_COUNT; col++) {
+        for (int x = 0; x < 8; x++) {
+          for (int y = 0; y < 8; y++) {
+            buffer[x + type * 8 + (200 + col * 8 + y) * 256] =
+                e->pal[type].color[col];
+          }
+        }
+      }
+    }
+  }
+}
+
+void emulator_render_background(Emulator* e, u32* buffer, int type) {
+  memset(buffer, 0, sizeof(u32) * 256 * 256);
+  int bank = 0;
+  int tile_map = (type & 1) ? 0x400 : 0;
+  for (int ty = 0; ty < 32; ty++) {
+    for (int tx = 0; tx < 32; tx++) {
+      for (int row = 0; row < 8; row++) {
+        int tile = VRAM.data[0x1800 + tile_map + tx + ty * 32];
+        // TODO: LCDC bit 4
+        int n = tile * 16 + row * 2;
+        u8 a = VRAM.data[n];
+        u8 b = VRAM.data[n + 1];
+        for (int x = 0; x < 8; x++) {
+          u32 color = 0xFFC2F0C4;
+          u8 bit = (0x80 >> x);
+          if ((a & bit) && (b & bit)) {
+            color = 0xFF001B2D;
+          } else if (a & bit) {
+            color = 0xFFA8B95A;
+          } else if (b & bit) {
+            color = 0xFF6E601E;
+          } else if (x == 7 || row == 7) {
+            color = 0xFFB2E0B4;
+          }
+          buffer[(tx * 8 + x) + (ty * 8 + row) * 256] = color;
+        }
+      }
+    }
+  }
+  for (int x = 0; x < SCREEN_WIDTH; x++) {
+    buffer[((PPU.scx + x) % 256) + (PPU.scy * 256)] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + x) % 256) +
+           ((PPU.scy + SCREEN_HEIGHT - 1) % 256) * 256] &= 0xFF7F7F7F;
+  }
+  for (int y = 0; y < SCREEN_HEIGHT; y++) {
+    buffer[PPU.scx + ((PPU.scy + y) % 256) * 256] &= 0xFF7F7F7F;
+    buffer[((PPU.scx + SCREEN_WIDTH) % 256) + ((PPU.scy + y) % 256) * 256] &=
+        0xFF7F7F7F;
+  }
+}
+
+#else  // !RGBDS_LIVE
+
+void emulator_set_breakpoint(Emulator* e, Address addr) {}
+
+void emulator_clear_breakpoints(Emulator* e) {}
+
+void emulator_render_vram(Emulator* e, u32* buffer) {}
+
+void emulator_render_background(Emulator* e, u32* buffer, int type) {}
+
+#endif

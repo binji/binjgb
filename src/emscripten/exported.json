@@ -25,6 +25,7 @@
 "_joypad_delete",
 "_joypad_new",
 "_malloc",
+"_free",
 "_reset_apu_log",
 "_rewind_append",
 "_rewind_begin",
@@ -42,7 +43,7 @@
 "_set_joyp_select",
 "_set_joyp_start",
 "_set_joyp_up",
-"_set_log_apu_writes"
+"_set_log_apu_writes",
 "_emulator_get_PC",
 "_emulator_get_SP",
 "_emulator_get_A",

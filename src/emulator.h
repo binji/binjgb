@@ -231,10 +231,12 @@ Result emulator_write_state(Emulator*, FileData*);
 Result emulator_read_ext_ram(Emulator*, const FileData*);
 Result emulator_write_ext_ram(Emulator*, FileData*);
 
+#ifndef __wasm__
 Result emulator_read_state_from_file(Emulator*, const char* filename);
 Result emulator_write_state_to_file(Emulator*, const char* filename);
 Result emulator_read_ext_ram_from_file(Emulator*, const char* filename);
 Result emulator_write_ext_ram_to_file(Emulator*, const char* filename);
+#endif
 
 EmulatorEvent emulator_step(Emulator*);
 EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
