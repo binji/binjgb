@@ -153,7 +153,6 @@ else (EMSCRIPTEN)
   endif ()
 
   set(LINK_FLAGS
-    --memory-init-file 0
     -s EXPORTED_FUNCTIONS=\"@${EXPORTED_JSON}\"
     -s MALLOC=emmalloc
     -s ASSERTIONS=0
