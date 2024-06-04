@@ -5258,3 +5258,19 @@ void emulator_render_vram(Emulator* e, u32* buffer) {}
 void emulator_render_background(Emulator* e, u32* buffer, int type) {}
 
 #endif
+
+#ifdef GBSTUDIO
+Bool set_audio_channel_mute(Emulator *e, int channel, Bool muted) {
+  EmulatorConfig emu_config = emulator_get_config(e);
+  emu_config.disable_sound[channel] = muted;
+  emulator_set_config(e, &emu_config);
+  return emu_config.disable_sound[channel];
+}
+
+#else  // !GBSTUDIO
+
+Bool set_audio_channel_mute(Emulator *e, int channel, Bool muted) { 
+  return FALSE;
+}
+
+#endif
