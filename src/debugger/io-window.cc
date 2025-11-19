@@ -55,7 +55,7 @@ void TextRegBits(Emulator* e, u8 v, BitArg arg, Args... args) {
     ImGui::SameLine();
     ImGui::Text("%s", text);
     if (arg.tooltip && ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(arg.tooltip);
+      ImGui::SetTooltip("%s", arg.tooltip);
     }
   }
   TextRegBits(e, v, args...);
