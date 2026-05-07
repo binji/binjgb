@@ -56,7 +56,7 @@ def BuildWlaGb():
     Run('cmake', '-G', 'NMake Makefiles', '-DCMAKE_BUILD_TYPE=Release', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
     Run('nmake', cwd=WLA_DX_BUILD_DIR)
   else:
-    Run('cmake', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
+    Run('cmake', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', WLA_DX_DIR, cwd=WLA_DX_BUILD_DIR)
     Run('make', cwd=WLA_DX_BUILD_DIR)
   # Test that wla-gb was build OK.
   Run(os.path.join(WLA_DX_BIN_DIR, 'wla-gb'))
