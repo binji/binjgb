@@ -97,3 +97,8 @@ jobs:
       run: |
         source $HOME/emsdk/emsdk_env.sh
         cmake --build out
+        
+    - uses: actions/upload-artifact@v3
+      with:
+        name: wasm-build
+        path: out/
