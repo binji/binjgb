@@ -693,7 +693,7 @@ typedef struct {
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
 #ifdef RGBDS_LIVE
-#ifndef BREAKPOINTS_MAX_BANKS_NUMBER 1
+#ifndef BREAKPOINTS_MAX_BANKS_NUMBER
 #define BREAKPOINTS_MAX_BANKS_NUMBER 1
 #endif
 typedef uint32_t breakpoints_type;
@@ -4665,7 +4665,7 @@ static inline uint32_t emulator_get_banked_PC_inline(Emulator *e) {
     }
     return pc;
   #else
-    return REG.PC    
+    return REG.PC;
   #endif
 }
 
