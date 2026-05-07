@@ -73,7 +73,7 @@ jobs:
     name: build-wasm
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
@@ -90,14 +90,43 @@ jobs:
       with:
         version: ${{env.EM_VERSION}}
         actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
-    - name: update path
-      run:  echo "PATH=$PATH:$HOME/emsdk" >> $GITHUB_ENV
 
     - name: mkdir
       run: mkdir -p out
 
     - name: cmake
       run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWASM=true
+
+    - name: build
+      run: emmake cmake --build out
+
+  build-rgbds-live:
+    name: build-rgbds-live
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: install packages
+      run: sudo apt-get install ninja-build
+
+    - name: setup cache
+      uses: actions/cache@v4
+      with:
+        path: ${{env.EM_CACHE_FOLDER}}
+        key: ${{env.EM_VERSION}}-${{ runner.os }}
+    - name: emsdk install
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: ${{env.EM_VERSION}}
+        actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
+
+    - name: mkdir
+      run: mkdir -p out
+
+    - name: cmake
+      run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWERROR=ON -DWASM=true -DRGBDS_LIVE=ONs
 
     - name: build
       run: emmake cmake --build out
