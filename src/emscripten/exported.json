@@ -3,6 +3,7 @@
 "_emulator_delete",
 "_emulator_get_A",
 "_emulator_get_BC",
+"_emulator_get_banked_PC",
 "_emulator_get_DE",
 "_emulator_get_F",
 "_emulator_get_HL",

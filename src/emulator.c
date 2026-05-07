@@ -692,7 +692,18 @@ typedef struct {
 } EmulatorState;
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
-
+#ifdef RGBDS_LIVE
+#ifndef BREAKPOINTS_MAX_BANKS_NUMBER 1
+#define BREAKPOINTS_MAX_BANKS_NUMBER 1
+#endif
+typedef uint32_t breakpoints_type;
+#define MEMORY_SIZE (64 * 1024)
+#define BREAKPOINTS_BIT_SIZE	(sizeof(breakpoints_type) * 8)
+#define BREAKPOINTS_SIZE ((BREAKPOINTS_MAX_BANKS_NUMBER * MEMORY_SIZE) / BREAKPOINTS_BIT_SIZE)
+#define BREAKPOINTS_SHIFT (__builtin_ctz(BREAKPOINTS_BIT_SIZE))
+#define BREAKPOINTS_MASK (BREAKPOINTS_BIT_SIZE - 1)
+#define BREAKPOINTS_BANK_SHIFT (16 - BREAKPOINTS_SHIFT)
+#endif
 struct Emulator {
   EmulatorConfig config;
   FileData file_data;
@@ -713,7 +724,7 @@ struct Emulator {
   CgbColorCurve cgb_color_curve;
   ApuLog apu_log;
 #ifdef RGBDS_LIVE
-  Bool breakpoint[0x10000];
+  breakpoints_type breakpoint[BREAKPOINTS_SIZE] __attribute__((aligned(8)));
 #endif
 };
 
@@ -4637,6 +4648,33 @@ static void execute_instruction(Emulator* e) {
   REG.PC = new_pc;
 }
 
+#ifdef RGBDS_LIVE
+static inline uint32_t emulator_get_banked_PC_inline(Emulator *e) {
+  #if BREAKPOINTS_MAX_BANKS_NUMBER > 1
+    uint16_t pc = REG.PC;
+    if (pc < 0x4000) {
+      return (MMAP_STATE.rom_base[0] << (16 - ROM_BANK_SHIFT)) | pc;
+    } else if (pc < 0x8000) {
+      return (MMAP_STATE.rom_base[1] << (16 - ROM_BANK_SHIFT)) | pc;
+    } else if (pc < 0xA000) {
+      return (e->state.vram.bank << 16) | pc;
+    } else if (pc < 0xC000) {
+      return (MMAP_STATE.ext_ram_base << (16 - EXT_RAM_BANK_SHIFT)) | pc;
+    } else if (pc < 0xE000) {
+      return (e->state.wram.bank << 16) | pc;
+    }
+    return pc;
+  #else
+    return REG.PC    
+  #endif
+}
+
+static inline bool is_breakpoint(Emulator* e, uint32_t  banked_pc) {
+    uint32_t idx = banked_pc >> BREAKPOINTS_SHIFT;
+    return (e->breakpoint[idx] & ((breakpoints_type)1 << (banked_pc & BREAKPOINTS_MASK)));
+}
+#endif
+
 static void emulator_step_internal(Emulator* e) {
   if (HDMA.state == DMA_INACTIVE) {
     if (HOOK0_FALSE(emulator_step)) {
@@ -4644,7 +4682,8 @@ static void emulator_step_internal(Emulator* e) {
     }
     execute_instruction(e);
 #ifdef RGBDS_LIVE
-    if (e->breakpoint[REG.PC]) {
+    uint32_t banked_pc = emulator_get_banked_PC_inline(e);
+    if (is_breakpoint(e, banked_pc)) {
       e->state.event |= EMULATOR_EVENT_BREAKPOINT;
     }
 #endif
@@ -5145,12 +5184,17 @@ void emulator_write_mem(Emulator* e, u16 addr, u8 data) {
 }
 
 #ifdef RGBDS_LIVE
-void emulator_set_breakpoint(Emulator* e, Address addr) {
-  e->breakpoint[addr] = TRUE;
+void emulator_set_breakpoint(Emulator* e, uint32_t addr) {
+    uint32_t idx = addr >> BREAKPOINTS_SHIFT;
+    e->breakpoint[idx] |= ((breakpoints_type)1 << (addr & BREAKPOINTS_MASK));
 }
 
 void emulator_clear_breakpoints(Emulator* e) {
   ZERO_MEMORY(e->breakpoint);
+}
+
+uint32_t emulator_get_banked_PC(Emulator *e) {
+    return emulator_get_banked_PC_inline(e);
 }
 
 void emulator_render_vram(Emulator* e, u32* buffer) {
@@ -5259,6 +5303,8 @@ void emulator_clear_breakpoints(Emulator* e) {}
 void emulator_render_vram(Emulator* e, u32* buffer) {}
 
 void emulator_render_background(Emulator* e, u32* buffer, int type) {}
+
+uint32_t emulator_get_banked_PC(Emulator *e) { return REG.PC; }
 
 #endif
 
