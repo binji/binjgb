@@ -69,95 +69,46 @@ jobs:
         python scripts/tester.py -vv --exe bin/binjgb-tester
       if: matrix.os != 'windows-latest'
 
-  build-wasm:
-    name: build-wasm
+  build-wasm-variants:
+    name: build-${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm, rgbds-live, gbstudio]
+        include:
+          - target: wasm
+            cmake_flags: ""
+          - target: rgbds-live
+            cmake_flags: '-DWERROR=ON -DRGBDS_LIVE=ON -DCMAKE_C_FLAGS="-DBREAKPOINTS_MAX_BANKS_NUMBER=256"'
+          - target: gbstudio
+            cmake_flags: "-DWERROR=ON -DGBSTUDIO=ON"
+
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: install packages
-      run: sudo apt-get install ninja-build
+      - name: install packages
+        run: sudo apt-get install ninja-build
 
-    - name: setup cache
-      uses: actions/cache@v4
-      with:
-        path: ${{env.EM_CACHE_FOLDER}}
-        key: ${{env.EM_VERSION}}-${{ runner.os }}
-    - name: emsdk install
-      uses: mymindstorm/setup-emsdk@v14
-      with:
-        version: ${{env.EM_VERSION}}
-        actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
+      - name: setup cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.EM_CACHE_FOLDER }}
+          key: ${{ env.EM_VERSION }}-${{ runner.os }}
 
-    - name: mkdir
-      run: mkdir -p out
+      - name: emsdk install
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EM_VERSION }}
+          actions-cache-folder: ${{ env.EM_CACHE_FOLDER }}
 
-    - name: cmake
-      run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWASM=true
+      - name: mkdir
+        run: mkdir -p out
 
-    - name: build
-      run: emmake cmake --build out
+      - name: cmake
+        run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWASM=true ${{ matrix.cmake_flags }}
 
-  build-rgbds-live:
-    name: build-rgbds-live
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-
-    - name: install packages
-      run: sudo apt-get install ninja-build
-
-    - name: setup cache
-      uses: actions/cache@v4
-      with:
-        path: ${{env.EM_CACHE_FOLDER}}
-        key: ${{env.EM_VERSION}}-${{ runner.os }}
-    - name: emsdk install
-      uses: mymindstorm/setup-emsdk@v14
-      with:
-        version: ${{env.EM_VERSION}}
-        actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
-
-    - name: mkdir
-      run: mkdir -p out
-
-    - name: cmake
-      run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWERROR=ON -DWASM=true -DRGBDS_LIVE=ONs -DCMAKE_C_FLAGS="-DBREAKPOINTS_MAX_BANKS_NUMBER=256"
-
-    - name: build
-      run: emmake cmake --build out
-
-  build-gbstudio:
-    name: build-gbstudio
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-
-    - name: install packages
-      run: sudo apt-get install ninja-build
-
-    - name: setup cache
-      uses: actions/cache@v4
-      with:
-        path: ${{env.EM_CACHE_FOLDER}}
-        key: ${{env.EM_VERSION}}-${{ runner.os }}
-    - name: emsdk install
-      uses: mymindstorm/setup-emsdk@v14
-      with:
-        version: ${{env.EM_VERSION}}
-        actions-cache-folder: ${{env.EM_CACHE_FOLDER}}
-
-    - name: mkdir
-      run: mkdir -p out
-
-    - name: cmake
-      run: emcmake cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=Release -DWERROR=ON -DWASM=true -DGBSTUDIO=ON
-
-    - name: build
-      run: emmake cmake --build out
+      - name: build
+        run: emmake cmake --build out
