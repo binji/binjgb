@@ -177,7 +177,7 @@ class Emulator {
     this.fps = 60;
     this.fastForward = false;
 
-    if (extRamBuffer) {
+    if (extRamBuffer && extRamBuffer.byteLength > 0) {
       this.loadExtRam(extRamBuffer);
     }
 
