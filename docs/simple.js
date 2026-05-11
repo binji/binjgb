@@ -194,6 +194,7 @@ class Emulator {
     this.cancelAnimationFrame();
     clearInterval(this.rewindIntervalId);
     this.rewind.destroy();
+    this.audio.destroy();
     this.module._emulator_delete(this.e);
     this.module._free(this.romDataPtr);
   }
@@ -657,6 +658,17 @@ class Audio {
   resume() {
     if (!this.started) { return; }
     Audio.ctx.resume();
+  }
+
+  destroy() {
+    if (this.boundStartPlayback) {
+      window.removeEventListener('keydown',  this.boundStartPlayback, true);
+      window.removeEventListener('click',    this.boundStartPlayback, true);
+      window.removeEventListener('touchend', this.boundStartPlayback, true);
+      this.boundStartPlayback = null;
+    }
+    this.buffer = null;
+    this.started = false;
   }
 }
 
