@@ -1,5 +1,6 @@
 /bin
 /out
+/emscripten
 /test/mooneye-gb
 /test/mooneye-gb-wp
 /third_party/wla-dx
