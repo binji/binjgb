@@ -2453,16 +2453,32 @@ static void do_sgb(Emulator* e) {
             u8 palin = pal & 3, palon = (pal >> 2) & 3, palout = (pal >> 4) & 3;
             u8 l = SGB.data[4 + i * 6], t = SGB.data[5 + i * 6],
                r = SGB.data[6 + i * 6], b = SGB.data[7 + i * 6];
-            if (info & 1) {  // colors inside region
-              set_sgb_attr_block(e, l, t, r, b, palin);
+            
+            Bool inside = info & 1;
+            Bool border = info & 2;
+            Bool outside = info & 4;
+            
+            if (inside && !border && !outside) {
+              border = TRUE;
+              palon = palin;
+            } else if (outside && !border && !inside) {
+              border = TRUE;
+              palon = palout;
             }
-            if (info & 2) { // colors on region border
+            
+            Bool has_inner = (r - l) >= 2 && (b - t) >= 2;
+            if (inside && has_inner) { // colors inside region
+              set_sgb_attr_block(e, l + 1, t + 1, r - 1, b - 1, palin);
+            }
+
+            if (border) { // colors on region border
               set_sgb_attr_block(e, l, t, r, t, palon);  // top
               set_sgb_attr_block(e, l, t, l, b, palon);  // left
               set_sgb_attr_block(e, l, b, r, b, palon);  // bottom
               set_sgb_attr_block(e, r, t, r, b, palon);  // right
             }
-            if (info & 4) { // colors outside region
+
+            if (outside) { // colors outside region
               set_sgb_attr_block(e, 0, 0, 19, t - 1, palout);   // top
               set_sgb_attr_block(e, 0, t, l - 1, b, palout);    // left
               set_sgb_attr_block(e, 0, b + 1, 19, 17, palout);  // bottom
