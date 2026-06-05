@@ -5269,21 +5269,33 @@ void emulator_render_vram(Emulator* e, u32* buffer) {
 
 void emulator_render_background(Emulator* e, u32* buffer, int type) {
   memset(buffer, 0, sizeof(u32) * 256 * 256);
-  int bank = 0;
   int tile_map = 0x1800 + ((type & 1) ? 0x400 : 0);
   for (int ty = 0; ty < 32; ty++) {
     for (int tx = 0; tx < 32; tx++) {
-      u8 tile = VRAM.data[tile_map + tx + ty * 32];
+      int map_index = tile_map + tx + ty * 32;
+      u8 tile = VRAM.data[map_index];
+      u8 attr = VRAM.data[0x2000 + map_index];
+
+      int tile_bank_offset = (IS_CGB && (attr & 0x08)) ? 0x2000 : 0;
+      int xflip = IS_CGB && (attr & 0x20);
+      int yflip = IS_CGB && (attr & 0x40);
+
       int offset = 0;
       if(tile < 128)
          offset = (LCDC.bg_tile_data_select ==  TILE_DATA_8000_8FFF) ? 0 : 0x1000;
       for (int row = 0; row < 8; row++) {
-        int n = offset + tile * 16 + row * 2;
-        u8 a = VRAM.data[n];
-        u8 b = VRAM.data[n + 1];
+        int py = yflip ? (7 - row) : row;
+        int n = offset + tile * 16 + py * 2;
+
+        u8 a = VRAM.data[tile_bank_offset + n];
+        u8 b = VRAM.data[tile_bank_offset + n + 1];
+
         for (int x = 0; x < 8; x++) {
           u32 color = 0xFFC2F0C4;
-          u8 bit = (0x80 >> x);
+
+          int px = xflip ? (7 - x) : x;
+          u8 bit = (0x80 >> px);
+          
           if ((a & bit) && (b & bit)) {
             color = 0xFF001B2D;
           } else if (a & bit) {
