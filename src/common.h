@@ -107,6 +107,26 @@ typedef struct JoypadButtons {
   Bool start, select, B, A;
 } JoypadButtons;
 
+typedef enum {
+  SERIAL_CLOCK_EXTERNAL = 0,
+  SERIAL_CLOCK_INTERNAL = 1,
+} SerialClock;
+
+typedef struct {
+  Ticks sync_ticks;       /* Current synchronization ticks. */
+  Ticks tick_count;       /* 0..SERIAL_TICKS */
+  Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
+  SerialClock clock;
+  Bool transferring;
+  u8 sb; /* Serial transfer data. */
+  u8 transferred_bits;
+} Serial;
+
+typedef enum {
+  ACCESSORY_NONE,
+  ACCESSORY_PRINTER,
+} Accessory;
+
 const char* replace_extension(const char* filename, const char* extension);
 #ifndef __wasm__
 Result file_read(const char* filename, FileData* out);

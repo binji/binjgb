@@ -13,6 +13,7 @@
 #endif
 
 #include "emulator.h"
+#include "printer.h"
 
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
 #define VIDEO_RAM_SIZE KILOBYTES(16)
@@ -274,11 +275,6 @@ typedef enum {
 } TimaState;
 
 typedef enum {
-  SERIAL_CLOCK_EXTERNAL = 0,
-  SERIAL_CLOCK_INTERNAL = 1,
-} SerialClock;
-
-typedef enum {
   DATA_READ_DISABLE = 0,
   DATA_READ_ENABLE = 3,
 } DataReadEnable;
@@ -468,16 +464,6 @@ typedef struct {
   u8 tma;          /* When TIMA overflows, it is set to this value */
   Bool on;
 } Timer;
-
-typedef struct {
-  Ticks sync_ticks;       /* Current synchronization ticks. */
-  Ticks tick_count;       /* 0..SERIAL_TICKS */
-  Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
-  SerialClock clock;
-  Bool transferring;
-  u8 sb; /* Serial transfer data. */
-  u8 transferred_bits;
-} Serial;
 
 typedef struct {
   Bool write;
@@ -689,6 +675,8 @@ typedef struct {
   Bool is_sgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
+
+  Printer printer;
 } EmulatorState;
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
@@ -723,7 +711,11 @@ struct Emulator {
   PaletteRGBA sgb_pal[4];
   CgbColorCurve cgb_color_curve;
   ApuLog apu_log;
-#ifdef RGBDS_LIVE
+
+  Accessory accessory;
+  SerialMessageCallback serial_start_cb;
+
+  #ifdef RGBDS_LIVE
   breakpoints_type breakpoint[BREAKPOINTS_SIZE] __attribute__((aligned(8)));
 #endif
 };
@@ -4056,12 +4048,33 @@ static void serial_synchronize(Emulator* e) {
       Ticks cpu_tick = e->state.cpu_tick;
       for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
         SERIAL.tick_count += cpu_tick;
+        
+        Bool in_bit = 1;
+
         if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
-          /* Since we're never connected to another device, always shift in
-           * 0xff. */
-          SERIAL.sb = (SERIAL.sb << 1) | 1;
+
+          if (e->accessory == ACCESSORY_PRINTER) {
+            uint8_t out_bit = (SERIAL.sb >> 7) & 1;
+            // printf("[GB     ] SEND %d      (SB: 0x%02X)\n", out_bit, SERIAL.sb);
+
+            // TODO: Should the printer state belong to the emulator state?
+            in_bit = e->serial_start_cb(&(e->state.printer), out_bit);
+          }
+
+          // printf("[GB     ] #%d: (0x%02X << 1 | %d) = ", 
+          //   SERIAL.transferred_bits,  
+          //   SERIAL.sb, 
+          //   in_bit);
+
+          SERIAL.sb = (SERIAL.sb << 1) | in_bit;
           SERIAL.transferred_bits++;
+
+          // printf("0x%02X\n", SERIAL.sb);
+
           if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
+            
+            printf("[GB     ] BYTE RECEIVED 0x%02X\n", SERIAL.sb);
+            
             SERIAL.transferring = 0;
             INTR.new_if |= IF_SERIAL;
             SERIAL.sync_ticks = TICKS - delta_ticks;
@@ -4939,6 +4952,18 @@ Ticks emulator_get_ticks(Emulator* e) {
 
 u32 emulator_get_ppu_frame(Emulator* e) {
   return PPU.frame;
+}
+
+void emulator_set_accessory(Emulator* e, Accessory accessory) {
+  e->accessory = accessory;
+}
+
+Accessory emulator_get_accessory(Emulator* e) {
+  return e->accessory;
+}
+
+void emulator_set_serial_message_callback(Emulator* e, SerialMessageCallback callback) {
+  e->serial_start_cb = callback;
 }
 
 u32 audio_buffer_get_frames(AudioBuffer* audio_buffer) {

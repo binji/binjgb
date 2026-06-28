@@ -76,6 +76,7 @@ typedef struct Host {
   JoypadPlayback joypad_playback;
   Ticks last_ticks;
   Bool key_state[HOST_KEYCODE_COUNT];
+  SDL_Window* printer_window;
 } Host;
 
 static Emulator* host_get_emulator(Host* host) {
@@ -191,6 +192,19 @@ Bool host_poll_events(Host* host) {
       case SDL_QUIT:
         running = FALSE;
         break;
+      case SDL_WINDOWEVENT: {
+        if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+          Uint32 id = event.window.windowID;
+
+          if (id == SDL_GetWindowID(host->window)) {
+              running = FALSE;  // main window
+          } else if (id == SDL_GetWindowID(host->printer_window)) {
+              SDL_DestroyWindow(host->printer_window);
+              host->printer_window = NULL;
+          }
+        }
+        break;
+      }
       default: break;
     }
   }
@@ -476,6 +490,7 @@ void host_delete(Host* host) {
     host_destroy_texture(host, host->fb_texture);
     SDL_GL_DeleteContext(host->gl_context);
     SDL_DestroyWindow(host->window);
+    SDL_DestroyWindow(host->printer_window);
     SDL_Quit();
     joypad_delete(host->joypad_buffer);
     rewind_delete(host->rewind_buffer);
@@ -608,4 +623,64 @@ Ticks host_oldest_ticks(Host* host) {
 
 Ticks host_newest_ticks(Host* host) {
   return host->last_ticks;
+}
+
+void host_new_printer_window(
+    struct Host* host,
+    uint32_t *image,
+    uint8_t height,
+    uint8_t top_margin,
+    uint8_t bottom_margin
+) {
+
+    int full_h = height + top_margin + bottom_margin;
+    SDL_Surface *paper_surface =
+        SDL_CreateRGBSurfaceWithFormat(
+            0,
+            SCREEN_WIDTH,
+            full_h,
+            32,
+            SDL_PIXELFORMAT_ARGB8888);
+    SDL_FillRect(paper_surface, NULL, 0xFFFFFFFF);
+
+    uint32_t *pixels = (uint32_t *)paper_surface->pixels;
+    int pitch_pixels = paper_surface->pitch / 4;
+    for (int y = 0; y < height; y++) {
+        memcpy(
+            pixels + (y + top_margin) * pitch_pixels,
+            image + y * SCREEN_WIDTH,
+            SCREEN_WIDTH * sizeof(uint32_t)
+        );
+    }
+
+    SDL_SaveBMP(paper_surface, "printer.bmp");
+
+    int x, y;
+    SDL_GetWindowPosition(host->window, &x, &y);
+
+    SDL_Window *window = SDL_CreateWindow(
+        "Printer",
+        x - SCREEN_WIDTH,
+        y + (SCREEN_HEIGHT * host->init.render_scale) / 2,
+        SCREEN_WIDTH * 2,
+        full_h * 2,
+        SDL_WINDOW_UTILITY);
+
+    SDL_Surface *window_surface = SDL_GetWindowSurface(window);
+
+    SDL_BlitScaled(
+        paper_surface,
+        NULL,
+        window_surface,
+        NULL);
+
+    SDL_UpdateWindowSurface(window);
+
+    host->printer_window = window;
+
+    SDL_FreeSurface(paper_surface);
+}
+
+void host_destroy_printer_window(struct Host* host) {
+  SDL_DestroyWindow(host->printer_window);
 }

@@ -4,6 +4,7 @@
 /test/mooneye-gb
 /test/mooneye-gb-wp
 /third_party/wla-dx
+/build
 *.gb
 __pycache__
 *.pyc
