@@ -13,7 +13,7 @@ extern "C" {
 
 struct Emulator;
 
-enum {
+typedef enum {
     PRINTER_STATE_MAGIC1,
     PRINTER_STATE_MAGIC2,
     PRINTER_STATE_ID,
@@ -29,7 +29,7 @@ enum {
     PRINTER_STATE_STATUS,
 } PrinterState;
 
-enum {
+typedef enum {
     PRINTER_INIT_COMMAND = 0x01,
     PRINTER_PRINT_COMMAND = 0x02,
     PRINTER_DATA_COMMAND = 0x04,
@@ -82,7 +82,7 @@ typedef void (*PrinterDoneCallaback)(uint32_t * buffer,
                                      uint8_t bottom_margin,
                                      uint8_t exposure);
 
-PrinterDoneCallaback printer_done_cb;
+extern PrinterDoneCallaback printer_done_cb;
 
 void connect_printer(Emulator* e, PrinterDoneCallaback printer_done);
 void disconnect_printer(Emulator* e);

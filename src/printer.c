@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+PrinterDoneCallaback printer_done_cb;
+
 static void handle_command(Printer *p)
 {
     switch (p->command) {
