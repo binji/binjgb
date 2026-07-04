@@ -50,7 +50,6 @@ if (NOT EMSCRIPTEN)
       src/host-gl.c
       src/host-ui-simple.c
       src/joypad.c
-      src/printer.c
       src/rewind.c
       src/binjgb.c
     )
@@ -75,7 +74,6 @@ if (NOT EMSCRIPTEN)
       src/host-gl.c
       src/host-ui-imgui.cc
       src/joypad.c
-      src/printer.c
       src/rewind.c
       src/debugger/main.cc
       src/debugger/debugger.cc
@@ -125,7 +123,6 @@ if (NOT EMSCRIPTEN)
     src/options.c
     src/emulator.c
     src/joypad.c
-    src/printer.c
     src/tester.c
   )
   install(TARGETS binjgb-tester DESTINATION bin)
@@ -137,7 +134,6 @@ if (NOT EMSCRIPTEN)
     src/options.c
     src/emulator-debug.c
     src/joypad.c
-    src/printer.c
     src/tester.c
   )
   target_compile_definitions(binjgb-tester-debug PUBLIC TESTER_DEBUGGER)
@@ -149,7 +145,6 @@ else (EMSCRIPTEN)
     src/common.c
     src/emulator.c
     src/joypad.c
-    src/printer.c
     src/rewind.c
     src/emscripten/wrapper.c)
   set(EXPORTED_JSON ${PROJECT_SOURCE_DIR}/src/emscripten/exported.json)

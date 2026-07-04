@@ -655,6 +655,7 @@ void host_new_printer_window(
 
     SDL_SaveBMP(paper_surface, "printer.bmp");
 
+#if 0
     int x, y;
     SDL_GetWindowPosition(host->window, &x, &y);
 
@@ -677,6 +678,7 @@ void host_new_printer_window(
     SDL_UpdateWindowSurface(window);
 
     host->printer_window = window;
+#endif
 
     SDL_FreeSurface(paper_surface);
 }

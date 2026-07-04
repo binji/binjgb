@@ -65,7 +65,8 @@ typedef struct JoypadCallbackInfo {
   void* user_data;
 } JoypadCallbackInfo;
 
-typedef Bool (*SerialMessageCallback)(void *ctx, Bool bit_to_send);
+typedef void (*PrinterDoneCallback)(u32* buffer, u8 height, u8 top_margin,
+                                    u8 bottom_margin, u8 exposure);
 
 typedef RGBA FrameBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 typedef RGBA SgbFrameBuffer[SGB_SCREEN_WIDTH * SGB_SCREEN_HEIGHT];
@@ -246,10 +247,9 @@ EmulatorEvent emulator_run_until(Emulator*, Ticks until_ticks);
 ApuLog* emulator_get_apu_log(Emulator*);
 void emulator_reset_apu_log(Emulator*);
 
-void emulator_set_accessory(Emulator* e, Accessory accessory);
+void emulator_set_accessory_none(Emulator* e);
+void emulator_set_accessory_printer(Emulator* e, PrinterDoneCallback printer_done);
 Accessory emulator_get_accessory(Emulator* e);
-
-void emulator_set_serial_message_callback(Emulator* e, SerialMessageCallback);
 
 #ifdef __cplusplus
 }

@@ -5,15 +5,14 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include <assert.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #if RGBDS_LIVE
 #include <emscripten.h>
 #endif
 
 #include "emulator.h"
-#include "printer.h"
 
 #define MAX_CART_INFOS (MAXIMUM_ROM_SIZE / MINIMUM_ROM_SIZE)
 #define VIDEO_RAM_SIZE KILOBYTES(16)
@@ -23,6 +22,8 @@
 #define HIGH_RAM_SIZE 127
 
 #define OBJ_PER_LINE_COUNT 10
+
+#define PRINTER_MAX_DATA_LENGTH 0x280
 
 /* Addresses are relative to IO_START_ADDR (0xff00). */
 #define FOREACH_IO_REG(V)                           \
@@ -350,6 +351,39 @@ typedef enum {
   SGB_STATE_STOP_WAIT,
 } SgbState;
 
+typedef enum {
+  PRINTER_STATE_MAGIC1,
+  PRINTER_STATE_MAGIC2,
+  PRINTER_STATE_ID,
+  PRINTER_STATE_COMPRESSION,
+  PRINTER_STATE_LENGTH,
+  PRINTER_STATE_DATA,
+  PRINTER_STATE_CHECKSUM_LOW,
+  PRINTER_STATE_CHECKSUM_HIGH,
+  PRINTER_STATE_KEEPALIVE,
+  PRINTER_STATE_STATUS,
+} PrinterState;
+
+typedef enum {
+  PRINTER_INIT_COMMAND = 0x01,
+  PRINTER_PRINT_COMMAND = 0x02,
+  PRINTER_DATA_COMMAND = 0x04,
+  PRINTER_BREAK_COMMAND = 0x08,
+  PRINTER_NUL_COMMAND = 0x0F,
+} PrinterCommand;
+
+typedef enum {
+  PRINTER_STATUS_NONE = 0x00,
+  PRINTER_STATUS_CHECKSUM_ERROR = 0x01,
+  PRINTER_STATUS_BUSY = 0x02,
+  PRINTER_STATUS_DATA_FULL = 0x04,
+  PRINTER_STATUS_UNPROCESSED = 0x08,
+  PRINTER_STATUS_PACKET_ERROR = 0x10,
+  PRINTER_STATUS_PAPER_JAM = 0x20,
+  PRINTER_STATUS_OTHER_ERROR = 0x40,
+  PRINTER_STATUS_LOW_BATTERY = 0x80
+} PrinterStatus;
+
 typedef struct {
   u8 data[EXT_RAM_MAX_SIZE];
   size_t size;
@@ -436,6 +470,24 @@ typedef struct {
   u8 player_mask;
   Bool player_incremented;
 } SGB;
+
+typedef struct {
+  PrinterState current_state;
+  PrinterCommand command;
+  PrinterStatus status;
+  Bool compression;
+  u16 data_length;
+  u8 data[PRINTER_MAX_DATA_LENGTH];
+  u16 checksum;
+  u8 byte_to_send;
+  u16 current_data_length;
+  u8 length_bytes_received;
+  u8 dot_data[PRINTER_MAX_DATA_LENGTH * 10];
+  u16 dot_data_length;
+  u8 bits_received;
+  u8 byte_being_received;
+  Ticks print_done_ticks;
+} Printer;
 
 typedef enum {
   CPU_STATE_NORMAL = 0,
@@ -659,6 +711,7 @@ typedef struct {
   Obj oam[OBJ_COUNT];
   Joypad joyp;
   SGB sgb;
+  Printer printer;
   Serial serial;
   Infrared infrared;
   Timer timer;
@@ -675,8 +728,6 @@ typedef struct {
   Bool is_sgb;
   Bool ext_ram_updated;
   EmulatorEvent event;
-
-  Printer printer;
 } EmulatorState;
 
 const size_t s_emulator_state_size = sizeof(EmulatorState);
@@ -713,7 +764,7 @@ struct Emulator {
   ApuLog apu_log;
 
   Accessory accessory;
-  SerialMessageCallback serial_start_cb;
+  PrinterDoneCallback printer_done_cb;
 
   #ifdef RGBDS_LIVE
   breakpoints_type breakpoint[BREAKPOINTS_SIZE] __attribute__((aligned(8)));
@@ -4039,6 +4090,218 @@ static void calculate_next_serial_intr(Emulator* e) {
   calculate_next_intr(e);
 }
 
+static void handle_printer_command(Emulator* e) {
+  Printer *p = &e->state.printer;
+  switch (p->command) {
+    case PRINTER_INIT_COMMAND:
+      p->status = PRINTER_STATUS_NONE;
+      p->dot_data_length = 0;
+      break;
+
+    case PRINTER_PRINT_COMMAND:
+      if (p->data_length == 4) {
+        p->status = PRINTER_STATUS_BUSY | PRINTER_STATUS_DATA_FULL;
+        static const u32 s_print_colors[4] = {RGBA_WHITE, RGBA_LIGHT_GRAY,
+                                              RGBA_DARK_GRAY, RGBA_BLACK};
+        u8 palette = p->data[2];
+        u8 colors[4] = {(palette >> 0) & 3, (palette >> 2) & 3,
+                        (palette >> 4) & 3, (palette >> 6) & 3};
+        int tile_count = p->dot_data_length / 16;
+        int tile_rows = tile_count / 20;
+        p->print_done_ticks =
+            SERIAL.sync_ticks + tile_rows * CPU_TICKS_PER_SECOND / 8;
+        u32 buffer[160 * 144];
+        for (int ty = 0; ty < tile_rows; ty++) {
+          for (int tx = 0; tx < 20; tx++) {
+            int tile = tx + ty * 20;
+            for (int row = 0; row < 8; row++) {
+              int n = tile * 16 + row * 2;
+              u8 a = p->dot_data[n];
+              u8 b = p->dot_data[n + 1];
+              for (int x = 0; x < 8; x++) {
+                u8 bit = (0x80 >> x);
+                u8 pixel = ((a & bit) ? 1 : 0) | ((b & bit) ? 2 : 0);
+                buffer[(tx * 8 + x) + (ty * 8 + row) * 160] =
+                    s_print_colors[colors[pixel]];
+              }
+            }
+          }
+        }
+
+        if (e->printer_done_cb) {
+          e->printer_done_cb(buffer, tile_rows * 8, p->data[1] >> 4,
+                             p->data[1] & 7, p->data[3] & 0x7F);
+        }
+        p->dot_data_length = 0;
+      }
+      break;
+
+    case PRINTER_DATA_COMMAND:
+      if (p->data_length > 0) {
+        p->status = PRINTER_STATUS_UNPROCESSED;
+        size_t dst = p->dot_data_length;
+        size_t i = 0;
+        if (p->compression) {
+          while (i < p->data_length) {
+            u8 data = p->data[i++];
+            if (data & 0x80) {
+              size_t length = (data & 0x7F) + 2;
+              u8 value = p->data[i++];
+              while (length--) {
+                if (dst < sizeof(p->dot_data)) {
+                  p->dot_data[dst] = value;
+                }
+                dst++;
+              }
+            } else {
+              size_t length = (data & 0x7F) + 1;
+              while (length--) {
+                if (i < p->data_length) {
+                  u8 value = p->data[i++];
+                  if (dst < sizeof(p->dot_data)) {
+                    p->dot_data[dst] = value;
+                  }
+                }
+                dst++;
+              }
+            }
+          }
+        } else {
+          while (i < p->data_length) {
+            u8 value = p->data[i++];
+            if (dst < sizeof(p->dot_data)) {
+              p->dot_data[dst] = value;
+            }
+            dst++;
+          }
+        }
+        p->dot_data_length = dst;
+      }
+      break;
+
+    case PRINTER_BREAK_COMMAND: break;
+    case PRINTER_NUL_COMMAND: break;
+  }
+}
+
+static void handle_printer_byte(Emulator* e, u8 value) {
+  static const u8 s_magic1 = 0x88;
+  static const u8 s_magic2 = 0x33;
+  Printer *p = &e->state.printer;
+  p->byte_to_send = 0;
+  switch (p->current_state) {
+    case PRINTER_STATE_MAGIC1:
+      if (value == s_magic1) {
+        p->status &= ~PRINTER_STATUS_CHECKSUM_ERROR;
+        p->checksum = 0;
+        p->current_state = PRINTER_STATE_MAGIC2;
+      }
+      break;
+
+    case PRINTER_STATE_MAGIC2:
+      if (value == s_magic2) {
+        p->current_state = PRINTER_STATE_ID;
+      } else if (value != s_magic1) {
+        p->current_state = PRINTER_STATE_MAGIC1;
+      }
+      break;
+
+    case PRINTER_STATE_ID:
+      p->command = value & 0xF;
+      p->checksum += value;
+      p->current_state = PRINTER_STATE_COMPRESSION;
+      break;
+
+    case PRINTER_STATE_COMPRESSION:
+      p->compression = value & 1;
+      p->checksum += value;
+      p->current_state = PRINTER_STATE_LENGTH;
+      break;
+
+    case PRINTER_STATE_LENGTH:
+      if (p->length_bytes_received == 0) {
+        p->length_bytes_received = 1;
+        p->data_length = value;
+        p->checksum += value;
+      } else {
+        p->length_bytes_received = 0;
+        p->data_length |= (value & 3) << 8;
+        p->checksum += value;
+        if (p->data_length == 0) {
+          p->current_state = PRINTER_STATE_CHECKSUM_LOW;
+        } else {
+          p->current_data_length = 0;
+          p->current_state = PRINTER_STATE_DATA;
+        }
+      }
+      break;
+
+    case PRINTER_STATE_DATA:
+      if (p->current_data_length < PRINTER_MAX_DATA_LENGTH) {
+        p->data[p->current_data_length++] = value;
+        p->checksum += value;
+      }
+      if (p->data_length == p->current_data_length) {
+        p->current_state = PRINTER_STATE_CHECKSUM_LOW;
+      }
+      break;
+
+    case PRINTER_STATE_CHECKSUM_LOW:
+      p->checksum ^= value;
+      p->current_state = PRINTER_STATE_CHECKSUM_HIGH;
+      break;
+
+    case PRINTER_STATE_CHECKSUM_HIGH:
+      p->checksum ^= value << 8;
+      if (p->checksum) {  // Checksum error
+        p->status |= PRINTER_STATUS_CHECKSUM_ERROR;
+        p->current_state = PRINTER_STATE_MAGIC1;
+      } else {
+        p->status &= ~PRINTER_STATUS_CHECKSUM_ERROR;
+      }
+      p->byte_to_send = 0x81;
+      p->current_state = PRINTER_STATE_KEEPALIVE;
+      break;
+
+    case PRINTER_STATE_KEEPALIVE:
+      if (value == 0) {
+        if ((p->command) == PRINTER_INIT_COMMAND) {
+          p->byte_to_send = PRINTER_STATUS_NONE;
+        } else {
+          if (p->status == (PRINTER_STATUS_BUSY | PRINTER_STATUS_DATA_FULL) &&
+              SERIAL.sync_ticks >= p->print_done_ticks) {
+            p->status = PRINTER_STATUS_DATA_FULL;
+          }
+          p->byte_to_send = p->status;
+        }
+        p->current_state = PRINTER_STATE_STATUS;
+      }
+      break;
+
+    case PRINTER_STATE_STATUS:
+      handle_printer_command(e);
+      p->current_state = PRINTER_STATE_MAGIC1;
+      break;
+  }
+}
+
+static u8 handle_serial_accessory_bit(Emulator *e, u8 recv_bit) {
+  if (e->accessory == ACCESSORY_NONE) return 0;
+  assert(e->accessory == ACCESSORY_PRINTER);
+  Printer* p = &e->state.printer;
+  u8 bit_to_send = (p->byte_to_send & 0x80) >> 7;
+  p->byte_to_send <<= 1;
+  p->byte_being_received <<= 1;
+  p->byte_being_received |= recv_bit;
+  p->bits_received++;
+  if (p->bits_received == 8) {
+    handle_printer_byte(e, p->byte_being_received);
+    p->bits_received = 0;
+    p->byte_being_received = 0;
+  }
+  return bit_to_send;
+}
+
 static void serial_synchronize(Emulator* e) {
   if (TICKS > SERIAL.sync_ticks) {
     Ticks delta_ticks = TICKS - SERIAL.sync_ticks;
@@ -4048,33 +4311,17 @@ static void serial_synchronize(Emulator* e) {
       Ticks cpu_tick = e->state.cpu_tick;
       for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
         SERIAL.tick_count += cpu_tick;
-        
-        Bool in_bit = 1;
-
+        u8 in_bit = 1;
         if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
-
           if (e->accessory == ACCESSORY_PRINTER) {
-            uint8_t out_bit = (SERIAL.sb >> 7) & 1;
-            // printf("[GB     ] SEND %d      (SB: 0x%02X)\n", out_bit, SERIAL.sb);
-
-            // TODO: Should the printer state belong to the emulator state?
-            in_bit = e->serial_start_cb(&(e->state.printer), out_bit);
+            u8 out_bit = (SERIAL.sb >> 7) & 1;
+            in_bit = handle_serial_accessory_bit(e, out_bit);
           }
-
-          // printf("[GB     ] #%d: (0x%02X << 1 | %d) = ", 
-          //   SERIAL.transferred_bits,  
-          //   SERIAL.sb, 
-          //   in_bit);
 
           SERIAL.sb = (SERIAL.sb << 1) | in_bit;
           SERIAL.transferred_bits++;
 
-          // printf("0x%02X\n", SERIAL.sb);
-
           if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
-            
-            printf("[GB     ] BYTE RECEIVED 0x%02X\n", SERIAL.sb);
-            
             SERIAL.transferring = 0;
             INTR.new_if |= IF_SERIAL;
             SERIAL.sync_ticks = TICKS - delta_ticks;
@@ -4954,16 +5201,18 @@ u32 emulator_get_ppu_frame(Emulator* e) {
   return PPU.frame;
 }
 
-void emulator_set_accessory(Emulator* e, Accessory accessory) {
-  e->accessory = accessory;
+void emulator_set_accessory_none(Emulator* e) {
+  e->accessory = ACCESSORY_NONE;
+  e->printer_done_cb = NULL;
+}
+
+void emulator_set_accessory_printer(Emulator* e, PrinterDoneCallback cb) {
+  e->accessory = ACCESSORY_PRINTER;
+  e->printer_done_cb = cb;
 }
 
 Accessory emulator_get_accessory(Emulator* e) {
   return e->accessory;
-}
-
-void emulator_set_serial_message_callback(Emulator* e, SerialMessageCallback callback) {
-  e->serial_start_cb = callback;
 }
 
 u32 audio_buffer_get_frames(AudioBuffer* audio_buffer) {

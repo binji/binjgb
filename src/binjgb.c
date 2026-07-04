@@ -14,8 +14,6 @@
 #include "host.h"
 #include "options.h"
 
-#include "printer.h"
-
 #define SAVE_EXTENSION ".sav"
 #define SAVE_STATE_EXTENSION ".state"
 
@@ -273,28 +271,19 @@ static void end_rewind(void) {
   s_rewinding = FALSE;
 }
 
-static void printer_done(u32 * image,
-                          u8 height,
-                          u8 top_margin,
-                          u8 bottom_margin,
-                          u8 exposure) {
-  host_new_printer_window(
-    host, 
-    image, 
-    height,
-    top_margin,
-    bottom_margin
-  );
+static void printer_done(u32* image, u8 height, u8 top_margin, u8 bottom_margin,
+                         u8 exposure) {
+  host_new_printer_window(host, image, height, top_margin, bottom_margin);
 }
 
 static void toggle_printer(void) {
   Accessory current_accessory = emulator_get_accessory(e);
 
   if (current_accessory != ACCESSORY_PRINTER) {
-    connect_printer(e, printer_done);
+    emulator_set_accessory_printer(e, printer_done);
     set_status_text("Printer connected %d", emulator_get_accessory(e));
   } else {
-    disconnect_printer(e);
+    emulator_set_accessory_none(e);
     set_status_text("Printer disconnected %d", emulator_get_accessory(e));
   }
 }
