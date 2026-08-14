@@ -432,6 +432,7 @@ int emulator_add_empty_breakpoint(void) {
       bp->addr = bp->bank = 0;
       bp->enabled = FALSE;
       bp->valid = TRUE;
+      bp->hit = FALSE;
       s_breakpoint_max_id = MAX(id + 1, s_breakpoint_max_id);
       ++s_breakpoint_count;
       return id;
