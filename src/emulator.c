@@ -3563,8 +3563,16 @@ static void ppu_mode3_synchronize(Emulator* e) {
           u8 palette_index = ((hi & 1) << 1) | (lo & 1);
           if (palette_index != 0 && (!bg_priority[i] || bg_is_zero[i]) &&
               (o->priority == OBJ_PRIORITY_ABOVE_BG || bg_is_zero[i])) {
-            pixel[i] = pal->color[palette_index];
-          }
+                if (IS_SGB) {
+                  int idx = (y >> 3) * (SCREEN_WIDTH >> 3) + ((x + i) >> 3);
+                  u8 palidx = 
+                    (SGB.attr_map[idx >> 2] >> (2 * (3 - (idx & 3)))) & 3;
+                  u8 sgb_color = PPU.pal[o->palette + 1].color[palette_index];
+                  pixel[i] = e->sgb_pal[palidx].color[sgb_color];
+                } else {
+                  pixel[i] = pal->color[palette_index];
+                }
+            }
         }
       }
     }
