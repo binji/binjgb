@@ -1190,6 +1190,7 @@ static Result get_cart_infos(Emulator* e) {
       if (s_cart_type_info[e->cart_infos[i].cart_type].mbc_type ==
           MBC_TYPE_MMM01) {
         /* MMM01 has the cart header at the end. */
+        e->cart_info_count++;
         goto done;
       }
       e->cart_info_count++;
