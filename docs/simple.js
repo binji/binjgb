@@ -205,6 +205,7 @@ class Emulator {
         this.module._get_file_data_size(fileDataPtr));
     const result = cb(fileDataPtr, buffer);
     this.module._file_data_delete(fileDataPtr);
+    this.module._free(fileDataPtr);
     return result;
   }
 
