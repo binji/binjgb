@@ -124,6 +124,7 @@ int emulator_disassemble(Emulator*, Address, char* buffer, size_t size);
 void emulator_disassemble_rom(Emulator*, u32 rom_addr, char* buffer,
                               size_t size);
 Registers emulator_get_registers(Emulator*);
+void emulator_set_registers(Emulator*, Registers*);
 
 int emulator_get_max_breakpoint_id(void);
 Breakpoint emulator_get_breakpoint(int id);
