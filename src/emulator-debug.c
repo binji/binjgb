@@ -378,6 +378,13 @@ void emulator_disassemble_rom(Emulator* e, u32 rom_addr, char* buffer,
 
 Registers emulator_get_registers(Emulator* e) { return REG; }
 
+void emulator_set_registers(Emulator* e, Registers* r) {
+  if (!r) {
+    return;
+  }
+  REG = *r;
+}
+
 int emulator_get_max_breakpoint_id(void) {
   return s_breakpoint_max_id;
 }
