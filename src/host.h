@@ -128,6 +128,9 @@ typedef struct HostInit {
   RewindInit rewind;
   const char* joypad_filename;
   Bool use_sgb_border;
+  /* Connect a PS/2 keyboard to the serial port at startup. Host keys are sent
+   * to it while Caps Lock is on. */
+  Bool ps2_keyboard;
 } HostInit;
 
 typedef struct HostConfig {

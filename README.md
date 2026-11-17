@@ -17,6 +17,7 @@ A simple GB/GBC emulator.
 * **Rewind** and seek to specific cycle
 * Disable/enable each audio channel
 * Disable/enable BG, Window and Sprite layers
+* **PS/2 keyboard** emulation on the serial port
 * Convenient Python test harness using hashes to validate
 * (WIP) **Debugger** with various visualizations (see below)
 
@@ -198,6 +199,13 @@ Keys:
 | Rewind | <kbd>Backspace</kbd> |
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
+| Type on the PS/2 keyboard | <kbd>Caps Lock</kbd> on |
+
+While Caps Lock is on, keys are sent to an emulated PS/2 keyboard attached to
+the serial port instead of the joypad and the shortcuts above. Each scan code
+is sent as two externally-clocked serial bytes holding the 11-bit PS/2 frame
+(start bit, 8 data bits LSB first, odd parity, stop bit). Use
+`--no-ps2-keyboard` to disable it.
 
 ## INI file
 
@@ -252,6 +260,12 @@ random-seed=0
 # 0=Don't display SGB border
 # 1=Display SGB border, even if it doesn't exist.
 sgb-border=0
+
+# Send keys to an emulated PS/2 keyboard on the serial port while Caps
+# Lock is on.
+# 0=Disable
+# 1=Enable
+ps2-keyboard=1
 ```
 
 The INI file is loaded before parsing the command line flags, so you can use

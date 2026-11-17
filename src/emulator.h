@@ -207,6 +207,15 @@ void emulator_delete(Emulator*);
 void emulator_set_joypad_buttons(Emulator*, JoypadButtons*);
 void emulator_set_joypad_callback(Emulator*, JoypadCallback, void* user_data);
 JoypadCallbackInfo emulator_get_joypad_callback(Emulator*);
+/* A PS/2 keyboard can be attached to the serial port. It is disconnected by
+ * default. Disconnecting it clears its queue. */
+void emulator_set_ps2_keyboard_connected(Emulator*, Bool connected);
+Bool emulator_get_ps2_keyboard_connected(Emulator*);
+/* Queue a PS/2 (set 2) scan code byte to be sent over the serial port, e.g.
+ * 0xe0/0xf0 prefixes are queued as separate bytes. Returns FALSE if the
+ * keyboard is disconnected or the queue is full. */
+Bool emulator_queue_ps2_scan_code(Emulator*, u8 scan_code);
+void emulator_clear_ps2_queue(Emulator*);
 void emulator_set_config(Emulator*, const EmulatorConfig*);
 EmulatorConfig emulator_get_config(Emulator*);
 FrameBuffer* emulator_get_frame_buffer(Emulator*);

@@ -60,6 +60,7 @@ static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
 static Bool s_use_sgb_border;
+static Bool s_ps2_keyboard = TRUE;
 static u32 s_cgb_color_curve;
 static u32 s_render_scale = 4;
 
@@ -318,7 +319,9 @@ static void usage(int argc, char** argv) {
       "                            1: Sameboy (Emulate Hardware)\n"
       "                            2: Gambatte/Gameboy Online\n"
       "     --force-dmg          force running as a DMG (original gameboy)\n"
-      "     --sgb-border         draw the super gameboy border\n",
+      "     --sgb-border         draw the super gameboy border\n"
+      "     --no-ps2-keyboard    don't send keys to an emulated PS/2 keyboard\n"
+      "                          on the serial port while Caps Lock is on\n",
       argv[0]);
 }
 
@@ -333,6 +336,7 @@ void parse_arguments(int argc, char** argv) {
     {'C', "cgb-color", 1},
     {0, "force-dmg", 0},
     {0, "sgb-border", 0},
+    {0, "no-ps2-keyboard", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -391,6 +395,8 @@ void parse_arguments(int argc, char** argv) {
               s_force_dmg = TRUE;
             } else if (strcmp(result.option->long_name, "sgb-border") == 0) {
               s_use_sgb_border = TRUE;
+            } else if (strcmp(result.option->long_name, "no-ps2-keyboard") == 0) {
+              s_ps2_keyboard = FALSE;
             } else {
               abort();
             }
@@ -460,6 +466,8 @@ void read_ini_file(void) {
       s_builtin_palette = atoi(value);
     } else if (strcmp(buffer, "force-dmg") == 0) {
       s_force_dmg = atoi(value);
+    } else if (strcmp(buffer, "ps2-keyboard") == 0) {
+      s_ps2_keyboard = atoi(value);
     } else if (strcmp(buffer, "cgb-color") == 0) {
       s_cgb_color_curve = atoi(value);
     } else if (strcmp(buffer, "rewind-frames-per-base-state") == 0) {
@@ -515,6 +523,7 @@ int main(int argc, char** argv) {
   host_init.rewind.buffer_capacity = s_rewind_buffer_capacity_megabytes * MEGABYTES(1);
   host_init.joypad_filename = s_read_joypad_filename;
   host_init.use_sgb_border = s_use_sgb_border;
+  host_init.ps2_keyboard = s_ps2_keyboard;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 
