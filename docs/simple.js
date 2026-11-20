@@ -73,6 +73,7 @@ const bEl = $('#controller_b');
 const aEl = $('#controller_a');
 
 const binjgbPromise = Binjgb();
+const keyboardConfigPromise = BinjgbKeyboard.loadConfig('binjgb.ini');
 
 // Extract stuff from the vue.js implementation in demo.js.
 class VM {
@@ -128,7 +129,7 @@ const vm = new VM();
   let response = await fetch(ROM_FILENAME);
   let romBuffer = await response.arrayBuffer();
   const extRam = new Uint8Array(JSON.parse(localStorage.getItem('extram')));
-  Emulator.start(await binjgbPromise, romBuffer, extRam);
+  Emulator.start(await binjgbPromise, romBuffer, extRam, await keyboardConfigPromise);
   emulator.setBuiltinPalette(vm.palIdx);
 })();
 
@@ -139,9 +140,9 @@ function makeWasmBuffer(module, ptr, size) {
 }
 
 class Emulator {
-  static start(module, romBuffer, extRamBuffer) {
+  static start(module, romBuffer, extRamBuffer, keyboardConfig) {
     Emulator.stop();
-    emulator = new Emulator(module, romBuffer, extRamBuffer);
+    emulator = new Emulator(module, romBuffer, extRamBuffer, keyboardConfig);
     emulator.run();
   }
 
@@ -152,7 +153,7 @@ class Emulator {
     }
   }
 
-  constructor(module, romBuffer, extRamBuffer) {
+  constructor(module, romBuffer, extRamBuffer, keyboardConfig) {
     this.module = module;
     // Align size up to 32k.
     const size = (romBuffer.byteLength + 0x7fff) & ~0x7fff;
@@ -167,6 +168,7 @@ class Emulator {
       throw new Error('Invalid ROM.');
     }
 
+    this.joypad = new BinjgbJoypad(module, this.e);
     this.audio = new Audio(module, this.e);
     this.video = new Video(module, this.e, $('canvas'));
     this.rewind = new Rewind(module, this.e);
@@ -181,7 +183,7 @@ class Emulator {
       this.loadExtRam(extRamBuffer);
     }
 
-    this.bindKeys();
+    this.bindKeys(keyboardConfig);
     this.bindTouch();
 
     this.touchEnabled = 'ontouchstart' in document.documentElement;
@@ -277,16 +279,14 @@ class Emulator {
   }
 
   get isRewinding() {
-    return ENABLE_REWIND && this.rewind.isRewinding;
+    return this.rewind.isRewinding;
   }
 
   beginRewind() {
-    if (!ENABLE_REWIND) { return; }
     this.rewind.beginRewind();
   }
 
   rewindToTicks(ticks) {
-    if (!ENABLE_REWIND) { return; }
     if (this.rewind.rewindToTicks(ticks)) {
       this.runUntil(ticks);
       this.video.renderTexture();
@@ -294,7 +294,6 @@ class Emulator {
   }
 
   endRewind() {
-    if (!ENABLE_REWIND) { return; }
     this.rewind.endRewind();
     this.lastRafSec = 0;
     this.leftoverTicks = 0;
@@ -302,7 +301,6 @@ class Emulator {
   }
 
   set autoRewind(enabled) {
-    if (!ENABLE_REWIND) { return; }
     if (enabled) {
       this.rewindIntervalId = setInterval(() => {
         const oldest = this.rewind.oldestTicks;
@@ -337,8 +335,10 @@ class Emulator {
   }
 
   runUntil(ticks) {
+    this.keyboard.flush();
     while (true) {
       const event = this.module._emulator_run_until_f64(this.e, ticks);
+      this.keyboard.flush();
       if (event & EVENT_NEW_FRAME) {
         this.rewind.pushBuffer();
         this.video.uploadTexture();
@@ -500,56 +500,52 @@ class Emulator {
     this.updateOnscreenGamepad();
   }
 
-  bindKeys() {
-    this.keyFuncs = {
-      'ArrowDown': this.setJoypDown.bind(this),
-      'ArrowLeft': this.setJoypLeft.bind(this),
-      'ArrowRight': this.setJoypRight.bind(this),
-      'ArrowUp': this.setJoypUp.bind(this),
-      'KeyZ': this.setJoypB.bind(this),
-      'KeyX': this.setJoypA.bind(this),
-      'Enter': this.setJoypStart.bind(this),
-      'Tab': this.setJoypSelect.bind(this),
-      'Backspace': this.keyRewind.bind(this),
-      'Space': this.keyPause.bind(this),
-      'BracketLeft': this.keyPrevPalette.bind(this),
-      'BracketRight': this.keyNextPalette.bind(this),
-      'ShiftLeft': this.setFastForward.bind(this),
-      'F6': this.saveState.bind(this),
-      'F9': this.loadState.bind(this),
-    };
-    this.boundKeyDown = this.keyDown.bind(this);
-    this.boundKeyUp = this.keyUp.bind(this);
-
-    window.addEventListener('keydown', this.boundKeyDown);
-    window.addEventListener('keyup', this.boundKeyUp);
+  bindKeys(config) {
+    const handlers = {};
+    for (const [name, button, key] of [
+      ['up', 'up', 'UP'], ['down', 'down', 'DOWN'],
+      ['left', 'left', 'LEFT'], ['right', 'right', 'RIGHT'],
+      ['a', 'A', 'X'], ['b', 'B', 'Z'],
+      ['start', 'start', 'RETURN'], ['select', 'select', 'TAB'],
+    ]) {
+      handlers[`joypad-${name}`] = {
+        keys: key, held: true,
+        callback: down => this.joypad.set(button, 'keyboard', down),
+      };
+    }
+    Object.assign(handlers, {
+      'shortcut-rewind': {keys: ENABLE_REWIND ? 'BACKSPACE' : '', held: true,
+                          callback: this.keyRewind.bind(this)},
+      'shortcut-pause': {keys: ENABLE_PAUSE ? 'SPACE' : '', callback: this.keyPause.bind(this)},
+      'shortcut-palette-prev': {keys: ENABLE_SWITCH_PALETTES ? 'LEFTBRACKET' : '',
+                                callback: this.keyPrevPalette.bind(this)},
+      'shortcut-palette-next': {keys: ENABLE_SWITCH_PALETTES ? 'RIGHTBRACKET' : '',
+                                callback: this.keyNextPalette.bind(this)},
+      'shortcut-fast-forward': {keys: ENABLE_FAST_FORWARD ? 'LSHIFT' : '', held: true,
+                                callback: this.setFastForward.bind(this)},
+      'shortcut-save-state': {keys: 'F6', callback: this.saveState.bind(this)},
+      'shortcut-load-state': {keys: 'F9', callback: this.loadState.bind(this)},
+      'shortcut-fullscreen': {keys: '', callback: () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else $('canvas').requestFullscreen();
+      }},
+    });
+    this.keyboard = new BinjgbKeyboard(this.module, this.e, config, handlers, {
+      onInput: () => {
+        if (this.touchEnabled) {
+          this.touchEnabled = false;
+          this.updateOnscreenGamepad();
+          this.joypad.clearSource('touch');
+        }
+      },
+    });
   }
 
   unbindKeys() {
-    window.removeEventListener('keydown', this.boundKeyDown);
-    window.removeEventListener('keyup', this.boundKeyUp);
-  }
-
-  keyDown(event) {
-    if (event.code in this.keyFuncs) {
-      if (this.touchEnabled) {
-        this.touchEnabled = false;
-        this.updateOnscreenGamepad();
-      }
-      this.keyFuncs[event.code](true);
-      event.preventDefault();
-    }
-  }
-
-  keyUp(event) {
-    if (event.code in this.keyFuncs) {
-      this.keyFuncs[event.code](false);
-      event.preventDefault();
-    }
+    this.keyboard.destroy();
   }
 
   keyRewind(isKeyDown) {
-    if (!ENABLE_REWIND) { return; }
     if (this.isRewinding !== isKeyDown) {
       if (isKeyDown) {
         vm.paused = true;
@@ -562,12 +558,10 @@ class Emulator {
   }
 
   keyPause(isKeyDown) {
-    if (!ENABLE_PAUSE) { return; }
     if (isKeyDown) vm.togglePause();
   }
 
   keyPrevPalette(isKeyDown) {
-    if (!ENABLE_SWITCH_PALETTES) { return; }
     if (isKeyDown) {
       vm.palIdx = (vm.palIdx + PALETTES.length - 1) % PALETTES.length;
       emulator.setBuiltinPalette(vm.palIdx);
@@ -575,7 +569,6 @@ class Emulator {
   }
 
   keyNextPalette(isKeyDown) {
-    if (!ENABLE_SWITCH_PALETTES) { return; }
     if (isKeyDown) {
       vm.palIdx = (vm.palIdx + 1) % PALETTES.length;
       emulator.setBuiltinPalette(vm.palIdx);
@@ -583,18 +576,17 @@ class Emulator {
   }
 
   setFastForward(isKeyDown) {
-    if (!ENABLE_FAST_FORWARD) { return; }
     this.fastForward = isKeyDown;
   }
 
-  setJoypDown(set) { this.module._set_joyp_down(this.e, set); }
-  setJoypUp(set) { this.module._set_joyp_up(this.e, set); }
-  setJoypLeft(set) { this.module._set_joyp_left(this.e, set); }
-  setJoypRight(set) { this.module._set_joyp_right(this.e, set); }
-  setJoypSelect(set) { this.module._set_joyp_select(this.e, set); }
-  setJoypStart(set) { this.module._set_joyp_start(this.e, set); }
-  setJoypB(set) { this.module._set_joyp_B(this.e, set); }
-  setJoypA(set) { this.module._set_joyp_A(this.e, set); }
+  setJoypDown(set) { this.joypad.set('down', 'touch', set); }
+  setJoypUp(set) { this.joypad.set('up', 'touch', set); }
+  setJoypLeft(set) { this.joypad.set('left', 'touch', set); }
+  setJoypRight(set) { this.joypad.set('right', 'touch', set); }
+  setJoypSelect(set) { this.joypad.set('select', 'touch', set); }
+  setJoypStart(set) { this.joypad.set('start', 'touch', set); }
+  setJoypB(set) { this.joypad.set('B', 'touch', set); }
+  setJoypA(set) { this.joypad.set('A', 'touch', set); }
 }
 
 class Audio {

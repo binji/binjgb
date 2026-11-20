@@ -4758,7 +4758,7 @@ static inline uint32_t emulator_get_banked_PC_inline(Emulator *e) {
   #endif
 }
 
-static inline bool is_breakpoint(Emulator* e, uint32_t  banked_pc) {
+static inline Bool is_breakpoint(Emulator* e, uint32_t banked_pc) {
     uint32_t idx = banked_pc >> BREAKPOINTS_SHIFT;
     return (e->breakpoint[idx] & ((breakpoints_type)1 << (banked_pc & BREAKPOINTS_MASK)));
 }

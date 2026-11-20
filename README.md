@@ -63,6 +63,8 @@ A simple GB/GBC emulator.
 Copy the folowing files to your webserver:
 * `docs/binjgb.js`
 * `docs/binjgb.wasm`
+* `docs/keyboard.js`
+* `docs/binjgb.ini`
 * `docs/simple.html`
 * `docs/simple.js`
 * `docs/simple.css`
