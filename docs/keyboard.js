@@ -157,7 +157,7 @@ class BinjgbKeyboard {
   }
 
   static async loadConfig(url) {
-    const response = await fetch(url);
+    const response = await fetch(url, {cache: 'no-cache'});
     if (response.status === 404) return [];
     if (!response.ok) throw new Error(`Could not load ${url}: ${response.status}`);
     return BinjgbKeyboard.parseConfig(await response.text());
