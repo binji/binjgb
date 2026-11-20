@@ -37,6 +37,7 @@ const $ = document.querySelector.bind(document);
 let emulator = null;
 
 const binjgbPromise = Binjgb();
+const keyboardConfigPromise = BinjgbKeyboard.loadConfig('binjgb.ini');
 
 const dbPromise = idb.open('db', 1, upgradeDb => {
   const objectStore = upgradeDb.createObjectStore('games', {keyPath : 'sha1'});
@@ -201,7 +202,7 @@ let vm = new Vue({
       this.files.show = false;
       this.loadedFile = file;
       this.needsReload = false;
-      Emulator.start(await binjgbPromise, romBuffer, extRamBuffer);
+      Emulator.start(await binjgbPromise, romBuffer, extRamBuffer, await keyboardConfigPromise);
       emulator.setBuiltinPalette(this.pal);
     },
     deleteFile: async function(file) {
@@ -310,6 +311,7 @@ let vm = new Vue({
     toggleOpenDialog: function() {
       this.files.show = !this.files.show;
       if (this.files.show) {
+        if (emulator) emulator.keyboard.releaseAll();
         this.paused = true;
       }
     },
@@ -368,9 +370,9 @@ function makeWasmBuffer(module, ptr, size) {
 }
 
 class Emulator {
-  static start(module, romBuffer, extRamBuffer) {
+  static start(module, romBuffer, extRamBuffer, keyboardConfig) {
     Emulator.stop();
-    emulator = new Emulator(module, romBuffer, extRamBuffer);
+    emulator = new Emulator(module, romBuffer, extRamBuffer, keyboardConfig);
     emulator.run();
   }
 
@@ -381,7 +383,7 @@ class Emulator {
     }
   }
 
-  constructor(module, romBuffer, extRamBuffer) {
+  constructor(module, romBuffer, extRamBuffer, keyboardConfig) {
     this.module = module;
     // Align size up to 32k.
     const size = (romBuffer.byteLength + 0x7fff) & ~0x7fff;
@@ -396,7 +398,8 @@ class Emulator {
       throw new Error('Invalid ROM.');
     }
 
-    this.gamepad = new Gamepad(module, this.e);
+    this.joypad = new BinjgbJoypad(module, this.e);
+    this.gamepad = new Gamepad(this.joypad);
     this.audio = new Audio(module, this.e);
     this.video = new Video(module, this.e, $('canvas'));
     this.rewind = new Rewind(module, this.e);
@@ -411,7 +414,7 @@ class Emulator {
       this.loadExtRam(extRamBuffer);
     }
 
-    this.bindKeys();
+    this.bindKeys(keyboardConfig);
     this.gamepad.init();
   }
 
@@ -568,10 +571,12 @@ class Emulator {
   }
 
   runUntil(untilTicks) {
+    this.keyboard.flush();
     let next60hzTicks = this.getNext60HzTicks(this.ticks);
     while (true) {
       const event = this.module._emulator_run_until_f64(
           this.e, Math.min(untilTicks, next60hzTicks));
+      this.keyboard.flush();
       if (event & EVENT_NEW_FRAME) {
         this.rewind.pushBuffer();
         this.video.uploadTexture();
@@ -613,45 +618,36 @@ class Emulator {
     this.video.renderTexture();
   }
 
-  bindKeys() {
-    this.keyFuncs = {
-      'ArrowDown': this.module._set_joyp_down.bind(null, this.e),
-      'ArrowLeft': this.module._set_joyp_left.bind(null, this.e),
-      'ArrowRight': this.module._set_joyp_right.bind(null, this.e),
-      'ArrowUp': this.module._set_joyp_up.bind(null, this.e),
-      'KeyZ': this.module._set_joyp_B.bind(null, this.e),
-      'KeyX': this.module._set_joyp_A.bind(null, this.e),
-      'Enter': this.module._set_joyp_start.bind(null, this.e),
-      'Tab': this.module._set_joyp_select.bind(null, this.e),
-      'Backspace': this.keyRewind.bind(this),
-      'Space': this.keyPause.bind(this),
-      'F6': vm.saveState.bind(vm),
-      'F9': vm.loadState.bind(vm),
-    };
-    this.boundKeyDown = this.keyDown.bind(this);
-    this.boundKeyUp = this.keyUp.bind(this);
-
-    window.addEventListener('keydown', this.boundKeyDown);
-    window.addEventListener('keyup', this.boundKeyUp);
+  bindKeys(config) {
+    const handlers = {};
+    for (const [name, button, key] of [
+      ['up', 'up', 'UP'], ['down', 'down', 'DOWN'],
+      ['left', 'left', 'LEFT'], ['right', 'right', 'RIGHT'],
+      ['a', 'A', 'X'], ['b', 'B', 'Z'],
+      ['start', 'start', 'RETURN'], ['select', 'select', 'TAB'],
+    ]) {
+      handlers[`joypad-${name}`] = {
+        keys: key, held: true,
+        callback: down => this.joypad.set(button, 'keyboard', down),
+      };
+    }
+    Object.assign(handlers, {
+      'shortcut-rewind': {keys: 'BACKSPACE', held: true, callback: this.keyRewind.bind(this)},
+      'shortcut-pause': {keys: 'SPACE', callback: this.keyPause.bind(this)},
+      'shortcut-save-state': {keys: 'F6', callback: vm.saveState.bind(vm)},
+      'shortcut-load-state': {keys: 'F9', callback: vm.loadState.bind(vm)},
+      'shortcut-fullscreen': {keys: '', callback: () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else vm.toggleFullscreen();
+      }},
+    });
+    this.keyboard = new BinjgbKeyboard(this.module, this.e, config, handlers, {
+      isCaptured: () => vm.files.show,
+    });
   }
 
   unbindKeys() {
-    window.removeEventListener('keydown', this.boundKeyDown);
-    window.removeEventListener('keyup', this.boundKeyUp);
-  }
-
-  keyDown(event) {
-    if (event.code in this.keyFuncs) {
-      this.keyFuncs[event.code](true);
-      event.preventDefault();
-    }
-  }
-
-  keyUp(event) {
-    if (event.code in this.keyFuncs) {
-      this.keyFuncs[event.code](false);
-      event.preventDefault();
-    }
+    this.keyboard.destroy();
   }
 
   keyRewind(isKeyDown) {
@@ -672,33 +668,27 @@ class Emulator {
 }
 
 class Gamepad {
-  constructor(module, e) {
-    this.module = module;
-    this.e = e;
+  constructor(joypad) {
+    this.joypad = joypad;
   }
 
   // Load a key map for gamepad-to-gameboy buttons
   bindKeys(strMapping) {
+    const bind = (gb_key, gp_button, type = 'button') => {
+      const button = gb_key === 'a' || gb_key === 'b' ? gb_key.toUpperCase() : gb_key;
+      return {
+        gb_key, gp_button, type,
+        gp_bind: down => this.joypad.set(button, `gamepad:${type}:${gp_button}`, down),
+      };
+    };
     this.GAMEPAD_KEYMAP_STANDARD = [
-      {gb_key: "b",      gp_button: 0,  type: "button", gp_bind:this.module._set_joyp_B.bind(null, this.e)      },
-      {gb_key: "a",      gp_button: 1,  type: "button", gp_bind:this.module._set_joyp_A.bind(null, this.e)      },
-      {gb_key: "select", gp_button: 8,  type: "button", gp_bind:this.module._set_joyp_select.bind(null, this.e) },
-      {gb_key: "start",  gp_button: 9,  type: "button", gp_bind:this.module._set_joyp_start.bind(null, this.e)  },
-      {gb_key: "up",     gp_button: 12, type: "button", gp_bind:this.module._set_joyp_up.bind(null, this.e)     },
-      {gb_key: "down",   gp_button: 13, type: "button", gp_bind:this.module._set_joyp_down.bind(null, this.e)   },
-      {gb_key: "left",   gp_button: 14, type: "button", gp_bind:this.module._set_joyp_left.bind(null, this.e)   },
-      {gb_key: "right",  gp_button: 15, type: "button", gp_bind:this.module._set_joyp_right.bind(null, this.e)  }
+      bind('b', 0), bind('a', 1), bind('select', 8), bind('start', 9),
+      bind('up', 12), bind('down', 13), bind('left', 14), bind('right', 15),
     ];
-
     this.GAMEPAD_KEYMAP_DEFAULT = [
-      {gb_key: "a",      gp_button: 0, type: "button", gp_bind:this.module._set_joyp_A.bind(null, this.e) },
-      {gb_key: "b",      gp_button: 1, type: "button", gp_bind:this.module._set_joyp_B.bind(null, this.e) },
-      {gb_key: "select", gp_button: 2, type: "button", gp_bind:this.module._set_joyp_select.bind(null, this.e) },
-      {gb_key: "start",  gp_button: 3, type: "button", gp_bind:this.module._set_joyp_start.bind(null, this.e) },
-      {gb_key: "up",     gp_button: 2, type: "axis",   gp_bind:this.module._set_joyp_up.bind(null, this.e) },
-      {gb_key: "down",   gp_button: 3, type: "axis",   gp_bind:this.module._set_joyp_down.bind(null, this.e) },
-      {gb_key: "left",   gp_button: 0, type: "axis",   gp_bind:this.module._set_joyp_left.bind(null, this.e) },
-      {gb_key: "right",  gp_button: 1, type: "axis",   gp_bind:this.module._set_joyp_right.bind(null, this.e) }
+      bind('a', 0), bind('b', 1), bind('select', 2), bind('start', 3),
+      bind('up', 2, 'axis'), bind('down', 3, 'axis'),
+      bind('left', 0, 'axis'), bind('right', 1, 'axis'),
     ];
 
     // Try to use the w3c "standard" gamepad mapping if available
@@ -821,6 +811,7 @@ class Gamepad {
   }
 
   releaseGamepad() {
+    this.joypad.clearSource('gamepad:');
     // Stop polling the gamepad for input
     if (this.gp.timerID !== undefined) {
       clearInterval(this.gp.timerID);

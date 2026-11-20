@@ -6,12 +6,14 @@
  */
 
 #include <assert.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdarg.h>
 
 #include "emulator.h"
 #include "host.h"
+#include "host-input.h"
 #include "options.h"
 
 #define SAVE_EXTENSION ".sav"
@@ -60,6 +62,8 @@ static u32 s_random_seed = 0xcabba6e5;
 static u32 s_builtin_palette;
 static Bool s_force_dmg;
 static Bool s_use_sgb_border;
+static Bool s_ps2_keyboard = TRUE;
+static HostInputConfig s_input;
 static u32 s_cgb_color_curve;
 static u32 s_render_scale = 4;
 
@@ -318,7 +322,9 @@ static void usage(int argc, char** argv) {
       "                            1: Sameboy (Emulate Hardware)\n"
       "                            2: Gambatte/Gameboy Online\n"
       "     --force-dmg          force running as a DMG (original gameboy)\n"
-      "     --sgb-border         draw the super gameboy border\n",
+      "     --sgb-border         draw the super gameboy border\n"
+      "     --no-ps2-keyboard    don't send keys to an emulated PS/2 keyboard\n"
+      "                          on the serial port\n",
       argv[0]);
 }
 
@@ -333,6 +339,7 @@ void parse_arguments(int argc, char** argv) {
     {'C', "cgb-color", 1},
     {0, "force-dmg", 0},
     {0, "sgb-border", 0},
+    {0, "no-ps2-keyboard", 0},
   };
 
   struct OptionParser* parser = option_parser_new(
@@ -391,6 +398,8 @@ void parse_arguments(int argc, char** argv) {
               s_force_dmg = TRUE;
             } else if (strcmp(result.option->long_name, "sgb-border") == 0) {
               s_use_sgb_border = TRUE;
+            } else if (strcmp(result.option->long_name, "no-ps2-keyboard") == 0) {
+              s_ps2_keyboard = FALSE;
             } else {
               abort();
             }
@@ -422,22 +431,31 @@ error:
   exit(1);
 }
 
+static char* trim_ini_space(char* text) {
+  while (isspace((unsigned char)*text)) ++text;
+  char* end = text + strlen(text);
+  while (end > text && isspace((unsigned char)end[-1])) --end;
+  *end = 0;
+  return text;
+}
+
 void read_ini_file(void) {
   FILE* file = fopen("binjgb.ini", "r");
   if (!file) {
     return;
   }
   while (1) {
-    char buffer[1024], *value, *equals, *newline;
+    char buffer[1024], *value, *equals;
     if (!fgets(buffer, sizeof(buffer), file)) {
       break;
     }
 
-    if (buffer[0] == '#' || buffer[0] == '\n') {
+    char* name = trim_ini_space(buffer);
+    if (!*name || *name == '#' || *name == ';') {
       continue;
     }
 
-    equals = strchr(buffer, '=');
+    equals = strchr(name, '=');
     if (!equals) {
       fprintf(stderr, "warning: bad ini line: %s\n", buffer);
       continue;
@@ -445,37 +463,46 @@ void read_ini_file(void) {
     *equals = 0;
     value = equals + 1;
 
-    newline = strchr(value, '\n');
-    if (newline) {
-      *newline = 0;
+    name = trim_ini_space(name);
+    value = trim_ini_space(value);
+    int input_result = host_input_parse(&s_input, name, value);
+    if (input_result != 0) {
+      if (input_result < 0) {
+        fprintf(stderr, "invalid input setting: %s=%s\n", name, value);
+        fclose(file);
+        exit(1);
+      }
+      continue;
     }
 
-    if (strcmp(buffer, "autoload") == 0) {
+    if (strcmp(name, "autoload") == 0) {
       s_rom_filename = xstrdup(value);
-    } else if (strcmp(buffer, "audio-frequency") == 0) {
+    } else if (strcmp(name, "audio-frequency") == 0) {
       s_audio_frequency = atoi(value);
-    } else if (strcmp(buffer, "audio-frames") == 0) {
+    } else if (strcmp(name, "audio-frames") == 0) {
       s_audio_frames = atoi(value);
-    } else if (strcmp(buffer, "builtin-palette") == 0) {
+    } else if (strcmp(name, "builtin-palette") == 0) {
       s_builtin_palette = atoi(value);
-    } else if (strcmp(buffer, "force-dmg") == 0) {
+    } else if (strcmp(name, "force-dmg") == 0) {
       s_force_dmg = atoi(value);
-    } else if (strcmp(buffer, "cgb-color") == 0) {
+    } else if (strcmp(name, "ps2-keyboard") == 0) {
+      s_ps2_keyboard = atoi(value);
+    } else if (strcmp(name, "cgb-color") == 0) {
       s_cgb_color_curve = atoi(value);
-    } else if (strcmp(buffer, "rewind-frames-per-base-state") == 0) {
+    } else if (strcmp(name, "rewind-frames-per-base-state") == 0) {
       s_rewind_frames_per_base_state = atoi(value);
-    } else if (strcmp(buffer, "rewind-buffer-capacity-megabytes") == 0) {
+    } else if (strcmp(name, "rewind-buffer-capacity-megabytes") == 0) {
       s_rewind_buffer_capacity_megabytes = atoi(value);
-    } else if (strcmp(buffer, "rewind-scale") == 0) {
+    } else if (strcmp(name, "rewind-scale") == 0) {
       s_rewind_scale = atof(value);
-    } else if (strcmp(buffer, "render-scale") == 0) {
+    } else if (strcmp(name, "render-scale") == 0) {
       s_render_scale = atoi(value);
-    } else if (strcmp(buffer, "random-seed") == 0) {
+    } else if (strcmp(name, "random-seed") == 0) {
       s_random_seed = atoi(value);
-    } else if (strcmp(buffer, "sgb-border") == 0) {
+    } else if (strcmp(name, "sgb-border") == 0) {
       s_use_sgb_border = atoi(value);
     } else {
-      fprintf(stderr, "warning: unknown ini key: %s\n", buffer);
+      fprintf(stderr, "warning: unknown ini key: %s\n", name);
     }
   }
   fclose(file);
@@ -484,7 +511,9 @@ void read_ini_file(void) {
 int main(int argc, char** argv) {
   int result = 1;
 
+  host_input_defaults(&s_input);
   read_ini_file();
+  if (!host_input_validate(&s_input)) return 1;
 
   parse_arguments(argc, argv);
 
@@ -515,6 +544,8 @@ int main(int argc, char** argv) {
   host_init.rewind.buffer_capacity = s_rewind_buffer_capacity_megabytes * MEGABYTES(1);
   host_init.joypad_filename = s_read_joypad_filename;
   host_init.use_sgb_border = s_use_sgb_border;
+  host_init.ps2_keyboard = s_ps2_keyboard;
+  host_init.input = &s_input;
   host = host_new(&host_init, e);
   CHECK(host != NULL);
 

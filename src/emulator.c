@@ -475,9 +475,23 @@ typedef struct {
   Ticks next_intr_ticks;  /* Tick when the next intr will occur. */
   SerialClock clock;
   Bool transferring;
+  Bool external_active;   /* if a byte is being shifted in with external clock */
   u8 sb; /* Serial transfer data. */
+  u8 incoming; /* Remaining bits to shift in, MSB first. */
   u8 transferred_bits;
 } Serial;
+
+/* PS/2 keyboard attached to the serial port. Each scan code is sent as two
+ * externally-clocked serial bytes containing the 11-bit PS/2 frame (start
+ * bit, 8 data bits LSB first, odd parity, stop bit). This is host input, so
+ * it is not part of the save state. */
+#define PS2_QUEUE_SIZE 64
+typedef struct {
+  u8 queue[PS2_QUEUE_SIZE];
+  u8 head;
+  u8 tail;
+  Bool connected;
+} Ps2Keyboard;
 
 typedef struct {
   Bool write;
@@ -716,6 +730,7 @@ struct Emulator {
   SgbFrameBuffer sgb_frame_buffer;
   AudioBuffer audio_buffer;
   JoypadCallbackInfo joypad_info;
+  Ps2Keyboard ps2_keyboard;
   /* color_to_rgba stores mappings from 4 DMG colors to RGBA colors. pal is a
    * cached copy of the current DMG palette (e.g. could be all COLOR_WHITE). */
   PaletteRGBA color_to_rgba[PALETTE_TYPE_COUNT];
@@ -767,7 +782,7 @@ struct Emulator {
 #define VALUE_WRAPPED(X, MAX) \
   (UNLIKELY((X) >= (MAX) ? ((X) -= (MAX), TRUE) : FALSE))
 
-#define SAVE_STATE_VERSION (2)
+#define SAVE_STATE_VERSION (3)
 #define SAVE_STATE_HEADER (u32)(0x6b57a7e0 + SAVE_STATE_VERSION)
 
 #ifndef HOOK0
@@ -847,6 +862,7 @@ struct Emulator {
 #define DMA_TICKS 648
 #define DMA_DELAY_TICKS 8
 #define SERIAL_TICKS (CPU_TICKS_PER_SECOND / 8192)
+#define PS2_TICKS 336
 #define JOYP_INTERRUPT_WAIT_TICKS 10000 /* Arbitrary. */
 
 /* Video */
@@ -1051,6 +1067,8 @@ static void serial_synchronize(Emulator*);
 static void timer_synchronize(Emulator*);
 static void calculate_next_ppu_intr(Emulator*);
 static void calculate_next_serial_intr(Emulator*);
+static Bool serial_start_external_transfer(Emulator*);
+static Bool ps2_pop(Emulator*, u8* byte);
 
 static MemoryTypeAddressPair make_pair(MemoryMapType type, Address addr) {
   MemoryTypeAddressPair result;
@@ -2638,9 +2656,18 @@ static void write_io(Emulator* e, MaskedAddress addr, u8 value) {
       serial_synchronize(e);
       SERIAL.transferring = UNPACK(value, SC_TRANSFER_START);
       SERIAL.clock = UNPACK(value, SC_SHIFT_CLOCK);
+      SERIAL.external_active = FALSE;
       if (SERIAL.transferring) {
         SERIAL.tick_count = 0;
         SERIAL.transferred_bits = 0;
+        if (SERIAL.clock == SERIAL_CLOCK_INTERNAL) {
+          /* Nothing drives the data line unless the keyboard has data. */
+          if (!ps2_pop(e, &SERIAL.incoming)) {
+            SERIAL.incoming = 0xff;
+          }
+        } else {
+          serial_start_external_transfer(e);
+        }
       }
       calculate_next_serial_intr(e);
       break;
@@ -4041,7 +4068,7 @@ static void hdma_copy_byte(Emulator* e) {
 }
 
 static void calculate_next_serial_intr(Emulator* e) {
-  if (!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_INTERNAL) {
+  if (!SERIAL.transferring || (SERIAL.clock == SERIAL_CLOCK_EXTERNAL && !SERIAL.external_active)) {
     SERIAL.next_intr_ticks = INVALID_TICKS;
     calculate_next_intr(e);
     return;
@@ -4053,7 +4080,37 @@ static void calculate_next_serial_intr(Emulator* e) {
   SERIAL.next_intr_ticks =
       SERIAL.sync_ticks +
       SERIAL_TICKS * (CPU_SPEED.speed == SPEED_NORMAL ? 8 : 4);
+
+  if (SERIAL.clock == SERIAL_CLOCK_EXTERNAL && emulator_get_ps2_keyboard_connected(e)) {
+    SERIAL.next_intr_ticks = SERIAL.sync_ticks + PS2_TICKS * 8;
+  }
+
   calculate_next_intr(e);
+}
+
+static Bool ps2_pop(Emulator* e, u8* byte) {
+  Ps2Keyboard* kb = &e->ps2_keyboard;
+  if (kb->head == kb->tail) {
+    return FALSE;
+  }
+  *byte = kb->queue[kb->head];
+  kb->head = (kb->head + 1) % PS2_QUEUE_SIZE;
+  return TRUE;
+}
+
+/* If the game is waiting on an externally-clocked transfer and the keyboard
+ * has data, start clocking the next byte in. */
+static Bool serial_start_external_transfer(Emulator* e) {
+  if (!SERIAL.transferring || SERIAL.clock != SERIAL_CLOCK_EXTERNAL || SERIAL.external_active) {
+    return FALSE;
+  }
+  if (!ps2_pop(e, &SERIAL.incoming)) {
+    return FALSE;
+  }
+  SERIAL.external_active = TRUE;
+  SERIAL.tick_count = 0;
+  SERIAL.transferred_bits = 0;
+  return TRUE;
 }
 
 static void serial_synchronize(Emulator* e) {
@@ -4061,17 +4118,24 @@ static void serial_synchronize(Emulator* e) {
     Ticks delta_ticks = TICKS - SERIAL.sync_ticks;
 
     if (UNLIKELY(SERIAL.transferring &&
-                 SERIAL.clock == SERIAL_CLOCK_INTERNAL)) {
+                 (SERIAL.clock == SERIAL_CLOCK_INTERNAL ||
+                  SERIAL.external_active))) {
       Ticks cpu_tick = e->state.cpu_tick;
+      Ticks serial_ticks = SERIAL_TICKS;
+      if (emulator_get_ps2_keyboard_connected(e) && SERIAL.external_active) {
+        serial_ticks = PS2_TICKS;
+      }
       for (; delta_ticks > 0; delta_ticks -= cpu_tick) {
         SERIAL.tick_count += cpu_tick;
-        if (VALUE_WRAPPED(SERIAL.tick_count, SERIAL_TICKS)) {
-          /* Since we're never connected to another device, always shift in
-           * 0xff. */
-          SERIAL.sb = (SERIAL.sb << 1) | 1;
+        if (VALUE_WRAPPED(SERIAL.tick_count, serial_ticks)) {
+          /* Shift in the next bit, MSB first. Once the incoming byte is
+           * exhausted the line idles high (1). */
+          SERIAL.sb = (SERIAL.sb << 1) | (SERIAL.incoming >> 7);
+          SERIAL.incoming = (SERIAL.incoming << 1) | 1;
           SERIAL.transferred_bits++;
           if (VALUE_WRAPPED(SERIAL.transferred_bits, 8)) {
             SERIAL.transferring = 0;
+            SERIAL.external_active = FALSE;
             INTR.new_if |= IF_SERIAL;
             SERIAL.sync_ticks = TICKS - delta_ticks;
             calculate_next_serial_intr(e);
@@ -4694,7 +4758,7 @@ static inline uint32_t emulator_get_banked_PC_inline(Emulator *e) {
   #endif
 }
 
-static inline bool is_breakpoint(Emulator* e, uint32_t  banked_pc) {
+static inline Bool is_breakpoint(Emulator* e, uint32_t banked_pc) {
     uint32_t idx = banked_pc >> BREAKPOINTS_SHIFT;
     return (e->breakpoint[idx] & ((breakpoints_type)1 << (banked_pc & BREAKPOINTS_MASK)));
 }
@@ -5110,6 +5174,80 @@ Emulator* emulator_new(const EmulatorInit* init) {
 error:
   emulator_delete(e);
   return NULL;
+}
+
+static Bool ps2_push(Ps2Keyboard* kb, u8 byte) {
+  u8 next_tail = (kb->tail + 1) % PS2_QUEUE_SIZE;
+  if (next_tail == kb->head) {
+    return FALSE;
+  }
+  kb->queue[kb->tail] = byte;
+  kb->tail = next_tail;
+  return TRUE;
+}
+
+Bool emulator_queue_ps2_scan_code(Emulator* e, u8 scan_code) {
+  Ps2Keyboard* kb = &e->ps2_keyboard;
+  if (!kb->connected) {
+    return FALSE;
+  }
+  /* Each scan code needs two queue slots. */
+  u32 used = (kb->tail + PS2_QUEUE_SIZE - kb->head) % PS2_QUEUE_SIZE;
+  if (used + 2 > PS2_QUEUE_SIZE - 1) {
+    return FALSE;
+  }
+
+  /* Odd parity: the parity bit makes the total number of 1s odd. */
+  u8 ones = 0;
+  int i;
+  for (i = 0; i < 8; ++i) {
+    ones += (scan_code >> i) & 1;
+  }
+  u8 parity = (ones & 1) ? 0 : 1;
+
+  /* The serial port shifts MSB first, so the 11-bit frame is laid out as:
+   *   byte 0: start(0) d0 d1 d2 d3 d4 d5 d6
+   *   byte 1: d7 parity stop(1) 0 0 0 0 0 */
+  u8 frame0 = 0;
+  for (i = 0; i < 7; ++i) {
+    frame0 |= ((scan_code >> i) & 1) << (6 - i);
+  }
+  u8 frame1 = (scan_code & 0x80) | (parity << 6) | (1 << 5);
+  ps2_push(kb, frame0);
+  ps2_push(kb, frame1);
+
+  /* The game may already be waiting for a byte. */
+  serial_synchronize(e);
+  if (serial_start_external_transfer(e)) {
+    calculate_next_serial_intr(e);
+  }
+  return TRUE;
+}
+
+void emulator_clear_ps2_queue(Emulator* e) {
+  e->ps2_keyboard.head = e->ps2_keyboard.tail = 0;
+}
+
+void emulator_set_ps2_keyboard_connected(Emulator* e, Bool connected) {
+  Ps2Keyboard* kb = &e->ps2_keyboard;
+  if (kb->connected == connected) {
+    return;
+  }
+  kb->connected = connected;
+  if (!connected) {
+    emulator_clear_ps2_queue(e);
+    /* Unplugging stops the clock, so a byte that was being shifted in never
+     * finishes; the game keeps waiting, as on hardware. */
+    serial_synchronize(e);
+    if (SERIAL.external_active) {
+      SERIAL.external_active = FALSE;
+      calculate_next_serial_intr(e);
+    }
+  }
+}
+
+Bool emulator_get_ps2_keyboard_connected(Emulator* e) {
+  return e->ps2_keyboard.connected;
 }
 
 void emulator_delete(Emulator* e) {

@@ -47,6 +47,7 @@ if (NOT EMSCRIPTEN)
       src/options.c
       src/emulator.c
       src/host.c
+      src/host-input.c
       src/host-gl.c
       src/host-ui-simple.c
       src/joypad.c
@@ -71,6 +72,7 @@ if (NOT EMSCRIPTEN)
       src/options.c
       src/emulator-debug.c
       src/host.c
+      src/host-input.c
       src/host-gl.c
       src/host-ui-imgui.cc
       src/joypad.c

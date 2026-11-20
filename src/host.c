@@ -5,6 +5,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include "host.h"
+#include "host-input.h"
 
 #include <assert.h>
 
@@ -75,7 +76,10 @@ typedef struct Host {
   RewindState rewind_state;
   JoypadPlayback joypad_playback;
   Ticks last_ticks;
-  Bool key_state[HOST_KEYCODE_COUNT];
+  u32 key_state[HOST_KEYCODE_COUNT];
+  u32 shortcut_state[HOST_KEYCODE_COUNT];
+  Bool physical_down[SDL_NUM_SCANCODES];
+  HostInputRoute held_keys[SDL_NUM_SCANCODES];
 } Host;
 
 static Emulator* host_get_emulator(Host* host) {
@@ -155,6 +159,211 @@ static HostKeycode scancode_to_keycode(SDL_Scancode scancode) {
   return s_map[scancode];
 }
 
+/* Returns the PS/2 set 2 make code for |scancode|, or 0 if unmapped. Sets
+ * |*extended| if the key requires an 0xe0 prefix. */
+static u8 scancode_to_ps2(SDL_Scancode scancode, Bool* extended) {
+  *extended = FALSE;
+  switch (scancode) {
+    case SDL_SCANCODE_A: return 0x1c;
+    case SDL_SCANCODE_B: return 0x32;
+    case SDL_SCANCODE_C: return 0x21;
+    case SDL_SCANCODE_D: return 0x23;
+    case SDL_SCANCODE_E: return 0x24;
+    case SDL_SCANCODE_F: return 0x2b;
+    case SDL_SCANCODE_G: return 0x34;
+    case SDL_SCANCODE_H: return 0x33;
+    case SDL_SCANCODE_I: return 0x43;
+    case SDL_SCANCODE_J: return 0x3b;
+    case SDL_SCANCODE_K: return 0x42;
+    case SDL_SCANCODE_L: return 0x4b;
+    case SDL_SCANCODE_M: return 0x3a;
+    case SDL_SCANCODE_N: return 0x31;
+    case SDL_SCANCODE_O: return 0x44;
+    case SDL_SCANCODE_P: return 0x4d;
+    case SDL_SCANCODE_Q: return 0x15;
+    case SDL_SCANCODE_R: return 0x2d;
+    case SDL_SCANCODE_S: return 0x1b;
+    case SDL_SCANCODE_T: return 0x2c;
+    case SDL_SCANCODE_U: return 0x3c;
+    case SDL_SCANCODE_V: return 0x2a;
+    case SDL_SCANCODE_W: return 0x1d;
+    case SDL_SCANCODE_X: return 0x22;
+    case SDL_SCANCODE_Y: return 0x35;
+    case SDL_SCANCODE_Z: return 0x1a;
+    case SDL_SCANCODE_1: return 0x16;
+    case SDL_SCANCODE_2: return 0x1e;
+    case SDL_SCANCODE_3: return 0x26;
+    case SDL_SCANCODE_4: return 0x25;
+    case SDL_SCANCODE_5: return 0x2e;
+    case SDL_SCANCODE_6: return 0x36;
+    case SDL_SCANCODE_7: return 0x3d;
+    case SDL_SCANCODE_8: return 0x3e;
+    case SDL_SCANCODE_9: return 0x46;
+    case SDL_SCANCODE_0: return 0x45;
+    case SDL_SCANCODE_ESCAPE: return 0x76;
+    case SDL_SCANCODE_GRAVE: return 0x0e;
+    case SDL_SCANCODE_MINUS: return 0x4e;
+    case SDL_SCANCODE_EQUALS: return 0x55;
+    case SDL_SCANCODE_BACKSPACE: return 0x66;
+    case SDL_SCANCODE_TAB: return 0x0d;
+    case SDL_SCANCODE_LEFTBRACKET: return 0x54;
+    case SDL_SCANCODE_RIGHTBRACKET: return 0x5b;
+    case SDL_SCANCODE_BACKSLASH: return 0x5d;
+    case SDL_SCANCODE_SEMICOLON: return 0x4c;
+    case SDL_SCANCODE_APOSTROPHE: return 0x52;
+    case SDL_SCANCODE_RETURN: return 0x5a;
+    case SDL_SCANCODE_LSHIFT: return 0x12;
+    case SDL_SCANCODE_RSHIFT: return 0x59;
+    case SDL_SCANCODE_LCTRL: return 0x14;
+    case SDL_SCANCODE_LALT: return 0x11;
+    case SDL_SCANCODE_SPACE: return 0x29;
+    case SDL_SCANCODE_COMMA: return 0x41;
+    case SDL_SCANCODE_PERIOD: return 0x49;
+    case SDL_SCANCODE_SLASH: return 0x4a;
+    case SDL_SCANCODE_F1: return 0x05;
+    case SDL_SCANCODE_F2: return 0x06;
+    case SDL_SCANCODE_F3: return 0x04;
+    case SDL_SCANCODE_F4: return 0x0c;
+    case SDL_SCANCODE_F5: return 0x03;
+    case SDL_SCANCODE_F6: return 0x0b;
+    case SDL_SCANCODE_F7: return 0x83;
+    case SDL_SCANCODE_F8: return 0x0a;
+    case SDL_SCANCODE_F9: return 0x01;
+    case SDL_SCANCODE_F10: return 0x09;
+    case SDL_SCANCODE_F11: return 0x78;
+    case SDL_SCANCODE_F12: return 0x07;
+    case SDL_SCANCODE_CAPSLOCK: return 0x58;
+    case SDL_SCANCODE_SCROLLLOCK: return 0x7e;
+    case SDL_SCANCODE_NUMLOCKCLEAR: return 0x77;
+    case SDL_SCANCODE_KP_0: return 0x70;
+    case SDL_SCANCODE_KP_1: return 0x69;
+    case SDL_SCANCODE_KP_2: return 0x72;
+    case SDL_SCANCODE_KP_3: return 0x7a;
+    case SDL_SCANCODE_KP_4: return 0x6b;
+    case SDL_SCANCODE_KP_5: return 0x73;
+    case SDL_SCANCODE_KP_6: return 0x74;
+    case SDL_SCANCODE_KP_7: return 0x6c;
+    case SDL_SCANCODE_KP_8: return 0x75;
+    case SDL_SCANCODE_KP_9: return 0x7d;
+    case SDL_SCANCODE_KP_PERIOD: return 0x71;
+    case SDL_SCANCODE_KP_MULTIPLY: return 0x7c;
+    case SDL_SCANCODE_KP_MINUS: return 0x7b;
+    case SDL_SCANCODE_KP_PLUS: return 0x79;
+    default: break;
+  }
+
+  *extended = TRUE;
+  switch (scancode) {
+    case SDL_SCANCODE_UP: return 0x75;
+    case SDL_SCANCODE_DOWN: return 0x72;
+    case SDL_SCANCODE_LEFT: return 0x6b;
+    case SDL_SCANCODE_RIGHT: return 0x74;
+    case SDL_SCANCODE_KP_DIVIDE: return 0x4a;
+    case SDL_SCANCODE_KP_ENTER: return 0x5a;
+    case SDL_SCANCODE_INSERT: return 0x70;
+    case SDL_SCANCODE_DELETE: return 0x71;
+    case SDL_SCANCODE_HOME: return 0x6c;
+    case SDL_SCANCODE_END: return 0x69;
+    case SDL_SCANCODE_PAGEUP: return 0x7d;
+    case SDL_SCANCODE_PAGEDOWN: return 0x7a;
+    case SDL_SCANCODE_RCTRL: return 0x14;
+    case SDL_SCANCODE_RALT: return 0x11;
+    case SDL_SCANCODE_LGUI: return 0x1f;
+    case SDL_SCANCODE_RGUI: return 0x27;
+    case SDL_SCANCODE_APPLICATION: return 0x2f;
+    default: break;
+  }
+
+  *extended = FALSE;
+  return 0;
+}
+
+/* The route is chosen on keydown and retained until release. */
+static void host_send_ps2_key(Host* host, SDL_Scancode scancode, Bool down) {
+  Emulator* e = host_get_emulator(host);
+  Bool extended;
+  u8 code = scancode_to_ps2(scancode, &extended);
+  if (!code) return;
+  if (extended) emulator_queue_ps2_scan_code(e, 0xe0);
+  if (!down) emulator_queue_ps2_scan_code(e, 0xf0);
+  emulator_queue_ps2_scan_code(e, code);
+}
+
+static void host_dispatch_key(Host* host, SDL_Scancode scancode,
+                              HostInputRoute route, Bool down, Bool cancel) {
+  switch (route.destination) {
+    case HOST_INPUT_PS2:
+      host_send_ps2_key(host, scancode, down);
+      break;
+    case HOST_INPUT_JOYPAD:
+      if (down) ++host->key_state[route.key];
+      else --host->key_state[route.key];
+      break;
+    case HOST_INPUT_SHORTCUT:
+      if (down) {
+        if (host->shortcut_state[route.key]++ == 0) HOOK(key_down, route.key);
+      } else if (--host->shortcut_state[route.key] == 0) {
+        /* Focus loss ends held actions without activating release shortcuts. */
+        if (!cancel || route.key == HOST_KEYCODE_LSHIFT ||
+            route.key == HOST_KEYCODE_BACKSPACE) HOOK(key_up, route.key);
+      }
+      break;
+    case HOST_INPUT_RAW:
+      if (down) {
+        ++host->key_state[route.key];
+        HOOK(key_down, route.key);
+      } else {
+        --host->key_state[route.key];
+        HOOK(key_up, route.key);
+      }
+      break;
+    default: break;
+  }
+}
+
+static void host_key_event(Host* host, const SDL_KeyboardEvent* key) {
+  SDL_Scancode scancode = key->keysym.scancode;
+  if (scancode <= SDL_SCANCODE_UNKNOWN || scancode >= SDL_NUM_SCANCODES) return;
+  if (key->type == SDL_KEYUP) {
+    if (host->physical_down[scancode]) {
+      host_dispatch_key(host, scancode, host->held_keys[scancode], FALSE, FALSE);
+      host->physical_down[scancode] = FALSE;
+      ZERO_MEMORY(host->held_keys[scancode]);
+    }
+    return;
+  }
+  if (key->repeat || host->physical_down[scancode]) {
+    /* Preserve repeat-driven debugger navigation without repeating PS/2 or
+     * application shortcuts, or counting another held key. */
+    HostInputRoute held = host->held_keys[scancode];
+    if (key->repeat && host->physical_down[scancode] &&
+        held.destination == HOST_INPUT_RAW && !host_ui_capture_keyboard(host->ui)) {
+      HOOK(key_down, held.key);
+    }
+    return;
+  }
+  host->physical_down[scancode] = TRUE;
+  if (host_ui_capture_keyboard(host->ui)) return;
+  HostKeycode code = scancode_to_keycode(scancode);
+  HostInputRoute route = {HOST_INPUT_RAW, code};
+  if (host->init.input) {
+    route = host_input_route(host->init.input, code,
+                            emulator_get_ps2_keyboard_connected(host_get_emulator(host)));
+  }
+  host->held_keys[scancode] = route;
+  host_dispatch_key(host, scancode, route, TRUE, FALSE);
+}
+
+static void host_release_keys(Host* host) {
+  int scancode;
+  for (scancode = 1; scancode < SDL_NUM_SCANCODES; ++scancode) {
+    if (!host->physical_down[scancode]) continue;
+    host_dispatch_key(host, scancode, host->held_keys[scancode], FALSE, TRUE);
+    host->physical_down[scancode] = FALSE;
+    ZERO_MEMORY(host->held_keys[scancode]);
+  }
+}
+
 Bool host_poll_events(Host* host) {
   Emulator* e = host_get_emulator(host);
   Bool running = TRUE;
@@ -164,18 +373,14 @@ Bool host_poll_events(Host* host) {
 
     switch (event.type) {
       case SDL_KEYDOWN:
-      case SDL_KEYUP: {
-        HostKeycode keycode = scancode_to_keycode(event.key.keysym.scancode);
-        if (!host_ui_capture_keyboard(host->ui)) {
-          host->key_state[keycode] = event.type == SDL_KEYDOWN;
-        }
-        if (event.type == SDL_KEYDOWN) {
-          HOOK(key_down, keycode);
-        } else {
-          HOOK(key_up, keycode);
+      case SDL_KEYUP:
+        host_key_event(host, &event.key);
+        break;
+      case SDL_WINDOWEVENT:
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+          host_release_keys(host);
         }
         break;
-      }
       case SDL_CONTROLLERDEVICEADDED:
         if (!host->controller) {
           host->controller = SDL_GameControllerOpen(event.cdevice.which);
@@ -251,14 +456,14 @@ void host_render_audio(Host* host) {
 
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* host = user_data;
-  joyp->up = host->key_state[HOST_KEYCODE_UP];
-  joyp->down = host->key_state[HOST_KEYCODE_DOWN];
-  joyp->left = host->key_state[HOST_KEYCODE_LEFT];
-  joyp->right = host->key_state[HOST_KEYCODE_RIGHT];
-  joyp->B = host->key_state[HOST_KEYCODE_Z];
-  joyp->A = host->key_state[HOST_KEYCODE_X];
-  joyp->start = host->key_state[HOST_KEYCODE_RETURN];
-  joyp->select = host->key_state[HOST_KEYCODE_TAB];
+  joyp->up = host->key_state[HOST_KEYCODE_UP] != 0;
+  joyp->down = host->key_state[HOST_KEYCODE_DOWN] != 0;
+  joyp->left = host->key_state[HOST_KEYCODE_LEFT] != 0;
+  joyp->right = host->key_state[HOST_KEYCODE_RIGHT] != 0;
+  joyp->B = host->key_state[HOST_KEYCODE_Z] != 0;
+  joyp->A = host->key_state[HOST_KEYCODE_X] != 0;
+  joyp->start = host->key_state[HOST_KEYCODE_RETURN] != 0;
+  joyp->select = host->key_state[HOST_KEYCODE_TAB] != 0;
 
   /* Prefer controller input, if any */
   if (host->controller) {
@@ -462,6 +667,7 @@ Host* host_new(const HostInit *init, Emulator* e) {
   host->hook_ctx.e = e;
   host->hook_ctx.user_data = host->init.hooks.user_data;
   CHECK(SUCCESS(host_init(host, e)));
+  emulator_set_ps2_keyboard_connected(e, host->init.ps2_keyboard);
   return host;
 error:
   xfree(host);

@@ -17,6 +17,7 @@ A simple GB/GBC emulator.
 * **Rewind** and seek to specific cycle
 * Disable/enable each audio channel
 * Disable/enable BG, Window and Sprite layers
+* **PS/2 keyboard** over link port emulation
 * Convenient Python test harness using hashes to validate
 * (WIP) **Debugger** with various visualizations (see below)
 
@@ -62,6 +63,8 @@ A simple GB/GBC emulator.
 Copy the folowing files to your webserver:
 * `docs/binjgb.js`
 * `docs/binjgb.wasm`
+* `docs/keyboard.js`
+* `docs/binjgb.ini`
 * `docs/simple.html`
 * `docs/simple.js`
 * `docs/simple.css`
@@ -199,6 +202,12 @@ Keys:
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
 
+Keys not reserved for the joypad or the shortcuts above are sent to an 
+emulated PS/2 keyboard attached to the link port. Each scan code is sent 
+as two externally-clocked serial bytes holding the 11-bit PS/2 frame.
+
+Use `--no-ps2-keyboard` to disconnect the keyboard.
+
 ## INI file
 
 Binjgb tries to read from `binjgb.ini` on startup for configuration. The
@@ -252,10 +261,53 @@ random-seed=0
 # 0=Don't display SGB border
 # 1=Display SGB border, even if it doesn't exist.
 sgb-border=0
+
+# Connect an emulated PS/2 keyboard to the serial port.
+# 0=Disable
+# 1=Enable
+ps2-keyboard=1
+
+# Which unreserved keys may be sent to PS/2: all, none, or a comma-separated
+# list of physical key names (e.g. A,B,C,SPACE,RETURN).
+ps2-keys=all
 ```
 
 The INI file is loaded before parsing the command line flags, so you can use
 the command line to override the values in the INI file.
+
+### Keyboard routing
+
+Keyboard input can only go to one destination. Emulator shortcut are mapped first, 
+followed by keyboard joypad binding, then PS/2 (if connected and allowed by `ps2-keys`).
+Each binding accepts `none`, or a comma-separated list of key names.
+Names are case-insensitive and use SDL scancode tokens without the `SDL_SCANCODE_` prefix: 
+
+`A` through `Z`, `0` through `9`, `KP_0` through `KP_9`, `F1` through `F12`, 
+`UP`, `DOWN`, `LEFT`, `RIGHT`, `RETURN`, `ESCAPE`,
+`BACKSPACE`, `TAB`, `SPACE`, `LSHIFT`, `RSHIFT`, `LCTRL`, `RCTRL`, `LALT`,
+`RALT`, `LGUI`, `RGUI`, `APPLICATION`, `CAPSLOCK`, `NUMLOCKCLEAR`, `SCROLLLOCK`,
+`INSERT`, `DELETE`, `HOME`, `END`, `PAGEUP`, `PAGEDOWN`, `MINUS`, `EQUALS`,
+`LEFTBRACKET`, `RIGHTBRACKET`, `BACKSLASH`, `SEMICOLON`, `APOSTROPHE`, `GRAVE`,
+`COMMA`, `PERIOD`, `SLASH`, `KP_PERIOD`, `KP_MULTIPLY`,
+`KP_MINUS`, `KP_PLUS`, `KP_DIVIDE`, and `KP_ENTER`. 
+
+| Setting | Default |
+| --- | --- |
+| `joypad-up`, `joypad-down`, `joypad-left`, `joypad-right` | `UP`, `DOWN`, `LEFT`, `RIGHT` |
+| `joypad-b`, `joypad-a`, `joypad-start`, `joypad-select` | `Z`, `X`, `RETURN`, `TAB` |
+| `shortcut-quit` | `ESCAPE` |
+| `shortcut-save-state`, `shortcut-load-state` | `F6`, `F9` |
+| `shortcut-fullscreen` | `F11` |
+| `shortcut-audio-1` through `shortcut-audio-4` | `1` through `4` |
+| `shortcut-bg`, `shortcut-window`, `shortcut-obj` | `B`, `W`, `O` |
+| `shortcut-fast-forward`, `shortcut-rewind` | `LSHIFT`, `BACKSPACE` |
+| `shortcut-pause`, `shortcut-step` | `SPACE`, `N` |
+| `shortcut-volume-down`, `shortcut-volume-up` | `MINUS`, `EQUALS` |
+| `shortcut-palette-prev`, `shortcut-palette-next` | `LEFTBRACKET`, `RIGHTBRACKET` |
+
+Use `joypad=none` or `shortcuts=none` to clear a whole group before assigning
+individual bindings. `joypad=default` and `shortcuts=default` restore the
+respective defaults.
 
 ## Running tests
 
