@@ -5,6 +5,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 #include "host.h"
+#include "host-input.h"
 
 #include <assert.h>
 
@@ -75,7 +76,10 @@ typedef struct Host {
   RewindState rewind_state;
   JoypadPlayback joypad_playback;
   Ticks last_ticks;
-  Bool key_state[HOST_KEYCODE_COUNT];
+  u32 key_state[HOST_KEYCODE_COUNT];
+  u32 shortcut_state[HOST_KEYCODE_COUNT];
+  Bool physical_down[SDL_NUM_SCANCODES];
+  HostInputRoute held_keys[SDL_NUM_SCANCODES];
 } Host;
 
 static Emulator* host_get_emulator(Host* host) {
@@ -274,30 +278,90 @@ static u8 scancode_to_ps2(SDL_Scancode scancode, Bool* extended) {
   return 0;
 }
 
-/* While Caps Lock is on, keys go to the emulated PS/2 keyboard instead of the
- * joypad and hotkeys. Returns TRUE if the event was consumed. */
-static Bool host_send_ps2_key(Host* host, const SDL_KeyboardEvent* key) {
+/* The route is chosen on keydown and retained until release. */
+static void host_send_ps2_key(Host* host, SDL_Scancode scancode, Bool down) {
   Emulator* e = host_get_emulator(host);
-  if (!emulator_get_ps2_keyboard_connected(e) || key->repeat ||
-      key->keysym.scancode == SDL_SCANCODE_CAPSLOCK ||
-      !(SDL_GetModState() & KMOD_CAPS)) {
-    return FALSE;
-  }
-
   Bool extended;
-  u8 code = scancode_to_ps2(key->keysym.scancode, &extended);
-  if (code == 0) {
-    return FALSE;
-  }
-
-  if (extended) {
-    emulator_queue_ps2_scan_code(e, 0xe0);
-  }
-  if (key->type == SDL_KEYUP) {
-    emulator_queue_ps2_scan_code(e, 0xf0);
-  }
+  u8 code = scancode_to_ps2(scancode, &extended);
+  if (!code) return;
+  if (extended) emulator_queue_ps2_scan_code(e, 0xe0);
+  if (!down) emulator_queue_ps2_scan_code(e, 0xf0);
   emulator_queue_ps2_scan_code(e, code);
-  return TRUE;
+}
+
+static void host_dispatch_key(Host* host, SDL_Scancode scancode,
+                              HostInputRoute route, Bool down, Bool cancel) {
+  switch (route.destination) {
+    case HOST_INPUT_PS2:
+      host_send_ps2_key(host, scancode, down);
+      break;
+    case HOST_INPUT_JOYPAD:
+      if (down) ++host->key_state[route.key];
+      else --host->key_state[route.key];
+      break;
+    case HOST_INPUT_SHORTCUT:
+      if (down) {
+        if (host->shortcut_state[route.key]++ == 0) HOOK(key_down, route.key);
+      } else if (--host->shortcut_state[route.key] == 0) {
+        /* Focus loss ends held actions without activating release shortcuts. */
+        if (!cancel || route.key == HOST_KEYCODE_LSHIFT ||
+            route.key == HOST_KEYCODE_BACKSPACE) HOOK(key_up, route.key);
+      }
+      break;
+    case HOST_INPUT_RAW:
+      if (down) {
+        ++host->key_state[route.key];
+        HOOK(key_down, route.key);
+      } else {
+        --host->key_state[route.key];
+        HOOK(key_up, route.key);
+      }
+      break;
+    default: break;
+  }
+}
+
+static void host_key_event(Host* host, const SDL_KeyboardEvent* key) {
+  SDL_Scancode scancode = key->keysym.scancode;
+  if (scancode <= SDL_SCANCODE_UNKNOWN || scancode >= SDL_NUM_SCANCODES) return;
+  if (key->type == SDL_KEYUP) {
+    if (host->physical_down[scancode]) {
+      host_dispatch_key(host, scancode, host->held_keys[scancode], FALSE, FALSE);
+      host->physical_down[scancode] = FALSE;
+      ZERO_MEMORY(host->held_keys[scancode]);
+    }
+    return;
+  }
+  if (key->repeat || host->physical_down[scancode]) {
+    /* Preserve repeat-driven debugger navigation without repeating PS/2 or
+     * application shortcuts, or counting another held key. */
+    HostInputRoute held = host->held_keys[scancode];
+    if (key->repeat && host->physical_down[scancode] &&
+        held.destination == HOST_INPUT_RAW && !host_ui_capture_keyboard(host->ui)) {
+      HOOK(key_down, held.key);
+    }
+    return;
+  }
+  host->physical_down[scancode] = TRUE;
+  if (host_ui_capture_keyboard(host->ui)) return;
+  HostKeycode code = scancode_to_keycode(scancode);
+  HostInputRoute route = {HOST_INPUT_RAW, code};
+  if (host->init.input) {
+    route = host_input_route(host->init.input, code,
+                            emulator_get_ps2_keyboard_connected(host_get_emulator(host)));
+  }
+  host->held_keys[scancode] = route;
+  host_dispatch_key(host, scancode, route, TRUE, FALSE);
+}
+
+static void host_release_keys(Host* host) {
+  int scancode;
+  for (scancode = 1; scancode < SDL_NUM_SCANCODES; ++scancode) {
+    if (!host->physical_down[scancode]) continue;
+    host_dispatch_key(host, scancode, host->held_keys[scancode], FALSE, TRUE);
+    host->physical_down[scancode] = FALSE;
+    ZERO_MEMORY(host->held_keys[scancode]);
+  }
 }
 
 Bool host_poll_events(Host* host) {
@@ -309,26 +373,14 @@ Bool host_poll_events(Host* host) {
 
     switch (event.type) {
       case SDL_KEYDOWN:
-      case SDL_KEYUP: {
-        HostKeycode keycode = scancode_to_keycode(event.key.keysym.scancode);
-        if (!host_ui_capture_keyboard(host->ui) &&
-            host_send_ps2_key(host, &event.key)) {
-          /* Still release joypad buttons held before Caps Lock was on. */
-          if (event.type == SDL_KEYUP) {
-            host->key_state[keycode] = FALSE;
-          }
-          break;
-        }
-        if (!host_ui_capture_keyboard(host->ui)) {
-          host->key_state[keycode] = event.type == SDL_KEYDOWN;
-        }
-        if (event.type == SDL_KEYDOWN) {
-          HOOK(key_down, keycode);
-        } else {
-          HOOK(key_up, keycode);
+      case SDL_KEYUP:
+        host_key_event(host, &event.key);
+        break;
+      case SDL_WINDOWEVENT:
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+          host_release_keys(host);
         }
         break;
-      }
       case SDL_CONTROLLERDEVICEADDED:
         if (!host->controller) {
           host->controller = SDL_GameControllerOpen(event.cdevice.which);
@@ -404,14 +456,14 @@ void host_render_audio(Host* host) {
 
 static void joypad_callback(JoypadButtons* joyp, void* user_data) {
   Host* host = user_data;
-  joyp->up = host->key_state[HOST_KEYCODE_UP];
-  joyp->down = host->key_state[HOST_KEYCODE_DOWN];
-  joyp->left = host->key_state[HOST_KEYCODE_LEFT];
-  joyp->right = host->key_state[HOST_KEYCODE_RIGHT];
-  joyp->B = host->key_state[HOST_KEYCODE_Z];
-  joyp->A = host->key_state[HOST_KEYCODE_X];
-  joyp->start = host->key_state[HOST_KEYCODE_RETURN];
-  joyp->select = host->key_state[HOST_KEYCODE_TAB];
+  joyp->up = host->key_state[HOST_KEYCODE_UP] != 0;
+  joyp->down = host->key_state[HOST_KEYCODE_DOWN] != 0;
+  joyp->left = host->key_state[HOST_KEYCODE_LEFT] != 0;
+  joyp->right = host->key_state[HOST_KEYCODE_RIGHT] != 0;
+  joyp->B = host->key_state[HOST_KEYCODE_Z] != 0;
+  joyp->A = host->key_state[HOST_KEYCODE_X] != 0;
+  joyp->start = host->key_state[HOST_KEYCODE_RETURN] != 0;
+  joyp->select = host->key_state[HOST_KEYCODE_TAB] != 0;
 
   /* Prefer controller input, if any */
   if (host->controller) {

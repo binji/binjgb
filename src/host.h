@@ -89,7 +89,35 @@ extern "C" {
   _(LEFT)                       \
   _(DOWN)                       \
   _(UP)                         \
-  _(LSHIFT)
+  _(LSHIFT)                     \
+  _(RSHIFT)                     \
+  _(LCTRL)                      \
+  _(RCTRL)                      \
+  _(LALT)                       \
+  _(RALT)                       \
+  _(LGUI)                       \
+  _(RGUI)                       \
+  _(APPLICATION)                \
+  _(CAPSLOCK)                   \
+  _(NUMLOCKCLEAR)               \
+  _(SCROLLLOCK)                 \
+  _(INSERT)                     \
+  _(KP_0)                       \
+  _(KP_1)                       \
+  _(KP_2)                       \
+  _(KP_3)                       \
+  _(KP_4)                       \
+  _(KP_5)                       \
+  _(KP_6)                       \
+  _(KP_7)                       \
+  _(KP_8)                       \
+  _(KP_9)                       \
+  _(KP_PERIOD)                  \
+  _(KP_MULTIPLY)                \
+  _(KP_MINUS)                   \
+  _(KP_PLUS)                    \
+  _(KP_DIVIDE)                  \
+  _(KP_ENTER)
 
 typedef enum HostKeycode {
   HOST_KEYCODE_UNKNOWN,
@@ -101,6 +129,7 @@ typedef enum HostKeycode {
 
 struct Emulator;
 struct Host;
+struct HostInputConfig;
 typedef u32 EmulatorEvent;
 
 typedef struct HostHookContext {
@@ -128,9 +157,10 @@ typedef struct HostInit {
   RewindInit rewind;
   const char* joypad_filename;
   Bool use_sgb_border;
-  /* Connect a PS/2 keyboard to the serial port at startup. Host keys are sent
-   * to it while Caps Lock is on. */
+  /* Connect a PS/2 keyboard to the serial port at startup. */
   Bool ps2_keyboard;
+  /* NULL preserves raw keyboard hooks for the debugger. */
+  const struct HostInputConfig* input;
 } HostInit;
 
 typedef struct HostConfig {

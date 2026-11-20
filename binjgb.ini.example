@@ -1,0 +1,22 @@
+# Copy to binjgb.ini in the directory from which you launch binjgb.
+# A typing profile: physical controllers still work, while keyboard keys go
+# to the PS/2 device except for the explicitly reserved function keys below.
+ps2-keyboard=1
+ps2-keys=all
+joypad=none
+shortcuts=none
+shortcut-pause=F5
+shortcut-save-state=F6
+shortcut-step=F7
+shortcut-rewind=F8
+shortcut-load-state=F9
+shortcut-fast-forward=F10
+shortcut-fullscreen=F11
+shortcut-quit=F12
+
+# Optional keyboard joypad bindings. Uncommenting these reserves the arrow
+# keys for the Game Boy joypad; they will no longer reach the PS/2 keyboard.
+# joypad-up=UP
+# joypad-down=DOWN
+# joypad-left=LEFT
+# joypad-right=RIGHT

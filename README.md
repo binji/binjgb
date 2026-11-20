@@ -199,13 +199,12 @@ Keys:
 | Rewind | <kbd>Backspace</kbd> |
 | Pause | <kbd>Space</kbd> |
 | Step one frame | <kbd>N</kbd> |
-| Type on the PS/2 keyboard | <kbd>Caps Lock</kbd> on |
 
-While Caps Lock is on, keys are sent to an emulated PS/2 keyboard attached to
-the serial port instead of the joypad and the shortcuts above. Each scan code
-is sent as two externally-clocked serial bytes holding the 11-bit PS/2 frame
-(start bit, 8 data bits LSB first, odd parity, stop bit). Use
-`--no-ps2-keyboard` to disable it.
+In the native `binjgb` application, keys not reserved for the joypad or the
+shortcuts above are sent to an emulated PS/2 keyboard attached to the serial
+port. Each scan code is sent as two externally-clocked serial bytes holding
+the 11-bit PS/2 frame (start bit, 8 data bits LSB first, odd parity, stop bit).
+Use `--no-ps2-keyboard` to disconnect the keyboard.
 
 ## INI file
 
@@ -261,15 +260,77 @@ random-seed=0
 # 1=Display SGB border, even if it doesn't exist.
 sgb-border=0
 
-# Send keys to an emulated PS/2 keyboard on the serial port while Caps
-# Lock is on.
+# Connect an emulated PS/2 keyboard to the serial port.
 # 0=Disable
 # 1=Enable
 ps2-keyboard=1
+
+# Which unreserved keys may be sent to PS/2: all, none, or a comma-separated
+# list of physical key names (e.g. A,B,C,SPACE,RETURN).
+ps2-keys=all
 ```
 
 The INI file is loaded before parsing the command line flags, so you can use
 the command line to override the values in the INI file.
+
+### Native keyboard routing
+
+Input is routed to exactly one destination, in this order: emulator shortcut,
+keyboard joypad binding, then PS/2 (if connected and allowed by `ps2-keys`).
+The default joypad and shortcut bindings are the controls listed above.
+Disabling PS/2 does not restore bindings you explicitly removed.
+Physical controller input is independent of these keyboard settings.
+
+Each binding accepts a comma-separated list of physical key names, or `none`
+(an empty value also disables it). Names are case-insensitive and use SDL
+scancode tokens without the `SDL_SCANCODE_` prefix: `A` through `Z`, `0` through
+`9`, `F1` through `F12`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `RETURN`, `ESCAPE`,
+`BACKSPACE`, `TAB`, `SPACE`, `LSHIFT`, `RSHIFT`, `LCTRL`, `RCTRL`, `LALT`,
+`RALT`, `LGUI`, `RGUI`, `APPLICATION`, `CAPSLOCK`, `NUMLOCKCLEAR`, `SCROLLLOCK`,
+`INSERT`, `DELETE`, `HOME`, `END`, `PAGEUP`, `PAGEDOWN`, `MINUS`, `EQUALS`,
+`LEFTBRACKET`, `RIGHTBRACKET`, `BACKSLASH`, `SEMICOLON`, `APOSTROPHE`, `GRAVE`,
+`COMMA`, `PERIOD`, `SLASH`, `KP_0` through `KP_9`, `KP_PERIOD`, `KP_MULTIPLY`,
+`KP_MINUS`, `KP_PLUS`, `KP_DIVIDE`, and `KP_ENTER`. These select physical keys,
+not characters translated by the operating system's keyboard layout.
+
+| Setting | Default |
+| --- | --- |
+| `joypad-up`, `joypad-down`, `joypad-left`, `joypad-right` | `UP`, `DOWN`, `LEFT`, `RIGHT` |
+| `joypad-b`, `joypad-a`, `joypad-start`, `joypad-select` | `Z`, `X`, `RETURN`, `TAB` |
+| `shortcut-quit` | `ESCAPE` |
+| `shortcut-save-state`, `shortcut-load-state` | `F6`, `F9` |
+| `shortcut-fullscreen` | `F11` |
+| `shortcut-audio-1` through `shortcut-audio-4` | `1` through `4` |
+| `shortcut-bg`, `shortcut-window`, `shortcut-obj` | `B`, `W`, `O` |
+| `shortcut-fast-forward`, `shortcut-rewind` | `LSHIFT`, `BACKSPACE` |
+| `shortcut-pause`, `shortcut-step` | `SPACE`, `N` |
+| `shortcut-volume-down`, `shortcut-volume-up` | `MINUS`, `EQUALS` |
+| `shortcut-palette-prev`, `shortcut-palette-next` | `LEFTBRACKET`, `RIGHTBRACKET` |
+
+Use `joypad=none` or `shortcuts=none` to clear a whole group before assigning
+individual bindings. `joypad=default` and `shortcuts=default` restore the
+respective defaults. Settings are applied in file order. Binding the same key
+to multiple actions within one group is an error; move or disable the existing
+binding first. Overlaps between groups follow the routing priority above.
+Invalid key names or conflicting bindings stop startup with an error message.
+Key releases follow their original destination, and losing window focus
+releases held keys. Holding a key does not send host key-repeat events.
+
+For example, to reserve WASD for the joypad while sending other unreserved keys
+to PS/2:
+
+```ini
+shortcut-window=none
+joypad-up=W,UP
+joypad-down=S,DOWN
+joypad-left=A,LEFT
+joypad-right=D,RIGHT
+```
+
+For typing, copy [binjgb.ini.example](binjgb.ini.example) to `binjgb.ini`.
+It frees all keyboard joypad bindings and reserves only F5–F12 for emulator
+shortcuts. To capture only a chosen set of keys instead, use something like
+`ps2-keys=A,B,C,SPACE,RETURN`.
 
 ## Running tests
 
