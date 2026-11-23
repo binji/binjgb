@@ -3912,7 +3912,7 @@ static void write_audio_frame(Emulator* e, u32 gb_frames) {
   buffer->divisor += gb_frames;
   buffer->freq_counter += buffer->frequency * gb_frames;
   if (VALUE_WRAPPED(buffer->freq_counter, APU_TICKS_PER_SECOND)) {
-    for (i = 0; i < SOUND_OUTPUT_COUNT; ++i) {
+    for (i = SOUND_OUTPUT_COUNT - 1; i >= 0; --i) {
       u32 accumulator = 0;
       for (j = 0; j < APU_CHANNEL_COUNT; ++j) {
         if (!e->config.disable_sound[j]) {
